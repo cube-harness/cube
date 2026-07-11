@@ -1,0 +1,12 @@
+{
+  "dependencies": ["."],
+  "api_version": "0.11.0",
+  "docker_compose_file": "docker-compose.local.yml",
+  "graphs": {
+    "main_agent": "./src/graph/main/graph.ts:graph"
+  },
+  "env": ".env",
+  "checkpointer": {
+    "backend": "mongo"
+  }
+}

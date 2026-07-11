@@ -1,0 +1,2 @@
+export const SUMMARY_MAX_WORDS = 250
+export const SUMMARY_MESSAGE_THRESHOLD = 20;

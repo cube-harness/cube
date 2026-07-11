@@ -1,0 +1,17 @@
+[
+  {
+    "provider": "gemini",
+    "apiKeyEnv": "GEMINI_API_KEY",
+    "models": ["gemini-2.5-flash", "gemini-3.5-flash"]
+  },
+  {
+    "provider": "openai",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "models": ["gpt-4o", "gpt-3.5-turbo"]
+  },
+   {
+    "provider": "ollama",
+    "apiKeyEnv": "OLLAMA_BASE_URL",
+    "models": ["qwen2.5:7b"]
+  }
+]

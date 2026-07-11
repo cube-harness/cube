@@ -1,0 +1,38 @@
+{
+  "name": "agentic-agent",
+  "version": "1.0.0",
+  "description": "TypeScript LangGraph agent with short-term checkpoints and long-term memory.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "langgraphjs dev",
+    "build": "tsc --noEmit",
+    "test": "npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@langchain/langgraph-cli": "1.4.2",
+    "@types/node": "26.1.1",
+    "ts-node": "10.9.2",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.2",
+    "@langchain/google": "0.2.1",
+    "@langchain/google-genai": "^2.2.0",
+    "@langchain/langgraph": "1.3.6",
+    "@langchain/langgraph-checkpoint-mongodb": "1.4.0",
+    "@langchain/langgraph-sdk": "1.9.25",
+    "@langchain/ollama": "^1.3.0",
+    "@langchain/tavily": "1.2.0",
+    "dotenv": "17.4.2",
+    "express": "5.2.1",
+    "mongodb": "6.21.0",
+    "zod": "4.4.3"
+  },
+  "overrides": {
+    "@langchain/langgraph-checkpoint": "1.0.4"
+  }
+}
