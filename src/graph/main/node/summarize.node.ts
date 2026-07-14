@@ -15,7 +15,7 @@ export function shouldSummarize(state: MainStateType): boolean {
   return state.messages.length >= SUMMARY_MESSAGE_THRESHOLD;
 }
 
-export const summarizeNode: GraphNode<typeof MainState, ContextType> = async (state, config) => {
+export const summarizeNode: GraphNode<typeof MainState, ContextType> = async (state, runtime) => {
   const { messages, summary } = state;
 
   const summaryPromptText = summary ? getUpdateSummaryPrompt(summary) : getNewSummaryPrompt();

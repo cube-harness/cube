@@ -7,10 +7,10 @@ import { ContextType } from "../context.js";
 import { getLLMProvider } from "@/shared/providers/llm.provider.js";
 import { getAgentSystemPrompt } from "@/graph/main/prompt/agent.prompt.js";
 
-export const agentNode: GraphNode<typeof MainState, ContextType> = async (state, config) => {
+export const agentNode: GraphNode<typeof MainState, ContextType> = async (state, runtime) => {
   const { messages, summary } = state;
 
-  const { userRole, userMemory, locale } = config.context ?? {};
+  const { userRole, userMemory, locale } = runtime.context ?? {};
 
   const allowedTools = filterAllowedTools(systemTools, userRole);
 

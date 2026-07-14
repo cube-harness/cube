@@ -25,8 +25,8 @@ function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-function getTimeContext(config?: LangGraphRunnableConfig<ContextType>): TimeToolContext {
-  const context = config?.context as Partial<ContextType> | undefined;
+function getTimeContext(runtime?: LangGraphRunnableConfig<ContextType>): TimeToolContext {
+  const context = runtime?.context as Partial<ContextType> | undefined;
   const serverTimeZone = getServerTimeZone();
   const timeZone =
     context?.timeZone && isValidTimeZone(context.timeZone)
@@ -40,10 +40,10 @@ function getTimeContext(config?: LangGraphRunnableConfig<ContextType>): TimeTool
 }
 
 export const getCurrentTimeTool = tool(
-  async (_input, config) => {
+  async (_input, runtime) => {
     const now = new Date();
     const { timeZone, locale } = getTimeContext(
-      config as LangGraphRunnableConfig<ContextType> | undefined
+      runtime as LangGraphRunnableConfig<ContextType> | undefined
     );
 
     const date = new Intl.DateTimeFormat(locale, {

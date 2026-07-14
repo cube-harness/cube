@@ -6,6 +6,10 @@ services:
       ollama:
         condition: service_started
 
+  langgraph-postgres:
+    ports:
+      - "5433:5432"
+
   ollama:
     image: ollama/ollama:latest
     volumes:

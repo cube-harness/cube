@@ -21,9 +21,20 @@ Use strict TypeScript. Keep imports explicit, prefer the `@/` alias for project-
 
 Jest is configured with `ts-jest`, Node test environment, and `test/**/*.test.ts` discovery. Add focused tests beside the behavior they validate under `test/`, mirroring source paths where useful. At minimum, run `npm test` before submitting changes; run `npx jest` when adding executable Jest cases.
 
-## Commit & Pull Request Guidelines
+## Commit Message Format
 
-Commit history is not available in this checkout, so use concise imperative commit messages, for example `Add tool permission tests` or `Fix provider env loading`. Pull requests should describe the change, list validation commands run, note environment/config impacts, and link related issues or design docs. Include screenshots only for UI-facing changes.
+Use the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+`<type>(<scope>): <short description>`
+
+#### Types
+* `feat`: A new feature.
+* `fix`: A bug fix.
+* `docs`: Changes to documentation.
+* `style`: Formatting, missing semi-colons, etc. (no code change).
+* `refactor`: Code change that neither fixes a bug nor adds a feature.
+* `perf`: Code change that improves performance.
+* `test`: Adding or correcting tests.
+* `chore`: Update build tasks, package manager configs, etc.
 
 ## Security & Configuration Tips
 
@@ -103,6 +114,7 @@ Present the following plan format before writing any code:
 - Follow the approved plan exactly — do not expand scope unilaterally.
 - If an out-of-scope issue is discovered → report immediately, do not fix silently.
 - Always run tests at the end to avoid running them multiple times for each task.
+- No testing is required when the task is simply writing documentation.
 
 ## When Encountering Problems
 - Multiple solutions exist → list all options with trade-offs, do not choose on behalf of the user.

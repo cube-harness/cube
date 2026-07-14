@@ -5,8 +5,5 @@
   "graphs": {
     "main_agent": "./src/graph/main/graph.ts:graph"
   },
-  "env": ".env",
-  "checkpointer": {
-    "backend": "mongo"
-  }
+  "env": ".env"
 }
