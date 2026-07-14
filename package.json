@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "langgraphjs dev",
     "build": "tsc --noEmit",
-    "test": "npm run build"
+    "test": "npm run build",
+    "graph:render": "tsx src/script/reder_graph.ts"
   },
   "keywords": [],
   "author": "",
