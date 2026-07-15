@@ -8,7 +8,7 @@ Scope: short-term working memory for the TypeScript LangGraph main agent.
 Implement short-term working memory as:
 
 ```text
-LLM input = system prompt(summary, userMemory, locale) + active recent messages
+LLM input = system prompt(summary, userMemory, locale) + unsummarized recent messages
 ```
 
 The graph must keep full `state.messages` in checkpoint history. Working memory limits only the messages sent into model calls. It must not delete checkpoint messages with `RemoveMessage`.
@@ -50,11 +50,12 @@ src/graph/working-memory/prompt/summarize.prompt.ts
 
 Owns the working-memory policy shared by `agent.node.ts` and the working-memory subgraph:
 
-- compute active recent messages for model input;
+- compute recent unsummarized messages for model input;
 - preserve valid message boundaries for tool calls and tool results;
-- compute messages that have fallen outside the active window;
+- compute the unsummarized working segment after `summarizedThroughMessageId`;
+- decide when that segment has crossed the high token watermark;
+- select the older part to summarize while preserving the low token watermark as recent raw context;
 - exclude messages already covered by `summarizedThroughMessageId`;
-- apply batch thresholds before summarization.
 
 This belongs under `graph/working-memory`, not a generic utility folder, because it is domain policy rather than a generic helper.
 
@@ -64,10 +65,10 @@ Deterministic node. It does not call an LLM.
 
 Responsibilities:
 
-- determine which messages are outside the active context window;
-- select only unsummarized evicted messages;
-- enforce the summary batch threshold;
-- skip summary when there is no safe batch;
+- determine which older messages in the unsummarized segment should be compacted;
+- select only unsummarized messages that should be compacted into summary;
+- enforce the token high/low watermark policy;
+- skip summary when there is no safe compaction delta;
 - prepare the delta messages for `summarize.node.ts`.
 
 ### `summarize.node.ts`
@@ -77,7 +78,7 @@ LLM node.
 Responsibilities:
 
 - receive existing `summary`;
-- receive newly evicted messages prepared by the previous node;
+- receive newly compactable messages prepared by the previous node;
 - update the summary so it covers both the previous summary and the new delta;
 - update `summarizedThroughMessageId` to the last message covered by the summary.
 
@@ -101,15 +102,26 @@ pendingSummaryThroughMessageId?: string;
 
 Do not persist these transient fields unless LangGraph requires them for subgraph state handoff. If persisted fields are required, clear them after `summarize.node.ts`.
 
-## Active Window
+## Token Watermarks
 
-`agent.node.ts` must invoke the model with active messages, not raw full history:
+`agent.node.ts` must invoke the model with the unsummarized working segment, not raw full history:
 
 ```text
-model input = SystemMessage(prompt with summary) + activeMessages
+model input = SystemMessage(prompt with summary) + unsummarizedRecentMessages
 ```
 
-Use token budget for the active window. Token budget measures context size; it must not cut inside message content. The implementation should preserve whole messages and valid tool-call pairing.
+Use token watermarks for the working segment:
+
+```ts
+WORKING_MEMORY_SUMMARY_TRIGGER_TOKENS
+WORKING_MEMORY_RECENT_TOKENS_TO_KEEP
+```
+
+`WORKING_MEMORY_SUMMARY_TRIGGER_TOKENS` is the high watermark. When unsummarized messages exceed it, working memory summarizes the older part.
+
+`WORKING_MEMORY_RECENT_TOKENS_TO_KEEP` is the low watermark. After summarization, the graph keeps about this much recent raw context outside the summary.
+
+Token counts measure context size. They must not cut inside message content. The implementation should preserve whole messages and valid tool-call pairing.
 
 Example:
 
@@ -125,45 +137,43 @@ If this message is retained, it remains intact. It must not become:
 
 ## Summary Semantics
 
-The summary represents old context that has fallen outside the active window.
+The summary represents old context already compacted out of the unsummarized working segment.
 
 Example:
 
 ```text
-Full messages:     A B C D E F G H I J K L
-Active window:             I J K L
-Existing summary:  A B C D E F
-New delta:                 G H
-Updated summary:   A B C D E F G H
+Full messages:              A B C D E F G H I J K L M N O P
+Existing summary covers:    A B C D
+Unsummarized segment:               E F G H I J K L M N O P
+
+If the unsummarized segment crosses the high token watermark:
+
+Summarize delta:                    E F G H
+Keep recent raw context:                    I J K L M N O P
+Updated summary covers:     A B C D E F G H
 ```
 
 The summary LLM receives:
 
 ```text
-existing summary + newly evicted messages
+existing summary + newly compactable messages
 ```
 
-It does not receive all raw messages from the beginning of the thread.
+It does not receive all raw messages from the beginning of the thread. It receives the previous compressed summary plus only the older unsummarized messages being compacted in this cycle.
 
 ## Trigger Rules
 
-Summarization must be batch-based, not triggered by every single message that falls out of the active window.
+Summarization must be high/low watermark-based, not triggered by every single new message.
 
 Run `summarize.node.ts` only when:
 
 - the latest agent message is final and has no `tool_calls`;
-- enough unsummarized evicted messages have accumulated;
+- unsummarized messages after `summarizedThroughMessageId` exceed `WORKING_MEMORY_SUMMARY_TRIGGER_TOKENS`;
+- there are older unsummarized messages that can be summarized while retaining `WORKING_MEMORY_RECENT_TOKENS_TO_KEEP` as recent raw context;
 - the selected delta does not break tool-call / tool-result pairing;
 - the graph is not in the middle of an interrupt boundary.
 
-The first implementation should prefer simple thresholds:
-
-```ts
-WORKING_MEMORY_ACTIVE_WINDOW_TOKENS
-WORKING_MEMORY_SUMMARY_BATCH_MESSAGES
-```
-
-Token thresholding can be added to the batch trigger later if message count proves too coarse.
+If preserving whole message and tool-call boundaries means keeping slightly more than the low watermark, prefer valid history over an exact token number.
 
 ## Non-Goals
 
@@ -177,9 +187,9 @@ Token thresholding can be added to the batch trigger later if message count prov
 
 Add focused tests for deterministic boundary logic:
 
-- active window keeps whole messages;
+- token watermark selection keeps whole messages;
 - tool-call and tool-result pairs are not split;
-- no summary runs until batch threshold is met;
+- no summary runs until the high token watermark is crossed;
 - delta summary selects only messages after `summarizedThroughMessageId`;
 - the Vietnamese message `"tôi là phạm hoài phúc"` is not truncated when retained.
 
