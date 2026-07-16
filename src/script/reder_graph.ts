@@ -1,17 +1,27 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { graph } from "@/graph/main/graph.js";
+import { workingMemoryGraph } from "@/graph/working-memory/graph.js";
 
 const outputDir = "static/graphs";
 
 await mkdir(outputDir, { recursive: true });
 
-const drawableGraph = await graph.getGraphAsync();
+await renderGraph("main-agent", await graph.getGraphAsync({ xray: false }));
+await renderGraph(
+  "working-memory",
+  await workingMemoryGraph.getGraphAsync({ xray: false })
+);
 
-const mermaid = drawableGraph.drawMermaid();
-await writeFile(`${outputDir}/main-agent.mmd`, mermaid);
+async function renderGraph(
+  fileName: string,
+  drawableGraph: Awaited<ReturnType<typeof graph.getGraphAsync>>
+): Promise<void> {
+  const mermaid = drawableGraph.drawMermaid();
+  await writeFile(`${outputDir}/${fileName}.mmd`, mermaid);
 
-const png = await drawableGraph.drawMermaidPng();
-const buffer = Buffer.from(await png.arrayBuffer());
-await writeFile(`${outputDir}/main-agent.png`, buffer);
+  const png = await drawableGraph.drawMermaidPng();
+  const buffer = Buffer.from(await png.arrayBuffer());
+  await writeFile(`${outputDir}/${fileName}.png`, buffer);
+}
 
 process.exit(0);

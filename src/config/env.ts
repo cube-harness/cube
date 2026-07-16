@@ -28,6 +28,11 @@ const envSchema = z.object({
   DEFAULT_CHAT_PROVIDER: z.string().min(1).default("ollama"),
   DEFAULT_CHAT_MODEL: z.string().min(1).default("qwen2.5:7b"),
 
+  // Gateway
+  TELEGRAM_BOT_TOKEN: z.string().optional().default(""),
+  LANGGRAPH_API_URL: z.string().url().default("http://localhost:2024"),
+  LANGGRAPH_ASSISTANT_ID: z.string().min(1).default("main_agent"),
+
   LLM_PROVIDERS: z
     .string()
     .min(1, "LLM_PROVIDERS is required")

@@ -1,11 +1,15 @@
 import { tool } from "@langchain/core/tools";
 import * as z from "zod";
-import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { ContextType } from "@/graph/main/context.js";
 
 interface TimeToolContext {
   timeZone: string;
   locale: string;
+}
+
+interface TimeToolRuntime {
+  context?: Partial<ContextType>;
+  configurable?: Partial<ContextType>;
 }
 
 function getServerTimeZone(): string {
@@ -25,8 +29,12 @@ function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-function getTimeContext(runtime?: LangGraphRunnableConfig<ContextType>): TimeToolContext {
-  const context = runtime?.context as Partial<ContextType> | undefined;
+function getRuntimeContext(runtime?: TimeToolRuntime): Partial<ContextType> | undefined {
+  return runtime?.context ?? runtime?.configurable;
+}
+
+function getTimeContext(runtime?: TimeToolRuntime): TimeToolContext {
+  const context = getRuntimeContext(runtime);
   const serverTimeZone = getServerTimeZone();
   const timeZone =
     context?.timeZone && isValidTimeZone(context.timeZone)
@@ -42,9 +50,7 @@ function getTimeContext(runtime?: LangGraphRunnableConfig<ContextType>): TimeToo
 export const getCurrentTimeTool = tool(
   async (_input, runtime) => {
     const now = new Date();
-    const { timeZone, locale } = getTimeContext(
-      runtime as LangGraphRunnableConfig<ContextType> | undefined
-    );
+    const { timeZone, locale } = getTimeContext(runtime as TimeToolRuntime);
 
     const date = new Intl.DateTimeFormat(locale, {
       timeZone,
