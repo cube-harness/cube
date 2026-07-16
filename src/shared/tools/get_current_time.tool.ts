@@ -7,6 +7,10 @@ interface TimeToolContext {
   locale: string;
 }
 
+interface GetCurrentTimeInput {
+  timeZone?: string;
+}
+
 interface TimeToolRuntime {
   context?: Partial<ContextType>;
   configurable?: Partial<ContextType>;
@@ -33,9 +37,25 @@ function getRuntimeContext(runtime?: TimeToolRuntime): Partial<ContextType> | un
   return runtime?.context ?? runtime?.configurable;
 }
 
-function getTimeContext(runtime?: TimeToolRuntime): TimeToolContext {
+function getTimeContext(
+  input: GetCurrentTimeInput,
+  runtime?: TimeToolRuntime
+): TimeToolContext {
   const context = getRuntimeContext(runtime);
   const serverTimeZone = getServerTimeZone();
+  const requestedTimeZone = input.timeZone?.trim();
+
+  if (requestedTimeZone) {
+    if (!isValidTimeZone(requestedTimeZone)) {
+      throw new Error(`Invalid IANA time zone: "${requestedTimeZone}".`);
+    }
+
+    return {
+      timeZone: requestedTimeZone,
+      locale: context?.locale || getServerLocale(),
+    };
+  }
+
   const timeZone =
     context?.timeZone && isValidTimeZone(context.timeZone)
       ? context.timeZone
@@ -48,9 +68,12 @@ function getTimeContext(runtime?: TimeToolRuntime): TimeToolContext {
 }
 
 export const getCurrentTimeTool = tool(
-  async (_input, runtime) => {
+  async (input, runtime) => {
     const now = new Date();
-    const { timeZone, locale } = getTimeContext(runtime as TimeToolRuntime);
+    const { timeZone, locale } = getTimeContext(
+      input,
+      runtime as TimeToolRuntime
+    );
 
     const date = new Intl.DateTimeFormat(locale, {
       timeZone,
@@ -71,7 +94,14 @@ export const getCurrentTimeTool = tool(
   {
     name: "get_current_time",
     description:
-      "Get the current date, time, and time zone for the current user.",
-    schema: z.object({}),
+      "Get the current date and time. If the user does not ask for a specific place, do not pass timeZone; the user's current time zone from runtime context is used.",
+    schema: z.object({
+      timeZone: z
+        .string()
+        .describe(
+          "Optional IANA time zone for a specific place the user asks about. Use the Area/Location format, for example Europe/London, Europe/Paris, Asia/Tokyo, or America/New_York."
+        )
+        .optional(),
+    }),
   }
 );
