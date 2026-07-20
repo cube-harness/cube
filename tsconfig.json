@@ -15,6 +15,7 @@
     "declarationMap": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
+    "resolveJsonModule": true,
     "strict": true,
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
