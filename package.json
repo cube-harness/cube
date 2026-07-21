@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "langgraphjs dev",
     "build": "tsc --noEmit",
-    "test": "npm run build && npm run typecheck:tests && npm run test:unit",
-    "typecheck:tests": "tsc --noEmit -p test/tsconfig.json",
+    "test": "npm run build && npm run test:unit",
+    "typecheck:tests": "tsc --noEmit",
     "test:unit": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
     "graph:render": "tsx src/script/reder_graph.ts",
     "dev:telegram": "tsx src/gateway/index.ts"

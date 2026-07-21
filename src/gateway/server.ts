@@ -1,3 +1,3 @@
 import { startTelegramGateway } from "./telegram.js";
 
-startTelegramGateway();
+await startTelegramGateway();
