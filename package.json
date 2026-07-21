@@ -10,7 +10,7 @@
     "typecheck:tests": "tsc --noEmit",
     "test:unit": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
     "graph:render": "tsx src/script/reder_graph.ts",
-    "dev:telegram": "tsx src/gateway/index.ts"
+    "dev:telegram": "tsx src/gateway/server.ts"
   },
   "keywords": [],
   "author": "",
