@@ -2,7 +2,7 @@ import { tool } from "@langchain/core/tools";
 import * as z from "zod";
 import { createLogger } from "@/config/logger.js";
 
-const log = createLogger("get-time.tool");
+const log = createLogger("tool.system.get-time");
 
 const getTimeSchema = z.object({
   timeZone: z

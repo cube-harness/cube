@@ -46,7 +46,7 @@ TypeScript LangGraph agent project running on LangGraph Agent Server. The main g
 ```json
 {
   "graphs": {
-    "main-agent": "./src/graph/main/graph.ts:graph"
+    "main-agent": "./src/workflow/main/graph.ts:graph"
   }
 }
 ```

@@ -1,8 +1,7 @@
 import { createLogger } from "@/config/logger.js";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 
-const log = createLogger("guardrail.tool-availability");
-
+const log = createLogger("guardrail.tool");
 interface ToolGroup {
   name: string;
   tools: StructuredToolInterface[];

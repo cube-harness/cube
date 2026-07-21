@@ -4,7 +4,7 @@ import * as z from "zod";
 import { createLogger } from "@/config/logger.js";
 import { env } from "@/config/env.js";
 
-const log = createLogger("tavily.tool");
+const log = createLogger("tool.system.tavily");
 
 // Chỉ xử lý lỗi thực thi (agent tự sửa được: query rỗng, URL sai, rate limit, timeout...).
 // Lỗi cấu hình (thiếu API key) là việc của guardrail, xử lý trước khi tool này được bind vào agent.

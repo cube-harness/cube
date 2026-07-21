@@ -5,7 +5,7 @@ import { Client } from "@langchain/langgraph-sdk";
 import { createLogger } from "@/config/logger.js";
 import { env } from "@/config/env.js";
 
-const log = createLogger("telegram.gateway");
+const log = createLogger("gateway.telegram");
 
 const client = new Client({ apiUrl: env.LANGGRAPH_API_URL });
 

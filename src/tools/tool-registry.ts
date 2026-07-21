@@ -1,6 +1,6 @@
 // tools/registry.ts
 import { env } from "@/config/env.js";
-import { resolveTools, requireEnv } from "@/guardrail/tool-guardrail.js";
+import { resolveTools, requireEnv } from "@/guardrail/tool.guardrail.js";
 import { tavilyTools } from "@/tools/system/tavily.tool.js";
 import { getTimeTool } from "@/tools/system/get-time.tool.js";
 
