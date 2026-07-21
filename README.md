@@ -10,27 +10,31 @@ TypeScript LangGraph agent project running on LangGraph Agent Server. The main g
 - LangGraph Agent Server via `@langchain/langgraph-cli`
 - MongoDB checkpointer backend for Agent Server persistence
 - Ollama or Gemini as chat model providers
-- Tavily search tool
 - Docker Compose for local production-like runtime
 - LangSmith Studio for graph UI and traces
 
 ## Project Tree
 
 ```text
-.
-├── docs/
-│   └── superpowers/                 # project notes and API specs
-├── src/
-│   ├── config/                      # env, constants, database client
-│   ├── graph/
-│   │   └── main/                    # main_agent graph, state, context, nodes, prompts
-│   ├── middleware/                  # tool filtering and safe ToolNode setup
-│   └── shared/
-│       ├── memories/                # direct Mongo store/checkpointer helpers
-│       ├── providers/               # LLM provider factory
-│       └── tools/                   # agent tools
-├── docker-compose.local.yml         # local Ollama service override
-├── langgraph.json                   # LangGraph Agent Server config
+├── src
+│   ├───background/
+│   ├───config/  
+│   ├───conversation/
+│   ├───gateway/   
+│   ├───guardrail/
+│   ├───memory/
+│   │   ├───long-term/
+│   │   └───short-term/
+│   ├───provider/    
+│   ├───tools/
+│   │   ├───domain/
+│   │   └───system/
+│   └───workflow/
+│       └───main/
+│           ├───node/
+│           └───prompt/        
+├── docker-compose.local.yml         
+├── langgraph.json                   
 ├── package.json
 └── tsconfig.json
 ```
@@ -42,7 +46,7 @@ TypeScript LangGraph agent project running on LangGraph Agent Server. The main g
 ```json
 {
   "graphs": {
-    "main_agent": "./src/graph/main/graph.ts:graph"
+    "main-agent": "./src/graph/main/graph.ts:graph"
   }
 }
 ```
@@ -68,18 +72,6 @@ OLLAMA_BASE_URL=http://ollama:11434
 
 LLM_PROVIDERS=[{"provider":"ollama","apiKeyEnv":"OLLAMA_BASE_URL","models":["qwen2.5:7b"]},{"provider":"gemini","apiKeyEnv":"GEMINI_API_KEY","models":["gemini-2.5-flash"]}]
 ```
-
-`LS_MONGODB_URI` is used by LangGraph Agent Server because `langgraph.json` configures:
-
-```json
-{
-  "checkpointer": {
-    "backend": "mongo"
-  }
-}
-```
-
-The MongoDB URI must include a database name before the query string.
 
 ## Install
 
