@@ -83,7 +83,7 @@ interface CommandDefinition {
 const commands: CommandDefinition[] = [
   {
     name: "start",
-    description: "Bắt đầu cuộc trò chuyện",
+    description: "Start the conversation",
     handler: async (ctx) => {
       await getOrCreateThreadId(ctx.chat!.id);
       await ctx.reply("Xin chào! Mình sẵn sàng hỗ trợ bạn.");
@@ -91,7 +91,7 @@ const commands: CommandDefinition[] = [
   },
   {
     name: "clear",
-    description: "Xoá toàn bộ cuộc trò chuyện (như Clear chat history > Delete for me and bot)",
+    description: "Clear chat history",
     handler: async (ctx) => {
       const chatId = ctx.chat!.id;
 
@@ -133,7 +133,7 @@ const commands: CommandDefinition[] = [
   },
   {
     name: "cancel",
-    description: "Huỷ tác vụ đang chạy",
+    description: "Cancel running task",
     handler: async (ctx) => {
       const chatId = ctx.chat!.id;
       const running = runningRunByChat.get(chatId);
@@ -154,7 +154,7 @@ const commands: CommandDefinition[] = [
   },
   {
     name: "status",
-    description: "Xem trạng thái tác vụ hiện tại",
+    description: "View current task status",
     handler: async (ctx) => {
       const chatId = ctx.chat!.id;
       const running = runningRunByChat.get(chatId);
