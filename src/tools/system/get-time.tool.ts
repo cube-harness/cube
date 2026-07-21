@@ -26,15 +26,17 @@ const isValidTimeZone = (tz: string): boolean => {
 
 export const getTimeTool = tool(
   async ({ timeZone }, config) => {
-    const ctx = config.configurable as { timeZone: string; locale: string };
+    // Đến đây context đã được guardrail validate ở node đầu graph rồi,
+    // nên timeZone/locale chắc chắn tồn tại — không cần "as" ép kiểu mù.
+    const contextTimeZone = config.configurable?.timeZone as string;
+    const resolvedLocale = config.configurable?.locale as string;
 
-    const resolvedTimeZone = timeZone ?? ctx.timeZone;
-    const resolvedLocale = ctx.locale;
+    const resolvedTimeZone = timeZone ?? contextTimeZone;
 
     const runLog = log.child({
       threadId: config.configurable?.thread_id,
       requestedTimeZone: timeZone,
-      contextTimeZone: ctx.timeZone,
+      contextTimeZone,
       resolvedTimeZone,
       resolvedLocale,
     });
@@ -45,19 +47,10 @@ export const getTimeTool = tool(
     }
 
     const now = new Date();
-
-    const date = new Intl.DateTimeFormat(resolvedLocale, {
-      timeZone: resolvedTimeZone,
-      dateStyle: "full",
-    }).format(now);
-
-    const time = new Intl.DateTimeFormat(resolvedLocale, {
-      timeZone: resolvedTimeZone,
-      timeStyle: "medium",
-    }).format(now);
+    const date = new Intl.DateTimeFormat(resolvedLocale, { timeZone: resolvedTimeZone, dateStyle: "full" }).format(now);
+    const time = new Intl.DateTimeFormat(resolvedLocale, { timeZone: resolvedTimeZone, timeStyle: "medium" }).format(now);
 
     runLog.info({ date, time }, "Successfully retrieved time");
-
     return JSON.stringify({ date, time, timezone: resolvedTimeZone, locale: resolvedLocale });
   },
   {
