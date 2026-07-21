@@ -1,16 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { graph } from "@/graph/main/graph.js";
-import { workingMemoryGraph } from "@/graph/working-memory/graph.js";
+import { graph } from "@/workflow/main/graph.js";
 
-const outputDir = "static/graphs";
+const outputDir = "static/workflow";
 
 await mkdir(outputDir, { recursive: true });
 
 await renderGraph("main-agent", await graph.getGraphAsync({ xray: false }));
-await renderGraph(
-  "working-memory",
-  await workingMemoryGraph.getGraphAsync({ xray: false })
-);
+
 
 async function renderGraph(
   fileName: string,

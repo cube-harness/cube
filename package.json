@@ -9,12 +9,12 @@
     "test": "npm run build && npm run test:unit",
     "typecheck:tests": "tsc --noEmit",
     "test:unit": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
-    "graph:render": "tsx src/script/reder_graph.ts",
-    "dev:telegram": "tsx src/gateway/server.ts"
+    "graph:render": "tsx script/render-graph.ts",
+    "telegram:dev": "tsx src/gateway/server.ts"
   },
   "keywords": [],
   "author": "",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
     "@babel/preset-typescript": "7.28.5",
