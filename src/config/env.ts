@@ -25,7 +25,7 @@ const envSchema = z.object({
 
   // LangGraph server
   LANGGRAPH_API_URL: z.string().default("http://localhost:8123"),
-  LANGGRAPH_ASSISTANT_ID: z.string().default("main_agent"),
+  LANGGRAPH_ASSISTANT_ID: z.string().default("main-agent"),
 
   // Logging
   LOG_LEVEL: z

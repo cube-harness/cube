@@ -8,7 +8,6 @@ TypeScript LangGraph agent project running on LangGraph Agent Server. The main g
 - LangGraph JS for graph orchestration
 - LangChain Core message, tool, and model abstractions
 - LangGraph Agent Server via `@langchain/langgraph-cli`
-- MongoDB checkpointer backend for Agent Server persistence
 - Ollama or Gemini as chat model providers
 - Docker Compose for local production-like runtime
 - LangSmith Studio for graph UI and traces
