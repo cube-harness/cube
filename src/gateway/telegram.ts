@@ -221,6 +221,7 @@ bot.on(message("text"), async (ctx) => {
 
     const context = {
       userId,
+      agentId: "main-agent",
       timeZone: "Asia/Ho_Chi_Minh",
       locale: "vi-VN",
     };

@@ -1,4 +1,7 @@
-# System Prompt And SOUL Vibe Design
+# System Prompt And Store-Backed SOUL Design
+
+> Superseded by `docs/superpowers/specs/2026-07-22-store-backed-system-prompt-design.md`.
+> The older file-based `SOUL.md` write design below is obsolete and must not be used for implementation.
 
 Date: 2026-07-21
 Scope: System prompt composition and the first prompt-facing learning tool for the TypeScript LangGraph agent.
@@ -7,7 +10,7 @@ Scope: System prompt composition and the first prompt-facing learning tool for t
 
 This spec defines the first system prompt foundation for the agent. The goal is to build a stable OpenClaw-style prompt assembly from bootstrap files and add one narrow learning surface: updating the learned `Vibe` section in `SOUL.md`.
 
-This phase does not implement long-term memory read/write, vector search, background memory extraction, or database persistence. It only establishes prompt composition and a controlled tool that can update the prompt-facing `Vibe` layer.
+This phase does not implement long-term memory read/write, vector search, background memory extraction, or database persistence. It only establishes prompt composition and a controlled soul management tool group that can read `SOUL.md` and update the prompt-facing `Vibe` layer.
 
 ## Current State
 
@@ -94,26 +97,45 @@ The runtime context may include values already validated by the graph context gu
 
 `agent.node.ts` should call the composer and pass `new SystemMessage(systemPrompt)` into the model invocation instead of using the hardcoded helpful-assistant prompt.
 
-## update_soul_vibe Tool
+## manage_soul Tool Group
 
-The tool name should be:
+Soul prompt tools should live together in one capability-level file, following the same pattern as `src/tools/system/tavily.tool.ts`.
+
+The file should be:
 
 ```text
+src/tools/system/manage-soul.tool.ts
+```
+
+This file should export individual tools and one grouped array:
+
+```ts
+export const getSoulTool = ...
+export const updateSoulVibeTool = ...
+export const manageSoulTools = [getSoulTool, updateSoulVibeTool];
+```
+
+The first soul tools are:
+
+```text
+get_soul
 update_soul_vibe
 ```
 
-The tool updates only the learned `Vibe` block in `SOUL.md`. It should accept concise learned vibe guidance, normalize it into a bounded bullet list, and rewrite only the text between `LEARNED_VIBE_START` and `LEARNED_VIBE_END`.
+`get_soul` reads the current `SOUL.md` content for inspection/debugging.
 
-The tool does not require user approval. This is safe only because the writable surface is narrow and prompt-facing.
+`update_soul_vibe` updates only the learned `Vibe` block in `SOUL.md`. It should accept concise learned vibe guidance, normalize it into a bounded bullet list, and rewrite only the text between `LEARNED_VIBE_START` and `LEARNED_VIBE_END`.
 
-The tool must be registered through the same tool registry and guardrail path as every other tool. It must not bypass `resolveTools` or create a separate ad hoc tool injection path. If runtime enablement needs to be configurable, add a condition flag and register the tool group with that flag.
+`update_soul_vibe` does not require user approval. This is safe only because the writable surface is narrow and prompt-facing.
+
+The soul tool group must be registered through the same tool registry and guardrail path as every other tool. It must not bypass `resolveTools` or create a separate ad hoc tool injection path. If runtime enablement needs to be configurable, add a condition flag and register the tool group with that flag.
 
 Suggested group shape:
 
 ```ts
 {
   name: "prompt",
-  tools: [updateSoulVibeTool],
+  tools: manageSoulTools,
   isEnabled: promptLearningEnabled,
 }
 ```
@@ -124,7 +146,7 @@ The first implementation can use an always-on condition only if it still flows t
 isEnabled: () => true
 ```
 
-The tool must reject:
+`update_soul_vibe` must reject:
 
 - Attempts to update `Core Truths`, `Boundaries`, `Continuity`, `AGENT.md`, or system/tool policy.
 - Secrets, credentials, tokens, private keys, or API keys.
@@ -201,6 +223,8 @@ agent decides a durable style update is needed
 
 The prompt composer should fail clearly when required prompt files cannot be read.
 
+`get_soul` should return a clear rejected result when `SOUL.md` cannot be read.
+
 `update_soul_vibe` should return a clear rejected result when:
 
 - The learned `Vibe` markers are missing.
@@ -220,7 +244,7 @@ Add focused tests for:
 - The update tool rewrites only the learned `Vibe` block.
 - The update tool rejects missing or duplicate markers.
 - The update tool rejects out-of-scope content.
-- The tool registry exposes `update_soul_vibe` only through the normal guardrail-enabled group resolution path.
+- The tool registry exposes `get_soul` and `update_soul_vibe` only through the normal guardrail-enabled group resolution path.
 
 Run `npm test` after implementation. No runtime server validation is required for this phase unless prompt/tool registration causes a graph loading failure.
 
@@ -241,7 +265,9 @@ Run `npm test` after implementation. No runtime server validation is required fo
 - `SOUL.md` contains a machine-managed learned `Vibe` block.
 - `AGENT.md` contains runtime behavior rules.
 - `system.prompt.ts` composes the final system prompt from prompt files and runtime context.
+- `get_soul` can read the current `SOUL.md` content.
 - `update_soul_vibe` can update only the learned `Vibe` block.
-- `update_soul_vibe` is registered through the normal tool guardrail path.
+- Soul tools are implemented in `src/tools/system/manage-soul.tool.ts`.
+- `manageSoulTools` is registered through the normal tool guardrail path.
 - `store.prompt.ts` remains prompt-scoped and does not contain memory-store logic.
 - Tests cover composer behavior and marker-safe `Vibe` updates.

@@ -1,6 +1,6 @@
 {
   "dependencies": ["."],
-  "api_version": "0.11.0",
+  "node_version": "20",
   "docker_compose_file": "docker-compose.local.yml",
   "graphs": {
     "main-agent": "./src/workflow/main/graph.ts:graph"

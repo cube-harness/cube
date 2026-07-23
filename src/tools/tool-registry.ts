@@ -1,8 +1,8 @@
-// tools/registry.ts
-import { env } from "@/config/env.js";
-import { resolveTools, requireEnv } from "@/guardrail/tool.guardrail.js";
 import { tavilyTools } from "@/tools/system/tavily.tool.js";
 import { getTimeTool } from "@/tools/system/get-time.tool.js";
+import { alwaysEnabled, requireEnv, resolveTools } from "@/guardrail/tool.guardrail.js";
+import { env } from "process";
+
 
 export const tools = resolveTools([
   {
@@ -13,6 +13,6 @@ export const tools = resolveTools([
   {
     name: "time",
     tools: [getTimeTool],
-    isEnabled: () => true, 
+    isEnabled: alwaysEnabled,
   },
 ]);

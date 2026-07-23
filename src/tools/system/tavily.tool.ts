@@ -37,6 +37,7 @@ export const tavilySearchTool = tool(
       maxResults: 5,
       topic: "general",
       searchDepth: "basic",
+      // timeRange: "day",
       includeAnswer: false,
       includeRawContent: false,
       includeImages: false,

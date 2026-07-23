@@ -1,7 +1,28 @@
 import { createLogger } from "@/config/logger.js";
-import type { StructuredToolInterface } from "@langchain/core/tools";
+import { resolveRuntimeContext } from "@/guardrail/context.guardrail.js";
+import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 
 const log = createLogger("guardrail.tool");
+
+
+export interface ToolRuntimeGuardrailSource {
+  configurable?: {
+    thread_id?: string;
+    run_id?: string;
+    userId?: unknown;
+    agentId?: unknown;
+    timeZone?: unknown;
+    locale?: unknown;
+  };
+  context?: unknown;
+}
+
+type RuntimeGuardrail = (
+  input: unknown,
+  runtime: ToolRuntimeGuardrailSource,
+  toolName: string,
+) => void | Promise<void>;
+
 interface ToolGroup {
   name: string;
   tools: StructuredToolInterface[];
@@ -30,6 +51,10 @@ export const requireEnv =
   () =>
     values.every((v) => Boolean(v));
 
+export const alwaysEnabled = () => true;
+
+export const promptToolsEnabled = () => true;
+
 // Enable if ALL conditions are met — use when a tool requires multiple guardrails simultaneously
 export const all =
   (...conditions: Array<() => boolean>) =>
@@ -41,3 +66,4 @@ export const any =
   (...conditions: Array<() => boolean>) =>
   () =>
     conditions.some((cond) => cond());
+
