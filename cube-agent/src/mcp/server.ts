@@ -1,0 +1,1 @@
+import { MCPServer } from '@mastra/mcp'

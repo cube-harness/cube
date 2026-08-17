@@ -1,0 +1,12 @@
+packages:
+  - 'cube-*'
+
+allowBuilds:
+  '@google/genai': true
+  agent-browser: true
+  bufferutil: true
+  edgedriver: true
+  esbuild: true
+  geckodriver: true
+  onnxruntime-node: true
+  protobufjs: true

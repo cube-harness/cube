@@ -1,0 +1,25 @@
+{
+  "name": "@cube/workspace",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build && node scripts/copy-cube-home.mjs",
+    "clean": "node scripts/clean.mjs",
+    "test": "tsx --test --test-isolation=none tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "yaml": "2.7.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.1"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "cube-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @cube/cli dev",
+    "dev:web": "mastra dev",
+    "build": "pnpm --recursive run build",
+    "typecheck": "tsc --build"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.1",
+    "mastra": "^1.25.0",
+    "tsx": "4.19.3",
+    "turbo": "2.10.8",
+    "typescript": "5.7.3"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
