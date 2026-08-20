@@ -24,6 +24,7 @@ export type {
 export { ThreadPickerOverlay } from "./components/thread-picker.js";
 export { ModelPickerComponent } from "./components/model-picker.js";
 export { WorkingIndicator } from "./components/working-indicator.js";
+export { UsageBox, renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
 
 export interface SlashCommandSuggestion {
   name: `/${string}`;

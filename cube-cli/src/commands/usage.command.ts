@@ -1,6 +1,7 @@
 import type { Home } from "@cube/workspace";
 import { ConfigStore, ModelManager } from "@cube/workspace";
 import type { Session } from "@cube/agent";
+import { renderUsageBoxToString } from "@cube/tui";
 import type { CommandHandler } from "../command-manager.js";
 
 export interface UsageCommandDependencies {
@@ -19,14 +20,13 @@ export const createUsageCommandHandler = (
   const catalog = await modelManager.getCatalog().catch(() => null);
   const foundModel = catalog?.models?.find((m) => m.modelId === activeModelId);
 
-  const badges: string[] = [];
-  if (foundModel?.tool_call) badges.push("tools");
-  if (foundModel?.reasoning) badges.push("reasoning");
-  if (foundModel?.attachment) badges.push("vision");
-  const badgeStr = badges.length > 0 ? ` [${badges.join(", ")}]` : "";
+  const capabilities: string[] = [];
+  if (foundModel?.tool_call) capabilities.push("tools");
+  if (foundModel?.reasoning) capabilities.push("reasoning");
+  if (foundModel?.attachment) capabilities.push("vision");
 
   const contextLimit = foundModel?.limit?.context ?? 128_000;
-  const outputLimit = foundModel?.limit?.output;
+  const maxOutput = foundModel?.limit?.output;
 
   const usage = deps.session.getTokenUsage?.() ?? {
     promptTokens: 0,
@@ -35,28 +35,17 @@ export const createUsageCommandHandler = (
     cachedInputTokens: 0,
   };
 
-  const percent = Math.min(
-    100,
-    Math.max(0, (usage.promptTokens / contextLimit) * 100),
-  );
-  const filledBars = Math.round((percent / 100) * 20);
-  const emptyBars = 20 - filledBars;
-  const progressBar = `[${"█".repeat(filledBars)}${"░".repeat(emptyBars)}]`;
-  const remainingContext = Math.max(0, contextLimit - usage.promptTokens);
+  const output = renderUsageBoxToString({
+    model: activeModelId,
+    capabilities,
+    contextLimit,
+    maxOutput,
+    promptTokens: usage.promptTokens,
+    completionTokens: usage.completionTokens,
+    cachedTokens: usage.cachedInputTokens ?? 0,
+    totalTokens: usage.totalTokens,
+    threadId: deps.session.thread.getId() ?? "new thread",
+  });
 
-  const lines: string[] = [
-    "### 📊 Token & Context Window Usage",
-    `• Active Model:        \`${activeModelId}\`${badgeStr}`,
-    `• Context Limit:       ${contextLimit.toLocaleString()} tokens${outputLimit ? ` (Max Output: ${outputLimit.toLocaleString()} tokens)` : ""}`,
-    `• Context Window:      ${progressBar} ${percent.toFixed(1)}% (${usage.promptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`,
-    `• Remaining Context:   ${remainingContext.toLocaleString()} tokens`,
-    "",
-    `• Prompt Tokens:       ${usage.promptTokens.toLocaleString()}`,
-    `• Completion Tokens:   ${usage.completionTokens.toLocaleString()}`,
-    `• Cached Input Tokens: ${(usage.cachedInputTokens ?? 0).toLocaleString()}`,
-    `• Total Tokens:        ${usage.totalTokens.toLocaleString()}`,
-    `• Active Thread ID:    \`${deps.session.thread.getId() ?? "new thread"}\``,
-  ];
-
-  deps.showMessage(lines.join("\n"));
+  deps.showMessage(output);
 };
