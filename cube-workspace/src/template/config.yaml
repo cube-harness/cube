@@ -1,0 +1,61 @@
+version: 1
+model: ollama/qwen2.5:7b
+model_config: {}
+fallback_model: google/gemini-2.5-flash
+
+theme: dark
+telemetry: false
+
+soul:
+  max_characters: 20000
+
+memory:
+  working_memory:
+    enabled: true
+    scope: resource
+    use_state_signals: true
+    agent_managed: false
+    template: |
+      # Workspace State
+      - Current objective:
+      - Important constraints:
+      - Technical decisions:
+      - Open tasks:
+      - Blockers:
+
+  observational_memory:
+    enabled: true
+    scope: thread
+    model: inherit
+    activate_after_idle: auto
+    activate_on_provider_change: true
+    share_token_budget: false
+    temporal_markers: false
+    retrieval:
+      vector: false
+      scope: thread
+
+    observation:
+      message_tokens: 30000
+      buffer_tokens: 0.2
+      buffer_activation: 0.8
+      block_after: 1.2
+      previous_observer_tokens: 2000
+      max_tokens_per_batch: 10000
+      manage_working_memory: true
+      observe_attachments: auto
+      model_settings:
+        temperature: 0.3
+
+    reflection:
+      observation_tokens: 40000
+      buffer_activation: 0.5
+      block_after: 1.2
+      model_settings:
+        temperature: 0
+
+  semantic_recall: false
+
+permissions:
+  require_approval_for:
+    - execute_command

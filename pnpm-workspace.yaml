@@ -8,5 +8,6 @@ allowBuilds:
   edgedriver: true
   esbuild: true
   geckodriver: true
+  msw: true
   onnxruntime-node: true
   protobufjs: true

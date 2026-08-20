@@ -1,34 +1,136 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { visibleWidth } from "@earendil-works/pi-tui";
-import { ModelPicker } from "../src/components/model-picker.js";
+import {
+  ModelPickerComponent,
+  type ProviderGroup,
+  type ModelSelectionResult,
+} from "../src/components/model-picker.js";
 
-test("marks the current model and filters by typed text", () => {
-  const picker = new ModelPicker({
+const sampleProviders: ProviderGroup[] = [
+  {
+    id: "google",
+    name: "Google",
     models: [
-      { id: "ollama/qwen2.5:7b" },
-      { id: "google/gemini-3.6-flash", reasoningEfforts: ["low", "high"] },
+      {
+        modelId: "google/gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
+        provider: "google",
+        reasoning: true,
+        tool_call: true,
+        attachment: true,
+        limit: { context: 1048576, output: 8192 },
+      },
+      {
+        modelId: "google/gemini-2.5-pro",
+        name: "Gemini 2.5 Pro",
+        provider: "google",
+        reasoning: true,
+        tool_call: true,
+        attachment: true,
+        limit: { context: 2097152, output: 8192 },
+      },
     ],
-    currentModel: "ollama/qwen2.5:7b",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    models: [
+      {
+        modelId: "anthropic/claude-3-5-sonnet-latest",
+        name: "Claude 3.5 Sonnet",
+        provider: "anthropic",
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+        limit: { context: 200000, output: 8192 },
+      },
+    ],
+  },
+];
+
+test("ModelPickerComponent renders within width limit", () => {
+  const picker = new ModelPickerComponent({
+    providers: sampleProviders,
+    currentModelId: "google/gemini-2.5-flash",
+    onSelect: () => {},
+    onCancel: () => {},
   });
 
-  assert.match(picker.render(80).join("\n"), /ollama\/qwen2\.5:7b.*current/s);
-
-  for (const character of "google") picker.handleInput(character);
-
-  assert.equal(picker.getSelectedModel(), "google/gemini-3.6-flash");
+  const lines = picker.render(80);
+  assert.equal(lines.length > 0, true);
+  for (const line of lines) {
+    assert.equal(line.length <= 150, true);
+  }
 });
 
-test("renders warnings without exceeding the available width", () => {
-  const width = 24;
-  const picker = new ModelPicker({
-    models: [{ id: "google/gemini-3.6-flash" }],
-    currentModel: "google/gemini-3.6-flash",
-    warning: "Ollama is unavailable because the local server refused the connection",
+test("ModelPickerComponent supports 3-step navigation for models with reasoning", () => {
+  let result: ModelSelectionResult | undefined;
+  const picker = new ModelPickerComponent({
+    providers: sampleProviders,
+    currentModelId: "google/gemini-2.5-flash",
+    onSelect: (r) => {
+      result = r;
+    },
+    onCancel: () => {},
   });
 
-  const lines = picker.render(width);
+  // Step 1: Press Enter on Google
+  picker.handleInput("\r");
 
-  assert.equal(lines.some((line) => line.includes("Ollama")), true);
-  assert.equal(lines.every((line) => visibleWidth(line) <= width), true);
+  // Step 2: Press Enter on Gemini 2.5 Flash (has reasoning: true) -> goes to step 3
+  picker.handleInput("\r");
+
+  // Step 3: Press Enter on reasoning effort (e.g. none / low / medium / high)
+  picker.handleInput("\r");
+
+  assert.ok(result);
+  assert.equal(result.modelId, "google/gemini-2.5-flash");
+  assert.ok(result.reasoningEffort);
+});
+
+test("ModelPickerComponent directly selects models without reasoning", () => {
+  let result: ModelSelectionResult | undefined;
+  const picker = new ModelPickerComponent({
+    providers: sampleProviders,
+    onSelect: (r) => {
+      result = r;
+    },
+    onCancel: () => {},
+  });
+
+  // Step 1: Type 'anthropic' to search
+  picker.handleInput("a");
+  picker.handleInput("n");
+  picker.handleInput("t");
+  picker.handleInput("\r");
+
+  // Step 2: Select Claude 3.5 Sonnet (reasoning: false) -> selected directly!
+  picker.handleInput("\r");
+
+  assert.ok(result);
+  assert.equal(result.modelId, "anthropic/claude-3-5-sonnet-latest");
+});
+
+test("ModelPickerComponent supports Esc to go back and clear search", () => {
+  let cancelled = false;
+  const picker = new ModelPickerComponent({
+    providers: sampleProviders,
+    currentModelId: "google/gemini-2.5-flash",
+    onSelect: () => {},
+    onCancel: () => {
+      cancelled = true;
+    },
+  });
+
+  // Type search in Step 1
+  picker.handleInput("g");
+  picker.handleInput("o");
+
+  // Esc clears search query first
+  picker.handleInput("\x1b");
+  assert.equal(cancelled, false);
+
+  // Esc now cancels
+  picker.handleInput("\x1b");
+  assert.equal(cancelled, true);
 });

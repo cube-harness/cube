@@ -1,101 +1,341 @@
 import {
-  Input,
-  Key,
+  Box,
+  Container,
   SelectList,
+  Text,
+  Key,
   matchesKey,
-  truncateToWidth,
   type Component,
-  type Focusable,
+  type SelectItem,
 } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 
-export interface ModelPickerOptions {
-  models: ModelCatalogItemView[];
-  currentModel: string;
-  warning?: string;
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+
+export interface ModelItem {
+  modelId: string;
+  name: string;
+  provider: string;
+  family?: string;
+  reasoning?: boolean;
+  tool_call?: boolean;
+  attachment?: boolean;
+  limit?: {
+    context: number;
+    output: number;
+  };
 }
 
-export interface ModelCatalogItemView {
+export interface ProviderGroup {
   id: string;
-  reasoningEfforts?: string[];
+  name: string;
+  models: ModelItem[];
 }
 
-export class ModelPicker implements Component, Focusable {
-  private readonly search = new Input();
-  private readonly list: SelectList;
-  private error?: string;
-  private warning?: string;
+export interface ModelSelectionResult {
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+}
 
-  onSelect?: (modelId: string) => void;
-  onCancel?: () => void;
+export interface ModelPickerOptions {
+  providers: ProviderGroup[];
+  currentModelId?: string;
+  currentReasoningEffort?: ReasoningEffort;
+  onSelect: (result: ModelSelectionResult) => void;
+  onCancel: () => void;
+}
 
-  constructor(options: ModelPickerOptions) {
-    this.warning = options.warning;
-    const items = options.models.map((model) => ({
-      value: model.id,
-      label: model.id,
-      description: model.id === options.currentModel ? "current" : undefined,
+export class ModelPickerComponent extends Container implements Component {
+  private step: "provider" | "model" | "reasoning" = "provider";
+  private selectedProvider?: ProviderGroup;
+  private selectedModel?: ModelItem;
+  private searchQuery: string = "";
+
+  private providerList: SelectList;
+  private modelList?: SelectList;
+  private reasoningList?: SelectList;
+
+  private readonly container: Container;
+  private readonly title: Text;
+  private readonly searchDisplay: Text;
+  private readonly hint: Text;
+  private readonly box: Box;
+
+  constructor(private readonly options: ModelPickerOptions) {
+    super();
+    const theme = getTheme();
+
+    this.container = new Container();
+    this.title = new Text(theme.primary.bold("Select AI Provider"), 1, 0);
+    this.container.addChild(this.title);
+
+    this.searchDisplay = new Text(theme.muted("Search: ") + theme.secondary("_"), 1, 0);
+    this.container.addChild(this.searchDisplay);
+
+    const providerItems: SelectItem[] = options.providers.map((p) => ({
+      value: p.id,
+      label: `${p.name} (${p.models.length} models)`,
+      description: p.id,
     }));
-    this.list = new SelectList(items, 12, createSelectListTheme());
-    this.list.setSelectedIndex(Math.max(
+
+    this.providerList = new SelectList(
+      providerItems,
+      Math.min(10, Math.max(3, providerItems.length)),
+      createSelectListTheme(),
+    );
+
+    this.providerList.onSelect = (item) => {
+      const provider = options.providers.find((p) => p.id === item.value);
+      if (provider) {
+        this.switchToModelStep(provider);
+      }
+    };
+
+    this.providerList.onCancel = () => {
+      options.onCancel();
+    };
+
+    this.container.addChild(this.providerList);
+
+    this.hint = new Text(
+      theme.muted("↑/↓: Navigate • Type: Search • Enter: Choose Provider • Esc: Close"),
+      1,
       0,
-      items.findIndex((item) => item.value === options.currentModel),
-    ));
-    this.list.onSelect = (item) => this.onSelect?.(item.value);
-    this.list.onCancel = () => this.onCancel?.();
+    );
+    this.container.addChild(this.hint);
+
+    this.box = new Box(1, 1);
+    this.box.addChild(this.container);
+    this.addChild(this.box);
   }
 
-  get focused(): boolean {
-    return this.search.focused;
+  private updateSearchDisplay(): void {
+    const theme = getTheme();
+    const cursor = theme.secondary("_");
+    const queryText = this.searchQuery
+      ? theme.primary.bold(this.searchQuery)
+      : "";
+    this.searchDisplay.setText(
+      theme.muted("Search: ") + queryText + cursor,
+    );
   }
 
-  set focused(value: boolean) {
-    this.search.focused = value;
+  private switchToModelStep(provider: ProviderGroup): void {
+    const theme = getTheme();
+    this.step = "model";
+    this.selectedProvider = provider;
+    this.searchQuery = "";
+    this.updateSearchDisplay();
+
+    this.title.setText(theme.primary.bold(`Select Model [${provider.name}]`));
+
+    const modelItems: SelectItem[] = provider.models.map((m) => {
+      const isActive = m.modelId === this.options.currentModelId;
+      const activeTag = isActive ? " (Active)" : "";
+
+      return {
+        value: m.modelId,
+        label: `${m.modelId}${activeTag}`,
+        description: undefined,
+      };
+    });
+
+    this.modelList = new SelectList(
+      modelItems,
+      Math.min(10, Math.max(3, modelItems.length)),
+      createSelectListTheme(),
+    );
+
+    this.modelList.onSelect = (item) => {
+      const model = provider.models.find((m) => m.modelId === item.value);
+      if (model?.reasoning) {
+        this.switchToReasoningStep(model);
+      } else {
+        this.options.onSelect({ modelId: item.value });
+      }
+    };
+
+    this.modelList.onCancel = () => {
+      this.switchToProviderStep();
+    };
+
+    this.container.removeChild(this.providerList);
+    this.container.removeChild(this.hint);
+    this.container.addChild(this.modelList);
+
+    this.hint.setText(
+      theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Model • Esc: Back"),
+    );
+    this.container.addChild(this.hint);
   }
 
-  getSelectedModel(): string | null {
-    return this.list.getSelectedItem()?.value ?? null;
+  private switchToReasoningStep(model: ModelItem): void {
+    const theme = getTheme();
+    this.step = "reasoning";
+    this.selectedModel = model;
+    this.searchQuery = "";
+
+    this.title.setText(
+      theme.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
+    );
+    this.searchDisplay.setText(
+      theme.muted("Select reasoning / thinking level:"),
+    );
+
+    const currentEffort = this.options.currentReasoningEffort || "medium";
+    const efforts: Array<{ value: ReasoningEffort; label: string; desc: string }> = [
+      { value: "none", label: "none - Disable reasoning", desc: "No thinking tokens" },
+      { value: "low", label: "low - Fast reasoning", desc: "Light thinking pass" },
+      { value: "medium", label: "medium - Balanced reasoning", desc: "Standard thinking effort" },
+      { value: "high", label: "high - Deep reasoning", desc: "Thorough multi-step analysis" },
+      { value: "xhigh", label: "xhigh - Maximum reasoning", desc: "Full cognitive budget" },
+    ];
+
+    const items: SelectItem[] = efforts.map((e) => ({
+      value: e.value,
+      label: `${e.label}${e.value === currentEffort ? " (Current)" : ""}`,
+      description: e.desc,
+    }));
+
+    this.reasoningList = new SelectList(
+      items,
+      5,
+      createSelectListTheme(),
+    );
+
+    this.reasoningList.onSelect = (item) => {
+      this.options.onSelect({
+        modelId: model.modelId,
+        reasoningEffort: item.value as ReasoningEffort,
+      });
+    };
+
+    this.reasoningList.onCancel = () => {
+      if (this.selectedProvider) {
+        this.switchToModelStep(this.selectedProvider);
+      } else {
+        this.switchToProviderStep();
+      }
+    };
+
+    if (this.modelList) {
+      this.container.removeChild(this.modelList);
+    }
+    this.container.removeChild(this.hint);
+    this.container.addChild(this.reasoningList);
+
+    this.hint.setText(
+      theme.muted("↑/↓: Navigate • Enter: Confirm Config • Esc: Back to Models"),
+    );
+    this.container.addChild(this.hint);
   }
 
-  setError(message?: string): void {
-    this.error = message;
-  }
+  private switchToProviderStep(): void {
+    const theme = getTheme();
+    this.step = "provider";
+    this.selectedProvider = undefined;
+    this.selectedModel = undefined;
+    this.searchQuery = "";
+    this.updateSearchDisplay();
 
-  setWarning(message?: string): void {
-    this.warning = message;
+    this.title.setText(theme.primary.bold("Select AI Provider"));
+
+    if (this.modelList) {
+      this.container.removeChild(this.modelList);
+    }
+    if (this.reasoningList) {
+      this.container.removeChild(this.reasoningList);
+    }
+    this.container.removeChild(this.hint);
+
+    this.providerList.setFilter("");
+    this.container.addChild(this.providerList);
+
+    this.hint.setText(
+      theme.muted("↑/↓: Navigate • Type: Search • Enter: Choose Provider • Esc: Close"),
+    );
+    this.container.addChild(this.hint);
   }
 
   handleInput(data: string): void {
+    // 1. Handle Escape
+    if (matchesKey(data, Key.escape) || data === "\x1b") {
+      if (this.searchQuery.length > 0) {
+        this.searchQuery = "";
+        this.updateSearchDisplay();
+        if (this.step === "model" && this.modelList) {
+          this.modelList.setFilter("");
+        } else if (this.step === "provider") {
+          this.providerList.setFilter("");
+        }
+        return;
+      }
+
+      if (this.step === "reasoning" && this.selectedProvider) {
+        this.switchToModelStep(this.selectedProvider);
+        return;
+      }
+      if (this.step === "model") {
+        this.switchToProviderStep();
+        return;
+      }
+      this.options.onCancel();
+      return;
+    }
+
+    // 2. Handle Navigation / Action Keys
     if (
       matchesKey(data, Key.up) ||
       matchesKey(data, Key.down) ||
       matchesKey(data, Key.enter) ||
-      matchesKey(data, Key.escape) ||
-      matchesKey(data, Key.ctrl("c"))
+      matchesKey(data, Key.pageUp) ||
+      matchesKey(data, Key.pageDown) ||
+      data === "\r" ||
+      data === "\n"
     ) {
-      this.list.handleInput(data);
+      if (this.step === "reasoning" && this.reasoningList) {
+        this.reasoningList.handleInput(data);
+        return;
+      }
+      if (this.step === "model" && this.modelList) {
+        this.modelList.handleInput(data);
+        return;
+      }
+      if (this.step === "provider") {
+        this.providerList.handleInput(data);
+        return;
+      }
+    }
+
+    // 3. Handle Backspace in Search
+    if (
+      matchesKey(data, Key.backspace) ||
+      data === "\x7f" ||
+      data === "\b"
+    ) {
+      if (this.searchQuery.length > 0) {
+        this.searchQuery = this.searchQuery.slice(0, -1);
+        this.updateSearchDisplay();
+        if (this.step === "model" && this.modelList) {
+          this.modelList.setFilter(this.searchQuery);
+        } else if (this.step === "provider") {
+          this.providerList.setFilter(this.searchQuery);
+        }
+      }
       return;
     }
 
-    this.search.handleInput(data);
-    this.list.setFilter(this.search.getValue());
-  }
-
-  invalidate(): void {
-    this.search.invalidate();
-    this.list.invalidate();
-  }
-
-  render(width: number): string[] {
-    const theme = getTheme();
-    return [
-      theme.primary("Select model"),
-      ...this.search.render(width),
-      ...(this.warning ? [theme.warning(this.warning)] : []),
-      ...(this.error ? [theme.error(this.error)] : []),
-      ...this.list.render(width),
-      theme.muted("Type to filter • Enter select • Esc cancel"),
-    ].map((line) => truncateToWidth(line, width));
+    // 4. Handle Text Typing for Search (single printable char)
+    if (data.length === 1 && data >= " " && data <= "~" && this.step !== "reasoning") {
+      this.searchQuery += data;
+      this.updateSearchDisplay();
+      if (this.step === "model" && this.modelList) {
+        this.modelList.setFilter(this.searchQuery);
+      } else if (this.step === "provider") {
+        this.providerList.setFilter(this.searchQuery);
+      }
+      return;
+    }
   }
 }

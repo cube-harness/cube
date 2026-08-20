@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @cube/cli dev",
-    "dev:web": "mastra dev",
+    "dev:factory": "pnpm --filter @cube/factory-ui dev",
     "build": "pnpm --recursive run build",
     "typecheck": "tsc --build"
   },

@@ -11,11 +11,11 @@
     }
   },
   "scripts": {
-    "build": "tsc --build && node scripts/copy-cube-home.mjs",
-    "clean": "node scripts/clean.mjs",
+    "build": "tsc --build",
     "test": "tsx --test --test-isolation=none tests/**/*.test.ts"
   },
   "dependencies": {
+    "@opencode-ai/models": "0.0.46",
     "yaml": "2.7.0",
     "zod": "4.4.3"
   },

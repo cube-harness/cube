@@ -1,28 +1,27 @@
-import os from "node:os";
-import path from "node:path";
-import { createCubeHome } from "./home.js";
-import { resolveWorkspaceIdentity } from "./identity.js";
+// Export Home & Paths
+export { Home, CubeHome, resolveCubeHome } from "./home.js";
+export type { HomeOptions, CubeWorkspacePaths } from "./home.js";
 
+// Export Workspace Manager
+export { WorkspaceManager, Workspace } from "./workspace.js";
+export type { WorkspacePaths } from "./workspace.js";
+
+// Export Stores & Bootstrap
 export {
-  ConfigSchema,
-  ModelConfigSchema,
-  ReasoningEffortSchema,
-  type CubeConfig,
-  type ModelConfig,
-  type ReasoningEffort,
-} from "./schemas/config.schema.js";
-export type { AgentRuntimeFiles, CubeResult } from "./home.js";
-export type { WorkspaceIdentity } from "./identity.js";
+  Store,
+  ConfigStore,
+  ModelCatalogStore,
+  WorkspaceRegistryStore,
+  SoulStore,
+} from "./store/store.js";
+export { Bootstrap, createBootstrap, loadEnv } from "./bootstrap.js";
 
-export const createCubeWorkspace = (
-  options: { home?: string } = {},
-) => {
-  const home = createCubeHome(options.home ?? path.join(os.homedir(), ".cube"));
-  return {
-    initialize: home.initialize,
-    config: home.config,
-    soul: home.soul,
-    identity: { resolve: resolveWorkspaceIdentity },
-    agentRuntime: home.agentRuntime,
-  };
-};
+// Export Model Manager
+export { ModelManager, type ProviderCatalogItem } from "./model-manager.js";
+
+// Export Schemas & Types
+export * from "./schemas/config.schema.js";
+export * from "./schemas/workspace.schema.js";
+export * from "./schemas/model-catalog.schema.js";
+export { providers as snapshotProviders } from "@opencode-ai/models/snapshot";
+export * from "./constants.js";

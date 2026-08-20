@@ -1,5 +1,10 @@
 // cube-tui/src/components/message-list.ts
-import { Markdown, wrapTextWithAnsi, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import {
+  Markdown,
+  wrapTextWithAnsi,
+  truncateToWidth,
+  type Component,
+} from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
 import { createMarkdownTheme } from "../themes/pi-tui.theme.js";
 
@@ -18,10 +23,22 @@ export interface DisplayTool {
   id: string;
   name: string;
   args: unknown;
-  status: "streaming_input" | "waiting_approval" | "running" | "completed" | "error" | "declined";
+  status:
+    | "streaming_input"
+    | "waiting_approval"
+    | "running"
+    | "completed"
+    | "error"
+    | "declined";
   partialResult?: string;
   result?: unknown;
   shellOutput?: string;
+}
+
+interface CachedEntry {
+  message: ChatMessage;
+  cachedWidth?: number;
+  cachedLines?: string[];
 }
 
 const stringifyDisplayValue = (value: unknown): string => {
@@ -78,7 +95,10 @@ const formatToolExtraArgs = (args: unknown): string | null => {
 };
 
 const fenced = (language: "json" | "text", content: string): string => {
-  const longestRun = Math.max(0, ...Array.from(content.matchAll(/`+/g), (match) => match[0].length));
+  const longestRun = Math.max(
+    0,
+    ...Array.from(content.matchAll(/`+/g), (match) => match[0].length),
+  );
   const marker = "`".repeat(Math.max(3, longestRun + 1));
   return `${marker}${language}\n${content}\n${marker}`;
 };
@@ -93,26 +113,42 @@ const toolStatusText: Record<DisplayTool["status"], string> = {
 };
 
 export class MessageList implements Component {
-  invalidate = () => {};
-
-  private messages: ChatMessage[] = [];
+  private entries: CachedEntry[] = [];
   private scrollOffset: number = 0;
   private autoScroll: boolean = true;
-  private maxVisibleLines: number = 20;
+
+  invalidate(): void {
+    for (const entry of this.entries) {
+      entry.cachedWidth = undefined;
+      entry.cachedLines = undefined;
+    }
+  }
+
+  setMessages(messages: ChatMessage[]) {
+    this.entries = messages.map((message) => ({
+      message: {
+        ...message,
+        timestamp: message.timestamp ?? new Date(),
+      },
+    }));
+    this.scrollOffset = 0;
+    this.scrollToBottom();
+    this.invalidate();
+  }
+
+  clearMessages() {
+    this.entries = [];
+    this.scrollOffset = 0;
+    this.invalidate();
+  }
 
   addMessage(msg: ChatMessage | string) {
-    if (typeof msg === "string") {
-      this.messages.push({
-        role: "user",
-        content: msg,
-        timestamp: new Date(),
-      });
-    } else {
-      this.messages.push({
-        ...msg,
-        timestamp: msg.timestamp ?? new Date(),
-      });
-    }
+    const chatMsg: ChatMessage =
+      typeof msg === "string"
+        ? { role: "user", content: msg, timestamp: new Date() }
+        : { ...msg, timestamp: msg.timestamp ?? new Date() };
+
+    this.entries.push({ message: chatMsg });
 
     if (this.autoScroll) {
       this.scrollToBottom();
@@ -120,9 +156,15 @@ export class MessageList implements Component {
   }
 
   upsertMessage(msg: ChatMessage) {
-    if (msg.id && this.messages.some((message) => message.id === msg.id)) {
-      this.updateMessage(msg.id, msg.content, msg.status ?? "streaming");
-      return;
+    if (msg.id) {
+      const existing = this.entries.find((e) => e.message.id === msg.id);
+      if (existing) {
+        existing.message.content = msg.content;
+        existing.message.status = msg.status ?? "streaming";
+        existing.cachedWidth = undefined;
+        existing.cachedLines = undefined;
+        return;
+      }
     }
     this.addMessage(msg);
   }
@@ -131,19 +173,16 @@ export class MessageList implements Component {
     const theme = getTheme();
     const header = formatToolHeader(tool.name, tool.args);
     const extraArgs = formatToolExtraArgs(tool.args);
-    const output = tool.shellOutput?.trimEnd()
-      || tool.partialResult?.trimEnd()
-      || stringifyDisplayValue(tool.result);
+    const output =
+      tool.shellOutput?.trimEnd() ||
+      tool.partialResult?.trimEnd() ||
+      stringifyDisplayValue(tool.result);
 
     const statusLine = theme.muted(toolStatusText[tool.status]);
 
     const contentLines: string[] = [header];
-    if (extraArgs) {
-      contentLines.push(extraArgs);
-    }
-    if (output) {
-      contentLines.push(output);
-    }
+    if (extraArgs) contentLines.push(extraArgs);
+    if (output) contentLines.push(output);
     contentLines.push(statusLine);
 
     this.upsertMessage({
@@ -151,19 +190,25 @@ export class MessageList implements Component {
       role: "tool",
       toolName: tool.name,
       content: contentLines.join("\n"),
-      status: tool.status === "error" || tool.status === "declined"
-        ? "error"
-        : tool.status === "completed"
+      status:
+        tool.status === "error" || tool.status === "declined"
+          ? "error"
+          : tool.status === "completed"
           ? "done"
           : "pending",
     });
   }
 
-  updateLastMessage(content: string, status: "streaming" | "done" | "error" = "streaming") {
-    if (this.messages.length === 0) return;
-    const last = this.messages[this.messages.length - 1];
-    last.content = content;
-    last.status = status;
+  updateLastMessage(
+    content: string,
+    status: "streaming" | "done" | "error" = "streaming",
+  ) {
+    if (this.entries.length === 0) return;
+    const last = this.entries[this.entries.length - 1];
+    last.message.content = content;
+    last.message.status = status;
+    last.cachedWidth = undefined;
+    last.cachedLines = undefined;
 
     if (this.autoScroll) {
       this.scrollToBottom();
@@ -175,16 +220,12 @@ export class MessageList implements Component {
     content: string,
     status: "pending" | "streaming" | "done" | "error" = "streaming",
   ) {
-    let message: ChatMessage | undefined;
-    for (let index = this.messages.length - 1; index >= 0; index -= 1) {
-      if (this.messages[index]?.id === id) {
-        message = this.messages[index];
-        break;
-      }
-    }
-    if (!message) return;
-    message.content = content;
-    message.status = status;
+    const entry = this.entries.find((e) => e.message.id === id);
+    if (!entry) return;
+    entry.message.content = content;
+    entry.message.status = status;
+    entry.cachedWidth = undefined;
+    entry.cachedLines = undefined;
 
     if (this.autoScroll) {
       this.scrollToBottom();
@@ -192,7 +233,7 @@ export class MessageList implements Component {
   }
 
   clear() {
-    this.messages = [];
+    this.entries = [];
     this.scrollOffset = 0;
     this.autoScroll = true;
   }
@@ -220,7 +261,7 @@ export class MessageList implements Component {
   }
 
   getMessages(): ChatMessage[] {
-    return this.messages;
+    return this.entries.map((e) => e.message);
   }
 
   private formatRolePrefix(msg: ChatMessage): string {
@@ -237,71 +278,94 @@ export class MessageList implements Component {
     }
   }
 
-  render(width: number): string[] {
+  private renderMessage(entry: CachedEntry, width: number): string[] {
     const theme = getTheme();
     const availableWidth = Math.max(width, 20);
+    const msg = entry.message;
+    const prefix = this.formatRolePrefix(msg);
+    const lines: string[] = [];
 
-    if (this.messages.length === 0) {
+    if (msg.role === "assistant") {
+      const markdown = new Markdown(
+        msg.content,
+        0,
+        0,
+        createMarkdownTheme(),
+        { color: theme.assistant },
+      );
+      const renderedLines = markdown.render(Math.max(1, availableWidth - 2));
+      renderedLines.forEach((line, index) => {
+        const combined = `${index === 0 ? prefix : "  "}${line}`;
+        lines.push(truncateToWidth(combined, availableWidth));
+      });
+      lines.push("");
+      return lines;
+    }
+
+    if (msg.role === "tool") {
+      const contentLines = msg.content.split(/\r?\n/);
+      if (contentLines.length > 0) {
+        const firstLineWrapped = wrapTextWithAnsi(
+          `${prefix}${contentLines[0]}`,
+          availableWidth,
+        );
+        for (const wLine of firstLineWrapped) {
+          lines.push(truncateToWidth(wLine, availableWidth));
+        }
+        for (let i = 1; i < contentLines.length; i++) {
+          const restWrapped = wrapTextWithAnsi(
+            `  ${contentLines[i]}`,
+            availableWidth,
+          );
+          for (const wLine of restWrapped) {
+            lines.push(truncateToWidth(wLine, availableWidth));
+          }
+        }
+      }
+      lines.push("");
+      return lines;
+    }
+
+    const contentLines = msg.content.split(/\r?\n/);
+    if (contentLines.length > 0) {
+      const firstLineWrapped = wrapTextWithAnsi(
+        `${prefix}${contentLines[0]}`,
+        availableWidth,
+      );
+      for (const wLine of firstLineWrapped) {
+        lines.push(truncateToWidth(wLine, availableWidth));
+      }
+      for (let i = 1; i < contentLines.length; i++) {
+        const restWrapped = wrapTextWithAnsi(
+          `  ${contentLines[i]}`,
+          availableWidth,
+        );
+        for (const wLine of restWrapped) {
+          lines.push(truncateToWidth(wLine, availableWidth));
+        }
+      }
+    }
+    lines.push("");
+    return lines;
+  }
+
+  render(width: number): string[] {
+    if (this.entries.length === 0) {
       return [];
     }
 
+    const availableWidth = Math.max(width, 20);
     const allLines: string[] = [];
 
-    for (const msg of this.messages) {
-      const prefix = this.formatRolePrefix(msg);
-
-      if (msg.role === "assistant") {
-        const markdown = new Markdown(
-          msg.content,
-          0,
-          0,
-          createMarkdownTheme(),
-          { color: theme.assistant },
-        );
-        const renderedLines = markdown.render(Math.max(1, availableWidth - 2));
-        renderedLines.forEach((line, index) => {
-          const combined = `${index === 0 ? prefix : "  "}${line}`;
-          allLines.push(truncateToWidth(combined, availableWidth));
-        });
-        allLines.push("");
-        continue;
+    for (const entry of this.entries) {
+      if (entry.cachedLines && entry.cachedWidth === availableWidth) {
+        allLines.push(...entry.cachedLines);
+      } else {
+        const lines = this.renderMessage(entry, availableWidth);
+        entry.cachedLines = lines;
+        entry.cachedWidth = availableWidth;
+        allLines.push(...lines);
       }
-
-      if (msg.role === "tool") {
-        const contentLines = msg.content.split(/\r?\n/);
-        if (contentLines.length > 0) {
-          const firstLineWrapped = wrapTextWithAnsi(`${prefix}${contentLines[0]}`, availableWidth);
-          for (const wLine of firstLineWrapped) {
-            allLines.push(truncateToWidth(wLine, availableWidth));
-          }
-          for (let i = 1; i < contentLines.length; i++) {
-            const restWrapped = wrapTextWithAnsi(`  ${contentLines[i]}`, availableWidth);
-            for (const wLine of restWrapped) {
-              allLines.push(truncateToWidth(wLine, availableWidth));
-            }
-          }
-        }
-        allLines.push("");
-        continue;
-      }
-
-      // Giữ các role còn lại cùng kiểu inline, không tách prefix thành một dòng riêng.
-      const contentLines = msg.content.split(/\r?\n/);
-      if (contentLines.length > 0) {
-        const firstLineWrapped = wrapTextWithAnsi(`${prefix}${contentLines[0]}`, availableWidth);
-        for (const wLine of firstLineWrapped) {
-          allLines.push(wLine);
-        }
-        for (let i = 1; i < contentLines.length; i++) {
-          // Thụt lề các dòng tiếp theo cho đồng bộ (có thể thay đổi số khoảng trắng tùy ý)
-          const restWrapped = wrapTextWithAnsi(`  ${contentLines[i]}`, availableWidth);
-          for (const wLine of restWrapped) {
-            allLines.push(wLine);
-          }
-        }
-      }
-
-      allLines.push(""); 
     }
 
     return allLines;

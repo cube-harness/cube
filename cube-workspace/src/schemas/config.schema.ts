@@ -64,15 +64,8 @@ const observationalMemory = z.object({
 export const ConfigSchema = z.object({
   version: z.literal(1),
   model: z.string().min(1),
-  model_config: ModelConfigSchema.default({}),
+  model_config: ModelConfigSchema.nullish().transform((val) => val ?? {}),
   fallback_model: z.string().min(1).nullable(),
-  providers: z.object({
-    ollama: z.object({
-      base_url: z.string().url(),
-    }).strict(),
-  }).strict().default({
-    ollama: { base_url: "http://127.0.0.1:11434/api" },
-  }),
   theme: z.enum(["dark", "light"]),
   telemetry: z.boolean(),
   soul: z.object({
@@ -86,7 +79,7 @@ export const ConfigSchema = z.object({
   permissions: z.object({
     require_approval_for: z.array(z.string().min(1)),
   }).strict(),
-}).strict();
+});
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;

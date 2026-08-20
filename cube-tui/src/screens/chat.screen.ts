@@ -1,4 +1,4 @@
-import { Container, Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
 import { Banner } from "../components/banner.js";
 import { InfoBox } from "../components/info-box.js";
 import { MessageList } from "../components/message-list.js";
@@ -23,14 +23,12 @@ export const mountChatScreen = (
   const footer = new Footer();
   const promptEditor = new PromptEditor({ tui, ...options });
   const workingIndicator = new WorkingIndicator(tui);
-  const inlineControlHost = new Container();
 
   tui.addChild(banner);
   tui.addChild(infoBox);
   tui.addChild(messageList);
   tui.addChild(workingIndicator);
   tui.addChild(promptEditor);
-  tui.addChild(inlineControlHost);
   tui.addChild(footer);
   tui.setFocus(promptEditor);
 
@@ -54,7 +52,6 @@ export const mountChatScreen = (
     messageList,
     workingIndicator,
     promptEditor,
-    inlineControlHost,
     footer,
   };
 };

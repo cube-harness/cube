@@ -1,90 +1,91 @@
 import {
   CombinedAutocompleteProvider,
-  CURSOR_MARKER,
   Editor,
-  Key,
-  matchesKey,
+  type Component,
+  type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
-import type { SlashCommandSuggestion, TuiAction } from "../index.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
+import type { SlashCommandSuggestion, TuiAction } from "../index.js";
 
 export interface PromptEditorOptions {
   tui: TUI;
   onAction: (action: TuiAction) => void;
-  slashCommands: SlashCommandSuggestion[];
-  basePath: string;
+  slashCommands?: SlashCommandSuggestion[];
+  basePath?: string;
 }
 
-const INVERSE_ON = "\x1b[7m";
-const SGR_RESET = "\x1b[0m";
+export class PromptEditor implements Component, Focusable {
+  private readonly editor: Editor;
 
-export const removeSoftwareCursorAfterMarker = (line: string): string => {
-  const markerIndex = line.indexOf(CURSOR_MARKER);
-  if (markerIndex < 0) return line;
+  constructor(options: PromptEditorOptions) {
+    const theme = createEditorTheme();
+    this.editor = new Editor(options.tui, theme);
 
-  const inverseIndex = markerIndex + CURSOR_MARKER.length;
-  if (!line.startsWith(INVERSE_ON, inverseIndex)) return line;
+    if (options.slashCommands && options.slashCommands.length > 0) {
+      const autocompleteCommands = options.slashCommands.map((cmd) => ({
+        name: cmd.name.startsWith("/") ? cmd.name.slice(1) : cmd.name,
+        description: cmd.description,
+      }));
+      const provider = new CombinedAutocompleteProvider(
+        autocompleteCommands,
+        options.basePath ?? process.cwd(),
+      );
+      this.editor.setAutocompleteProvider(provider);
+    }
 
-  const resetIndex = line.indexOf(SGR_RESET, inverseIndex + INVERSE_ON.length);
-  if (resetIndex < 0) return line;
+    this.editor.onSubmit = (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
 
-  return `${line.slice(0, inverseIndex)}${line.slice(
-    inverseIndex + INVERSE_ON.length,
-    resetIndex,
-  )}${line.slice(resetIndex + SGR_RESET.length)}`;
-};
+      if (trimmed.startsWith("/")) {
+        const spaceIndex = trimmed.indexOf(" ");
+        const name = (spaceIndex === -1
+          ? trimmed
+          : trimmed.slice(0, spaceIndex)) as `/${string}`;
+        const argument =
+          spaceIndex === -1 ? "" : trimmed.slice(spaceIndex + 1).trim();
 
-export class PromptEditor extends Editor {
-  private isVisible = true;
-
-  setVisible(visible: boolean): void {
-    this.isVisible = visible;
-  }
-
-  constructor(private readonly options: PromptEditorOptions) {
-    super(options.tui, createEditorTheme(), {
-      paddingX: 1,
-      autocompleteMaxVisible: 8,
-    });
-
-    this.setAutocompleteProvider(new CombinedAutocompleteProvider(
-      options.slashCommands.map(({ name, description }) => ({
-        name: name.slice(1),
-        description,
-      })),
-      options.basePath,
-    ));
-
-    this.onSubmit = (text) => {
-      const value = text.trim();
-      if (!value) return;
-
-      this.addToHistory(value);
-      if (value.startsWith("/")) {
-        const [name, ...argumentParts] = value.split(/\s+/);
-        this.options.onAction({
+        options.onAction({
           type: "command_submit",
-          name: name as `/${string}`,
-          argument: argumentParts.join(" "),
+          name,
+          argument,
         });
       } else {
-        this.options.onAction({ type: "prompt_submit", content: value });
+        options.onAction({
+          type: "prompt_submit",
+          content: trimmed,
+        });
       }
-      this.setText("");
+      this.editor.setText("");
     };
   }
 
-  override handleInput(data: string): void {
-    if (matchesKey(data, Key.ctrl("c"))) {
-      this.options.onAction({ type: "cancel" });
-      return;
-    }
-    super.handleInput(data);
+  get focused(): boolean {
+    return this.editor.focused;
   }
 
-  override render(width: number): string[] {
-    if (!this.isVisible) return [];
-    return super.render(width).map(removeSoftwareCursorAfterMarker);
+  set focused(value: boolean) {
+    this.editor.focused = value;
+  }
+
+  render(width: number): string[] {
+    return this.editor.render(width);
+  }
+
+  handleInput(data: string): void {
+    this.editor.handleInput(data);
+  }
+
+  invalidate(): void {
+    this.editor.invalidate?.();
+  }
+
+  setText(text: string): void {
+    this.editor.setText(text);
+  }
+
+  getText(): string {
+    return this.editor.getText();
   }
 }
