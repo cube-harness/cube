@@ -5,13 +5,17 @@ import { getTheme } from "../themes/color.schema.js";
 
 export interface UsageBoxContent {
   model: string;
+  reasoningEffort?: string;
   capabilities?: string[];
   contextLimit: number;
   maxOutput?: number;
   promptTokens: number;
   completionTokens: number;
+  reasoningTokens?: number;
   cachedTokens?: number;
+  cacheCreationTokens?: number;
   totalTokens: number;
+  threadTitle?: string;
   threadId: string;
 }
 
@@ -34,13 +38,17 @@ export class UsageBox implements Component {
 
     const {
       model,
+      reasoningEffort,
       capabilities = [],
       contextLimit,
       maxOutput,
       promptTokens,
       completionTokens,
+      reasoningTokens,
       cachedTokens = 0,
+      cacheCreationTokens = 0,
       totalTokens,
+      threadTitle,
       threadId,
     } = this.content;
 
@@ -56,8 +64,18 @@ export class UsageBox implements Component {
     const capText = capabilities.length > 0 ? capabilities.join(", ") : "none";
     const maxOutputText = maxOutput ? ` (Max Output: ${maxOutput.toLocaleString()} tokens)` : "";
 
+    const modelDisplay =
+      reasoningEffort && reasoningEffort !== "none"
+        ? `${model} (${reasoningEffort})`
+        : model;
+
+    let cachedDisplay = `${cachedTokens.toLocaleString()}`;
+    if (cacheCreationTokens > 0) {
+      cachedDisplay += ` (Read: ${cachedTokens.toLocaleString()}, Write: ${cacheCreationTokens.toLocaleString()})`;
+    }
+
     const contentLines: string[] = [
-      `${theme.primary("Model            :")} ${model}`,
+      `${theme.primary("Model            :")} ${modelDisplay}`,
       `${theme.primary("Capabilities     :")} ${capText}`,
       `${theme.primary("Context Limit    :")} ${contextLimit.toLocaleString()} tokens${maxOutputText}`,
       `${theme.primary("Context Window   :")} ${progressBar} ${percent.toFixed(1)}% (${promptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`,
@@ -65,10 +83,25 @@ export class UsageBox implements Component {
       "",
       `${theme.primary("Prompt Tokens    :")} ${promptTokens.toLocaleString()}`,
       `${theme.primary("Completion Tokens:")} ${completionTokens.toLocaleString()}`,
-      `${theme.primary("Cached Tokens    :")} ${cachedTokens.toLocaleString()}`,
-      `${theme.primary("Total Tokens     :")} ${totalTokens.toLocaleString()}`,
-      `${theme.primary("Thread ID        :")} ${threadId}`,
     ];
+
+    if (reasoningTokens !== undefined && reasoningTokens > 0) {
+      contentLines.push(
+        `${theme.primary("Reasoning Tokens :")} ${reasoningTokens.toLocaleString()}`,
+      );
+    }
+
+    contentLines.push(
+      `${theme.primary("Cached Tokens    :")} ${cachedDisplay}`,
+      `${theme.primary("Total Tokens     :")} ${totalTokens.toLocaleString()}`,
+      "",
+    );
+
+    if (threadTitle) {
+      contentLines.push(`${theme.primary("Thread Title     :")} ${threadTitle}`);
+    }
+
+    contentLines.push(`${theme.primary("Thread ID        :")} ${threadId}`);
 
     let maxTextWidth = 0;
     for (const line of contentLines) {

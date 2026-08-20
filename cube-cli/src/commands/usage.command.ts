@@ -15,6 +15,7 @@ export const createUsageCommandHandler = (
 ): CommandHandler => async () => {
   const config = await ConfigStore(deps.home).read().catch(() => null);
   const activeModelId = config?.model || "unknown";
+  const reasoningEffort = config?.model_config?.reasoning_effort;
 
   const modelManager = new ModelManager(deps.home);
   const catalog = await modelManager.getCatalog().catch(() => null);
@@ -28,23 +29,51 @@ export const createUsageCommandHandler = (
   const contextLimit = foundModel?.limit?.context ?? 128_000;
   const maxOutput = foundModel?.limit?.output;
 
-  const usage = deps.session.getTokenUsage?.() ?? {
+  const usage = (deps.session.getTokenUsage?.() ?? {
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
     cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    reasoningTokens: 0,
+  }) as {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cachedInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    reasoningTokens?: number;
   };
+
+  const activeThreadId = deps.session.thread.getId();
+  let threadTitle: string | undefined;
+
+  if (activeThreadId) {
+    try {
+      const threads = await deps.session.thread.list();
+      const currentThread = threads?.find(
+        (t: { id: string; title?: string }) => t.id === activeThreadId,
+      );
+      threadTitle = currentThread?.title;
+    } catch {
+      // ignore thread list errors
+    }
+  }
 
   const output = renderUsageBoxToString({
     model: activeModelId,
+    reasoningEffort,
     capabilities,
     contextLimit,
     maxOutput,
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
+    reasoningTokens: usage.reasoningTokens,
     cachedTokens: usage.cachedInputTokens ?? 0,
+    cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,
     totalTokens: usage.totalTokens,
-    threadId: deps.session.thread.getId() ?? "new thread",
+    threadTitle,
+    threadId: activeThreadId ?? "new thread",
   });
 
   deps.showMessage(output);
