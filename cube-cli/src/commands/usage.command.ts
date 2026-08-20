@@ -43,7 +43,15 @@ export const createUsageCommandHandler = (
     cachedInputTokens?: number;
     cacheCreationInputTokens?: number;
     reasoningTokens?: number;
+    raw?: {
+      inputTokens?: { total?: number };
+      raw?: { promptTokenCount?: number };
+    };
   };
+
+  const activeTurnTokens =
+    usage.raw?.inputTokens?.total ??
+    usage.raw?.raw?.promptTokenCount;
 
   const activeThreadId = deps.session.thread.getId();
   let threadTitle: string | undefined;
@@ -66,6 +74,7 @@ export const createUsageCommandHandler = (
     capabilities,
     contextLimit,
     maxOutput,
+    activeTurnTokens,
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
     reasoningTokens: usage.reasoningTokens,

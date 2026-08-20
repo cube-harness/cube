@@ -9,6 +9,7 @@ export interface UsageBoxContent {
   capabilities?: string[];
   contextLimit: number;
   maxOutput?: number;
+  activeTurnTokens?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens?: number;
@@ -42,6 +43,7 @@ export class UsageBox implements Component {
       capabilities = [],
       contextLimit,
       maxOutput,
+      activeTurnTokens,
       promptTokens,
       completionTokens,
       reasoningTokens,
@@ -52,14 +54,19 @@ export class UsageBox implements Component {
       threadId,
     } = this.content;
 
+    const currentContextTokens =
+      activeTurnTokens !== undefined && activeTurnTokens > 0
+        ? activeTurnTokens
+        : promptTokens;
+
     const percent = Math.min(
       100,
-      Math.max(0, (promptTokens / (contextLimit || 1)) * 100),
+      Math.max(0, (currentContextTokens / (contextLimit || 1)) * 100),
     );
     const filledBars = Math.round((percent / 100) * 20);
     const emptyBars = 20 - filledBars;
     const progressBar = `[${"█".repeat(filledBars)}${"░".repeat(emptyBars)}]`;
-    const remainingContext = Math.max(0, contextLimit - promptTokens);
+    const remainingContext = Math.max(0, contextLimit - currentContextTokens);
 
     const capText = capabilities.length > 0 ? capabilities.join(", ") : "none";
     const maxOutputText = maxOutput ? ` (Max Output: ${maxOutput.toLocaleString()} tokens)` : "";
@@ -74,14 +81,21 @@ export class UsageBox implements Component {
       cachedDisplay += ` (Read: ${cachedTokens.toLocaleString()}, Write: ${cacheCreationTokens.toLocaleString()})`;
     }
 
+    const promptDisplay =
+      activeTurnTokens !== undefined &&
+      activeTurnTokens > 0 &&
+      activeTurnTokens !== promptTokens
+        ? `${promptTokens.toLocaleString()} (Active Turn: ${activeTurnTokens.toLocaleString()})`
+        : promptTokens.toLocaleString();
+
     const contentLines: string[] = [
       `${theme.primary("Model            :")} ${modelDisplay}`,
       `${theme.primary("Capabilities     :")} ${capText}`,
       `${theme.primary("Context Limit    :")} ${contextLimit.toLocaleString()} tokens${maxOutputText}`,
-      `${theme.primary("Context Window   :")} ${progressBar} ${percent.toFixed(1)}% (${promptTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`,
+      `${theme.primary("Context Window   :")} ${progressBar} ${percent.toFixed(1)}% (${currentContextTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`,
       `${theme.primary("Remaining Space  :")} ${remainingContext.toLocaleString()} tokens`,
       "",
-      `${theme.primary("Prompt Tokens    :")} ${promptTokens.toLocaleString()}`,
+      `${theme.primary("Prompt Tokens    :")} ${promptDisplay}`,
       `${theme.primary("Completion Tokens:")} ${completionTokens.toLocaleString()}`,
     ];
 
