@@ -5,6 +5,7 @@ import {
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
+import { getTheme } from "../themes/color.schema.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
 import type { SlashCommandSuggestion, TuiAction } from "../index.js";
 
@@ -21,6 +22,7 @@ export class PromptEditor implements Component, Focusable {
   constructor(options: PromptEditorOptions) {
     const theme = createEditorTheme();
     this.editor = new Editor(options.tui, theme);
+    this.editor.setPaddingX(2);
 
     if (options.slashCommands && options.slashCommands.length > 0) {
       const autocompleteCommands = options.slashCommands.map((cmd) => ({
@@ -70,7 +72,19 @@ export class PromptEditor implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    return this.editor.render(width);
+    const lines = this.editor.render(width);
+    const theme = getTheme();
+    const prefix = theme.primary.bold(">");
+
+    if (lines.length >= 3 && lines[1]) {
+      if (lines[1].startsWith("  ")) {
+        lines[1] = `${prefix} ${lines[1].slice(2)}`;
+      } else if (lines[1].startsWith(" ")) {
+        lines[1] = `${prefix}${lines[1].slice(1)}`;
+      }
+    }
+
+    return lines;
   }
 
   handleInput(data: string): void {
