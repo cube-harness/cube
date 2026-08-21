@@ -170,7 +170,8 @@ export class ModelPickerComponent extends Container implements Component, Focusa
       theme.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
     );
 
-    const currentEffort = this.options.currentReasoningEffort || "medium";
+    const isCurrentModel = model.modelId === this.options.currentModelId;
+    const currentEffort = isCurrentModel ? this.options.currentReasoningEffort : undefined;
     const efforts: Array<{ value: ReasoningEffort; label: string; desc: string }> = [
       { value: "none", label: "none - Disable reasoning", desc: "No thinking tokens" },
       { value: "low", label: "low - Fast reasoning", desc: "Light thinking pass" },
@@ -181,7 +182,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
 
     const items: SelectItem[] = efforts.map((e) => ({
       value: e.value,
-      label: `${e.label}${e.value === currentEffort ? " (Current)" : ""}`,
+      label: `${e.label}${currentEffort && e.value === currentEffort ? " (Current)" : ""}`,
       description: e.desc,
     }));
 
@@ -246,6 +247,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     }
 
     // 3. Render Active Step List
+    lines.push("")
     if (this.step === "reasoning" && this.reasoningList) {
       lines.push(...this.reasoningList.render(width));
     } else if (this.step === "model" && this.modelList) {
@@ -253,7 +255,9 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     } else {
       lines.push(...this.providerList.render(width));
     }
+
     // 4. Render Hint
+    lines.push("")
     lines.push(...this.hint.render(width));
 
     return lines;

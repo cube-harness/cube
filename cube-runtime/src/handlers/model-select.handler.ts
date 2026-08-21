@@ -13,14 +13,19 @@ export interface ModelSelectHandlerDeps {
 export const createModelSelectHandler = (deps: ModelSelectHandlerDeps) => {
   return async (modelId: string, reasoningEffort?: ReasoningEffort) => {
     // 1. Persist model and reasoning_effort to config.yaml
-    await ConfigStore(deps.home).update((current) => ({
-      ...current,
-      model: modelId,
-      model_config: {
-        ...current.model_config,
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-      },
-    }));
+    await ConfigStore(deps.home).update((current) => {
+      const nextModelConfig = { ...current.model_config };
+      if (reasoningEffort && reasoningEffort !== "none") {
+        nextModelConfig.reasoning_effort = reasoningEffort;
+      } else {
+        delete nextModelConfig.reasoning_effort;
+      }
+      return {
+        ...current,
+        model: modelId,
+        model_config: Object.keys(nextModelConfig).length > 0 ? nextModelConfig : {},
+      };
+    });
 
     // 2. Update Mastra Agent Runtime Model
     updateCubeAgentModel(deps.agent, modelId, reasoningEffort);

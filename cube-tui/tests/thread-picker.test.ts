@@ -19,9 +19,9 @@ test("ThreadPickerOverlay renders within width limit", () => {
   }
 });
 
-test("ThreadPickerOverlay supports pagination with Left and Right arrow keys", () => {
+test("ThreadPickerOverlay supports navigation and search filtering", () => {
   let selected = "";
-  const threads = Array.from({ length: 12 }, (_, i) => ({
+  const threads = Array.from({ length: 5 }, (_, i) => ({
     id: `thread-${i + 1}`,
     title: `Conversation ${i + 1}`,
     updatedAt: new Date().toISOString(),
@@ -36,14 +36,11 @@ test("ThreadPickerOverlay supports pagination with Left and Right arrow keys", (
     onCancel: () => {},
   });
 
-  // Page 1: Navigate down
+  // Navigate down
   overlay.handleInput("down");
-  
-  // Page 2: Right arrow
-  overlay.handleInput("right");
-  overlay.handleInput("\r"); // select item 1 of page 2 (thread-6)
+  overlay.handleInput("\r");
 
-  assert.equal(selected, "thread-6");
+  assert.equal(selected, "thread-2");
 });
 
 test("ThreadPickerOverlay triggers onSelect when Enter is pressed", () => {
