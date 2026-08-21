@@ -313,6 +313,8 @@ export const startTui = async (): Promise<void> => {
     },
   });
 
+  await runtime.start();
+
   const app = CubeApp({
     onAction: (action) => {
       void runtime.dispatch(action);
@@ -326,7 +328,7 @@ export const startTui = async (): Promise<void> => {
   });
 
   app.start();
-  await runtime.start();
+  runtime.emitInitialState();
 };
 
 const isMainModule = (): boolean => {

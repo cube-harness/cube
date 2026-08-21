@@ -65,6 +65,8 @@ export class CubeRuntime {
   private readonly workspacePath: string;
   private plannedThreadId: `${string}-${string}-${string}-${string}-${string}`;
   private session?: any;
+  private config?: any;
+  private workspacePaths?: any;
   private readonly onExit?: () => void;
 
   constructor(options: CubeRuntimeOptions = {}) {
@@ -94,11 +96,11 @@ export class CubeRuntime {
     await createBootstrap(home).run();
 
     const workspace = Workspace(home, this.workspacePath);
-    const workspacePaths = await workspace.getPaths();
-    const config = await ConfigStore(home).read();
+    this.workspacePaths = await workspace.getPaths();
+    this.config = await ConfigStore(home).read();
 
     this.session = await cubeController.createSession({
-      resourceId: workspacePaths.root,
+      resourceId: this.workspacePaths.root,
     });
 
     // Startup Normalization
@@ -327,11 +329,16 @@ export class CubeRuntime {
     });
 
     // Emit initial info event
+    this.emitInitialState();
+  }
+
+  public emitInitialState(): void {
+    if (!this.config || !this.workspacePaths) return;
     this.dispatcher.emit({
       type: "state:info",
       info: {
-        model: config.model,
-        workspace: workspacePaths.root,
+        model: this.config.model,
+        workspace: this.workspacePaths.root,
         agentMd: "AGENT.md (active)",
         threadId: "default",
       },
