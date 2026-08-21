@@ -40,16 +40,6 @@ export const loadEnv = (searchDirs?: string[]): void => {
       }
     }
   }
-
-  // Normalize provider environment variable aliases for AI SDK compatibility
-  if (process.env.GOOGLE_API_KEY) {
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GOOGLE_API_KEY;
-    }
-    if (!process.env.GEMINI_API_KEY) {
-      process.env.GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
-    }
-  }
 };
 
 export class Bootstrap {
