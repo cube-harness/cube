@@ -240,11 +240,9 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     // 2. Render Search Bar (only in provider and model steps)
     if (this.step !== "reasoning") {
       lines.push(...this.searchBar.render(width));
-      lines.push("");
     } else {
       const theme = getTheme();
       lines.push(theme.muted("Select reasoning level:"));
-      lines.push("");
     }
 
     // 3. Render Active Step List
@@ -255,9 +253,6 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     } else {
       lines.push(...this.providerList.render(width));
     }
-
-    lines.push("");
-
     // 4. Render Hint
     lines.push(...this.hint.render(width));
 

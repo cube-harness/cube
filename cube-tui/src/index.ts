@@ -304,15 +304,18 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
 };
 
 export const startTui = async (): Promise<void> => {
+  let app: TuiApp;
+
   const runtime = new CubeRuntime({
     onExit: () => {
+      app?.stop();
       process.exit(0);
     },
   });
 
   await runtime.start();
 
-  const app = CubeApp({
+  app = CubeApp({
     onAction: (action) => {
       void runtime.dispatch(action);
     },
@@ -322,6 +325,16 @@ export const startTui = async (): Promise<void> => {
 
   runtime.subscribe((event) => {
     app.handleEvent(event);
+  });
+
+  process.once("SIGTERM", () => {
+    app?.stop();
+    process.exit(0);
+  });
+
+  process.once("SIGINT", () => {
+    app?.stop();
+    process.exit(0);
   });
 
   app.start();
