@@ -81,6 +81,36 @@ export interface TuiApp {
   ) => Promise<ModelSelectionResult | null>;
 }
 
+export type TerminalCursorShape =
+  | "blinking-block"
+  | "block"
+  | "blinking-underline"
+  | "underline"
+  | "blinking-bar"
+  | "bar";
+
+export const setTerminalCursorShape = (
+  shape: TerminalCursorShape = "blinking-bar",
+): void => {
+  const codes: Record<TerminalCursorShape, string> = {
+    "blinking-block": "\x1b[1 q",
+    block: "\x1b[2 q",
+    "blinking-underline": "\x1b[3 q",
+    underline: "\x1b[4 q",
+    "blinking-bar": "\x1b[5 q",
+    bar: "\x1b[6 q",
+  };
+  try {
+    process.stdout.write(codes[shape] || "\x1b[5 q");
+  } catch {}
+};
+
+export const resetTerminalCursorShape = (): void => {
+  try {
+    process.stdout.write("\x1b[0 q");
+  } catch {}
+};
+
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
@@ -102,9 +132,11 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
 
   return {
     start: () => {
+      setTerminalCursorShape("blinking-bar");
       tui.start();
     },
     stop: () => {
+      resetTerminalCursorShape();
       tui.stop();
     },
     addMessage: (msg: ChatMessage | string) => {
