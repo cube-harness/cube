@@ -325,10 +325,3 @@ export const startTui = async (): Promise<void> => {
   app.start();
   await runtime.start();
 };
-
-if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
-  startTui().catch((err) => {
-    console.error("Fatal TUI Error:", err);
-    process.exit(1);
-  });
-}
