@@ -19,12 +19,14 @@ import { createRenameCommandHandler } from "./commands/rename.command.js";
 import { createDeleteCommandHandler } from "./commands/delete.command.js";
 import { createForkCommandHandler } from "./commands/fork.command.js";
 import { createUsageCommandHandler } from "./commands/usage.command.js";
+import { createThemeCommandHandler } from "./commands/theme.command.js";
 
 import { createPromptHandler } from "./handlers/prompt.handler.js";
 import { createCommandHandler } from "./handlers/command.handler.js";
 import { createCancelHandler } from "./handlers/cancel.handler.js";
 import { createModelSelectHandler } from "./handlers/model-select.handler.js";
 import { createThreadSelectHandler } from "./handlers/thread-select.handler.js";
+import { createThemeSelectHandler } from "./handlers/theme-select.handler.js";
 
 export interface CubeRuntimeOptions {
   workspacePath?: string;
@@ -81,6 +83,10 @@ export class CubeRuntime {
 
   get suggestions(): SlashCommandSuggestion[] {
     return this.commandManager.suggestions;
+  }
+
+  get theme(): string {
+    return this.config?.theme || "default";
   }
 
   subscribe(listener: CubeEventListener): () => void {
@@ -218,6 +224,15 @@ export class CubeRuntime {
           dispatcher: this.dispatcher,
         }),
       },
+      {
+        name: "/theme",
+        description: "Change color scheme (/theme [name])",
+        handler: createThemeCommandHandler({
+          home,
+          dispatcher: this.dispatcher,
+          isTurnActive: () => this.session.run.isRunning(),
+        }),
+      },
     ]);
 
     // Handlers
@@ -251,6 +266,11 @@ export class CubeRuntime {
       dispatcher: this.dispatcher,
     });
 
+    const themeSelectHandler = createThemeSelectHandler({
+      home,
+      dispatcher: this.dispatcher,
+    });
+
     // Action Router
     this.dispatcher.setActionHandler(async (action: CubeAction) => {
       switch (action.type) {
@@ -262,6 +282,8 @@ export class CubeRuntime {
           return modelSelectHandler(action.modelId, action.reasoningEffort);
         case "thread:select":
           return threadSelectHandler(action.threadId);
+        case "theme:select":
+          return themeSelectHandler(action.themeId);
         case "turn:cancel":
           return cancelHandler();
         case "app:exit":

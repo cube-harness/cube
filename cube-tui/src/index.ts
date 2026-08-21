@@ -17,18 +17,22 @@ import {
   type ModelItem,
   type ModelSelectionResult,
   type ReasoningEffort,
+  type ThemeItem,
 } from "@cube/runtime";
 
 import { mountChatScreen } from "./screens/chat.screen.js";
 import { ThreadPickerOverlay, type ThreadPickerViewItem } from "./components/thread-picker.js";
 import { ModelPickerComponent } from "./components/model-picker.js";
+import { ThemePickerOverlay, type ThemePickerItem } from "./components/theme-picker.js";
 import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
+import { setTheme, getTheme } from "./themes/color.schema.js";
 
 export type {
   CubeAction,
   CubeEvent,
   SystemInfo,
   ThreadSummary,
+  ThemeItem,
   UsageBoxMetrics,
   SlashCommandSuggestion,
   ChatMessage,
@@ -42,6 +46,7 @@ export type {
 export type { ThreadPickerViewItem } from "./components/thread-picker.js";
 export { ThreadPickerOverlay } from "./components/thread-picker.js";
 export { ModelPickerComponent } from "./components/model-picker.js";
+export { ThemePickerOverlay, type ThemePickerItem } from "./components/theme-picker.js";
 export { SearchBar, type SearchBarOptions } from "./components/search-bar.js";
 export { KeyHint, type KeyHintItem } from "./components/key-hint.js";
 export { WorkingIndicator } from "./components/working-indicator.js";
@@ -57,6 +62,11 @@ export interface OpenModelPickerOptions {
   providers: ProviderGroup[];
   currentModelId?: string;
   currentReasoningEffort?: ReasoningEffort;
+}
+
+export interface OpenThemePickerOptions {
+  themes: ThemePickerItem[];
+  currentThemeId: string;
 }
 
 export interface CreateAppOptions {
@@ -80,12 +90,12 @@ export interface TuiApp {
   setInfo: (info: SystemInfo) => void;
   openThreadPicker: (options: OpenThreadPickerOptions) => Promise<string | null>;
   openModelPicker: (options: OpenModelPickerOptions) => Promise<ModelSelectionResult | null>;
+  openThemePicker: (options: OpenThemePickerOptions) => Promise<string | null>;
 }
 
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
-  tui.setShowHardwareCursor(true);
 
   const screen = mountChatScreen(tui, {
     onAction: (action) => {
@@ -178,6 +188,23 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
                 options.onAction({
                   type: "thread:select",
                   threadId,
+                });
+              }
+            });
+          break;
+        case "dialog:theme_picker":
+          void app
+            .openThemePicker({
+              themes: event.themes,
+              currentThemeId: event.currentThemeId,
+            })
+            .then((themeId) => {
+              if (themeId) {
+                setTheme(themeId);
+                tui.requestRender();
+                options.onAction({
+                  type: "theme:select",
+                  themeId,
                 });
               }
             });
@@ -298,6 +325,43 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
         tui.requestRender();
       });
     },
+    openThemePicker: (pickerOptions: OpenThemePickerOptions) => {
+      return new Promise<string | null>((resolve) => {
+        let closed = false;
+        const initialTheme = getTheme().name;
+
+        const finish = (result: string | null) => {
+          if (closed) return;
+          closed = true;
+          if (result) {
+            setTheme(result);
+          } else {
+            setTheme(pickerOptions.currentThemeId);
+          }
+          tui.removeChild(screen.footer);
+          tui.removeChild(picker);
+          tui.addChild(screen.promptEditor);
+          tui.addChild(screen.footer);
+          tui.setFocus(screen.promptEditor);
+          tui.requestRender();
+          resolve(result);
+        };
+
+        const picker = new ThemePickerOverlay({
+          themes: pickerOptions.themes,
+          currentThemeId: pickerOptions.currentThemeId,
+          onSelect: (themeId) => finish(themeId),
+          onCancel: () => finish(null),
+        });
+
+        tui.removeChild(screen.footer);
+        tui.removeChild(screen.promptEditor);
+        tui.addChild(picker);
+        tui.addChild(screen.footer);
+        tui.setFocus(picker);
+        tui.requestRender();
+      });
+    },
   };
 
   return app;
@@ -314,6 +378,7 @@ export const startTui = async (): Promise<void> => {
   });
 
   await runtime.start();
+  setTheme(runtime.theme);
 
   app = CubeApp({
     onAction: (action) => {

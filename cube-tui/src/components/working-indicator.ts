@@ -79,7 +79,7 @@ export class WorkingIndicator implements Component {
   render(width: number): string[] {
     if (!this.active) return [];
 
-    const elapsedSeconds = ((this.now() - this.startedAt) / 1000).toFixed(1);
+    const elapsedSeconds = Math.floor((this.now() - this.startedAt) / 1000);
     const frame = SPINNER_FRAMES[this.frameIndex % SPINNER_FRAMES.length];
 
     const spinner = this.spinnerStyle(frame);

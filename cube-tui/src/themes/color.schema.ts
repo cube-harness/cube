@@ -176,20 +176,100 @@ export const THEMES: Record<string, ColorTheme> = {
     codeAccent: chalk.hex("#BE9DB8"),
     border: chalk.hex("#3B4252"),
     muted: chalk.hex("#7B88A1"),
-    banner: chalk.hex("#AFCFCF").bold, // == primary, both hue-locked to gradient stop 0
+    banner: chalk.hex("#AFCFCF").bold, 
     bannerGradient: ["#8FBCBB", "#5E81AC"],
+  },
+  "tokyo-night": {
+    name: "Tokyo Night",
+    success: chalk.hex("#9ECE6A"),
+    warning: chalk.hex("#E0AF68"),
+    error: chalk.hex("#F7768E").bold,
+    user: chalk.hex("#7AA2F7").bold,
+    assistant: chalk.hex("#C0CAF5"),
+    system: chalk.hex("#565F89"),
+    tool: chalk.hex("#BB9AF7"),
+    primary: chalk.hex("#7AA2F7"),
+    secondary: chalk.hex("#7DCFFF"),
+    codeAccent: chalk.hex("#FF9E64"),
+    border: chalk.hex("#292E42"),
+    muted: chalk.hex("#565F89"),
+    banner: chalk.hex("#7AA2F7").bold,
+    bannerGradient: ["#7AA2F7", "#BB9AF7"],
+  },
+  "solarized-dark": {
+    name: "Solarized Dark",
+    success: chalk.hex("#859900"),
+    warning: chalk.hex("#B58900"),
+    error: chalk.hex("#DC322F").bold,
+    user: chalk.hex("#268BD2").bold,
+    assistant: chalk.hex("#93A1A1"),
+    system: chalk.hex("#586E75"),
+    tool: chalk.hex("#6C71C4"),
+    primary: chalk.hex("#2AA198"),
+    secondary: chalk.hex("#268BD2"),
+    codeAccent: chalk.hex("#CB4B16"),
+    border: chalk.hex("#073642"),
+    muted: chalk.hex("#657B83"),
+    banner: chalk.hex("#2AA198").bold,
+    bannerGradient: ["#2AA198", "#268BD2"],
+  },
+  "solarized-light": {
+    name: "Solarized Light",
+    success: chalk.hex("#859900"),
+    warning: chalk.hex("#B58900"),
+    error: chalk.hex("#DC322F").bold,
+    user: chalk.hex("#268BD2").bold,
+    assistant: chalk.hex("#586E75"),
+    system: chalk.hex("#93A1A1"),
+    tool: chalk.hex("#6C71C4"),
+    primary: chalk.hex("#2AA198"),
+    secondary: chalk.hex("#268BD2"),
+    codeAccent: chalk.hex("#CB4B16"),
+    border: chalk.hex("#EEE8D5"),
+    muted: chalk.hex("#839496"),
+    banner: chalk.hex("#2AA198").bold,
+    bannerGradient: ["#2AA198", "#268BD2"],
+  },
+  light: {
+    name: "Clean Light",
+    success: chalk.hex("#16A34A"),
+    warning: chalk.hex("#D97706"),
+    error: chalk.hex("#DC2626").bold,
+    user: chalk.hex("#0284C7").bold,
+    assistant: chalk.hex("#334155"),
+    system: chalk.hex("#64748B"),
+    tool: chalk.hex("#9333EA"),
+    primary: chalk.hex("#0284C7"),
+    secondary: chalk.hex("#4F46E5"),
+    codeAccent: chalk.hex("#EA580C"),
+    border: chalk.hex("#CBD5E1"),
+    muted: chalk.hex("#64748B"),
+    banner: chalk.hex("#0284C7").bold,
+    bannerGradient: ["#0284C7", "#4F46E5"],
   },
 };
 
 let activeTheme: ColorTheme = THEMES.default;
 
 export const setTheme = (name: string) => {
-  if (THEMES[name]) {
-    activeTheme = THEMES[name];
+  const normalized = name.toLowerCase().trim();
+  if (THEMES[normalized]) {
+    activeTheme = THEMES[normalized];
+  } else if (normalized === "dark") {
+    activeTheme = THEMES.default;
+  } else if (normalized === "light") {
+    activeTheme = THEMES.light;
   }
 };
 
 export const getTheme = (): ColorTheme => activeTheme;
+
+export const getAvailableThemes = (): Array<{ id: string; name: string }> => {
+  return Object.entries(THEMES).map(([id, t]) => ({
+    id,
+    name: t.name,
+  }));
+};
 
 export const COLOR_SCHEMA: Record<string, string[]> = {
   availableThemes: Object.keys(THEMES),

@@ -66,7 +66,7 @@ export const ConfigSchema = z.object({
   model: z.string().min(1),
   model_config: ModelConfigSchema.nullish().transform((val) => val ?? {}),
   fallback_model: z.string().min(1).nullable(),
-  theme: z.enum(["dark", "light"]),
+  theme: z.string().min(1).default("default"),
   telemetry: z.boolean(),
   soul: z.object({
     max_characters: z.number().int().min(1).max(1_000_000),
