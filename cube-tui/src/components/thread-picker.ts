@@ -117,13 +117,12 @@ export class ThreadPickerOverlay extends Container implements Component {
         const item = pageItems[i]!;
         const isSelected = i === this.selectedIndex;
         const prefix = isSelected ? "→ " : "  ";
-        const shortId = item.id.length > 8 ? item.id.slice(0, 8) : item.id;
         const currentTag = item.isActive ? " (Current)" : "";
         const dateStr = item.updatedAt ? formatDateTime(item.updatedAt) : "";
 
         const prefixWidth = visibleWidth(prefix);
         const dateWidth = visibleWidth(dateStr);
-        const idTag = `[${shortId}]${currentTag}`;
+        const idTag = `[${item.id}]${currentTag}`;
         const idTagWidth = visibleWidth(idTag);
 
         const availableForTitle = Math.max(
