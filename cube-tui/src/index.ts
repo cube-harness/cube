@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProcessTerminal, TUI, matchesKey } from "@earendil-works/pi-tui";
@@ -328,11 +329,24 @@ export const startTui = async (): Promise<void> => {
   await runtime.start();
 };
 
-if (
-  process.argv[1] &&
-  path.resolve(process.argv[1]).toLowerCase() ===
-    fileURLToPath(import.meta.url).toLowerCase()
-) {
+const isMainModule = (): boolean => {
+  if (!process.argv[1]) return false;
+  try {
+    const scriptPath = fs.realpathSync(process.argv[1]);
+    const modulePath = fs.realpathSync(fileURLToPath(import.meta.url));
+    return process.platform === "win32"
+      ? scriptPath.toLowerCase() === modulePath.toLowerCase()
+      : scriptPath === modulePath;
+  } catch {
+    const scriptResolved = path.resolve(process.argv[1]);
+    const moduleResolved = fileURLToPath(import.meta.url);
+    return process.platform === "win32"
+      ? scriptResolved.toLowerCase() === moduleResolved.toLowerCase()
+      : scriptResolved === moduleResolved;
+  }
+};
+
+if (isMainModule()) {
   startTui().catch((err: unknown) => {
     console.error("Fatal TUI Error:", err);
     process.exit(1);
