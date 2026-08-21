@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProcessTerminal, TUI, matchesKey } from "@earendil-works/pi-tui";
+import { ProcessTerminal, TuiMainScreen, matchesKey } from "@earendil-works/pi-tui";
 import {
   CubeRuntime,
   type CubeAction,
@@ -84,7 +84,7 @@ export interface TuiApp {
 
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
   const terminal = new ProcessTerminal();
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   tui.setShowHardwareCursor(true);
 
   const screen = mountChatScreen(tui, {

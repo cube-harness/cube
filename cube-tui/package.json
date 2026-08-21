@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@cube/runtime": "workspace:*",
-    "@earendil-works/pi-tui": "0.83.0",
+    "@earendil-works/pi-tui": "0.84.2",
     "chalk": "5.6.2"
   },
   "devDependencies": {
