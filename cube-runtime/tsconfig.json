@@ -7,7 +7,6 @@
   },
   "include": ["src/**/*"],
   "references": [
-    { "path": "../cube-tui" },
     { "path": "../cube-agent" },
     { "path": "../cube-workspace" }
   ]

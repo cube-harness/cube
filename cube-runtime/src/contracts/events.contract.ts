@@ -17,6 +17,11 @@ export interface ProviderGroup {
   models: ModelItem[];
 }
 
+export interface ModelSelectionResult {
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
 export interface ChatMessage {

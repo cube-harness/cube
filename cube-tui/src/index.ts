@@ -1,107 +1,55 @@
+#!/usr/bin/env node
 import {
   ProcessTerminal,
   TUI,
   matchesKey,
 } from "@earendil-works/pi-tui";
+import {
+  CubeRuntime,
+  type CubeAction,
+  type CubeEvent,
+  type SystemInfo,
+  type ThreadSummary,
+  type UsageBoxMetrics,
+  type SlashCommandSuggestion,
+  type ChatMessage,
+  type DisplayTool,
+  type ProviderGroup,
+  type ModelItem,
+  type ModelSelectionResult,
+  type ReasoningEffort,
+} from "@cube/runtime";
+
 import { mountChatScreen } from "./screens/chat.screen.js";
 import {
   ThreadPickerOverlay,
   type ThreadPickerViewItem,
 } from "./components/thread-picker.js";
-import {
-  ModelPickerComponent,
-  type ProviderGroup,
-  type ModelItem,
-  type ModelSelectionResult,
-  type ReasoningEffort,
-} from "./components/model-picker.js";
-import type { ChatMessage, DisplayTool } from "./components/message-list.js";
+import { ModelPickerComponent } from "./components/model-picker.js";
 import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
 
-export type { ChatMessage, DisplayTool } from "./components/message-list.js";
-export type { ThreadPickerViewItem } from "./components/thread-picker.js";
 export type {
+  CubeAction,
+  CubeEvent,
+  SystemInfo,
+  ThreadSummary,
+  UsageBoxMetrics,
+  SlashCommandSuggestion,
+  ChatMessage,
+  DisplayTool,
   ProviderGroup,
   ModelItem,
   ModelSelectionResult,
   ReasoningEffort,
-} from "./components/model-picker.js";
+};
+
+export type { ThreadPickerViewItem } from "./components/thread-picker.js";
 export { ThreadPickerOverlay } from "./components/thread-picker.js";
 export { ModelPickerComponent } from "./components/model-picker.js";
 export { SearchBar, type SearchBarOptions } from "./components/search-bar.js";
 export { KeyHint, type KeyHintItem } from "./components/key-hint.js";
 export { WorkingIndicator } from "./components/working-indicator.js";
 export { UsageBox, renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
-
-export interface SlashCommandSuggestion {
-  name: `/${string}`;
-  description: string;
-}
-
-export interface SystemInfo {
-  model?: string;
-  workspace?: string;
-  agentMd?: string;
-  threadId?: string;
-}
-
-export interface ThreadSummary {
-  id: string;
-  title: string;
-  updatedAt: string;
-  isActive: boolean;
-}
-
-export interface UsageBoxMetrics {
-  title?: string;
-  model: string;
-  reasoningEffort?: string;
-  capabilities?: string[];
-  contextLimit: number;
-  maxOutput?: number;
-  activeTurnTokens?: number;
-  promptTokens: number;
-  completionTokens: number;
-  reasoningTokens?: number;
-  cachedTokens?: number;
-  cacheCreationTokens?: number;
-  totalTokens: number;
-  threadTitle?: string;
-  threadId: string;
-}
-
-export type CubeAction =
-  | { type: "prompt:submit"; content: string }
-  | { type: "command:submit"; name: `/${string}`; argument?: string }
-  | {
-      type: "model:select";
-      modelId: string;
-      reasoningEffort?: ReasoningEffort;
-    }
-  | { type: "thread:select"; threadId: string }
-  | { type: "turn:cancel" }
-  | { type: "app:exit" };
-
-export type CubeEvent =
-  | { type: "state:info"; info: SystemInfo }
-  | { type: "turn:start"; message?: string }
-  | { type: "turn:delta"; text: string }
-  | { type: "turn:tool"; tool: DisplayTool }
-  | { type: "turn:end" }
-  | { type: "message:add"; message: ChatMessage | string }
-  | { type: "message:upsert"; message: ChatMessage }
-  | { type: "messages:set"; messages: ChatMessage[] }
-  | { type: "messages:clear" }
-  | {
-      type: "dialog:model_picker";
-      providers: ProviderGroup[];
-      currentModelId?: string;
-      currentReasoningEffort?: ReasoningEffort;
-    }
-  | { type: "dialog:thread_picker"; threads: ThreadSummary[] }
-  | { type: "usage:metrics"; metrics: UsageBoxMetrics }
-  | { type: "system:message"; content: string }
-  | { type: "system:error"; error: string };
 
 export type TuiAction = CubeAction;
 
@@ -397,3 +345,33 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
 
   return app;
 };
+
+export const startTui = async (): Promise<void> => {
+  const runtime = new CubeRuntime({
+    onExit: () => {
+      process.exit(0);
+    },
+  });
+
+  const app = CubeApp({
+    onAction: (action) => {
+      void runtime.dispatch(action);
+    },
+    slashCommands: runtime.suggestions,
+    basePath: process.cwd(),
+  });
+
+  runtime.subscribe((event) => {
+    app.handleEvent(event);
+  });
+
+  app.start();
+  await runtime.start();
+};
+
+if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`) {
+  startTui().catch((err) => {
+    console.error("Fatal TUI Error:", err);
+    process.exit(1);
+  });
+}

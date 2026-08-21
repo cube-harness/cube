@@ -59,9 +59,6 @@ importers:
       '@cube/agent':
         specifier: workspace:*
         version: link:../cube-agent
-      '@cube/tui':
-        specifier: workspace:*
-        version: link:../cube-tui
       '@cube/workspace':
         specifier: workspace:*
         version: link:../cube-workspace
@@ -78,12 +75,25 @@ importers:
 
   cube-tui:
     dependencies:
+      '@cube/runtime':
+        specifier: workspace:*
+        version: link:../cube-runtime
       '@earendil-works/pi-tui':
         specifier: 0.83.0
         version: 0.83.0
       chalk:
         specifier: 5.6.2
         version: 5.6.2
+    devDependencies:
+      '@types/node':
+        specifier: 22.13.1
+        version: 22.13.1
+      tsx:
+        specifier: 4.19.3
+        version: 4.19.3
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
 
   cube-workspace:
     dependencies:

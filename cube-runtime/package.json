@@ -4,9 +4,6 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "cube": "./dist/index.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -14,15 +11,12 @@
     }
   },
   "scripts": {
-    "predev": "pnpm --filter @cube/workspace --filter @cube/agent --filter @cube/tui run build",
-    "dev": "tsx src/index.ts",
     "build": "tsc --build",
     "clean": "node ../scripts/clean-package.mjs",
     "test": "tsx --test --test-isolation=none tests/**/*.test.ts"
   },
   "dependencies": {
     "@cube/agent": "workspace:*",
-    "@cube/tui": "workspace:*",
     "@cube/workspace": "workspace:*"
   },
   "devDependencies": {
