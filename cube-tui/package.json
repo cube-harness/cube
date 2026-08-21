@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "cube": "./dist/bin.js"
+    "cube": "./dist/index.js"
   },
   "exports": {
     ".": {
@@ -15,7 +15,7 @@
   },
   "scripts": {
     "predev": "pnpm --filter @cube/workspace --filter @cube/agent --filter @cube/runtime run build",
-    "dev": "tsx src/bin.ts",
+    "dev": "tsx src/index.ts",
     "build": "tsc --build",
     "test": "tsx --test --test-isolation=none tests/**/*.test.ts",
     "clean": "node ../scripts/clean-package.mjs"

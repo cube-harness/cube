@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ProcessTerminal, TUI, matchesKey } from "@earendil-works/pi-tui";
 import {
   CubeRuntime,
@@ -325,3 +327,14 @@ export const startTui = async (): Promise<void> => {
   app.start();
   await runtime.start();
 };
+
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]).toLowerCase() ===
+    fileURLToPath(import.meta.url).toLowerCase()
+) {
+  startTui().catch((err: unknown) => {
+    console.error("Fatal TUI Error:", err);
+    process.exit(1);
+  });
+}
