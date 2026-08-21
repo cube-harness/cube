@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "predev": "pnpm --filter @cube/agent --filter @cube/tui run build",
+    "predev": "pnpm --filter @cube/workspace --filter @cube/agent --filter @cube/tui run build",
     "dev": "tsx src/index.ts",
     "build": "tsc --build",
     "clean": "node ../scripts/clean-package.mjs",
