@@ -2,7 +2,7 @@ import {
   Container,
   Text,
   Key,
-  CURSOR_MARKER,
+  fuzzyFilter,
   matchesKey,
   truncateToWidth,
   visibleWidth,
@@ -10,6 +10,8 @@ import {
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
+import { KeyHint } from "./key-hint.js";
+import { SearchBar } from "./search-bar.js";
 
 export interface ThreadPickerViewItem {
   id: string;
@@ -42,9 +44,8 @@ const formatDateTime = (dateStr: string): string => {
 export class ThreadPickerOverlay extends Container implements Component, Focusable {
   focused = true;
   private readonly title: Text;
-  private readonly searchDisplay: Text;
-  private readonly hint: Text;
-  private searchQuery = "";
+  private readonly searchBar: SearchBar;
+  private readonly hint: KeyHint;
   private currentPage = 0;
   private selectedIndex = 0;
   private readonly pageSize = 5;
@@ -54,46 +55,26 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
     const theme = getTheme();
 
     this.title = new Text(theme.primary.bold("Select Conversation Thread"), 0, 0);
-    this.searchDisplay = new Text(
-      theme.muted("Search: ") +
-        theme.muted("Type to filter...") +
-        CURSOR_MARKER,
-      0,
-      0,
-    );
-
-    this.hint = new Text(
-      theme.muted("↑/↓: Navigate • ←/→: Page • Type: Search • Enter: Select • Esc: Cancel"),
-      0,
-      0,
-    );
+    this.searchBar = new SearchBar();
+    this.hint = new KeyHint([
+      { key: "↑/↓", label: "Navigate" },
+      { key: "←/→", label: "Page" },
+      { key: "Type", label: "Search" },
+      { key: "Enter", label: "Select" },
+      { key: "Esc", label: "Cancel" },
+    ]);
 
     this.addChild(this.title);
-    this.addChild(this.searchDisplay);
+    this.addChild(this.searchBar);
     this.addChild(this.hint);
   }
 
   private getFilteredThreads(): ThreadPickerViewItem[] {
-    if (!this.searchQuery.trim()) {
+    const query = this.searchBar.getQuery().trim();
+    if (!query) {
       return this.options.threads;
     }
-    const q = this.searchQuery.toLowerCase();
-    return this.options.threads.filter((t) => {
-      const titleMatch = (t.title || "").toLowerCase().includes(q);
-      const idMatch = t.id.toLowerCase().includes(q);
-      return titleMatch || idMatch;
-    });
-  }
-
-  private updateSearchDisplay(): void {
-    const theme = getTheme();
-    const marker = this.focused ? CURSOR_MARKER : "";
-    const queryText = this.searchQuery
-      ? theme.primary.bold(this.searchQuery)
-      : theme.muted("Type to filter...");
-    this.searchDisplay.setText(
-      theme.muted("Search: ") + queryText + marker,
-    );
+    return fuzzyFilter(this.options.threads, query, (t) => `${t.title || ""} ${t.id}`);
   }
 
   render(width: number): string[] {
@@ -103,8 +84,8 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
     // 1. Render Title
     lines.push(...this.title.render(width));
 
-    // 2. Render Search Bar (immediately under Title)
-    lines.push(...this.searchDisplay.render(width));
+    // 2. Render Search Bar
+    lines.push(...this.searchBar.render(width));
     lines.push("");
 
     // 3. Filter and Paginate
@@ -186,11 +167,10 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
 
     // Escape
     if (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape") {
-      if (this.searchQuery) {
-        this.searchQuery = "";
+      if (this.searchBar.getQuery()) {
+        this.searchBar.clear();
         this.currentPage = 0;
         this.selectedIndex = 0;
-        this.updateSearchDisplay();
         return;
       }
       this.options.onCancel();
@@ -242,21 +222,19 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
 
     // Backspace
     if (matchesKey(data, Key.backspace) || data === "\x7f" || data === "\b" || data === "backspace") {
-      if (this.searchQuery.length > 0) {
-        this.searchQuery = this.searchQuery.slice(0, -1);
+      if (this.searchBar.getQuery().length > 0) {
+        this.searchBar.backspace();
         this.currentPage = 0;
         this.selectedIndex = 0;
-        this.updateSearchDisplay();
       }
       return;
     }
 
     // Printable search characters
     if (data.length === 1 && data >= " " && data <= "~") {
-      this.searchQuery += data;
+      this.searchBar.appendChar(data);
       this.currentPage = 0;
       this.selectedIndex = 0;
-      this.updateSearchDisplay();
     }
   }
 }

@@ -474,3 +474,93 @@ class CachedComponent implements Component {
   }
 }
 ```
+
+## Additional Utilities (not in main README, verified against package .d.ts)
+
+### Fuzzy matching
+```typescript
+interface FuzzyMatch { matches: boolean; score: number; } // lower score = better match
+
+function fuzzyMatch(query: string, text: string): FuzzyMatch;
+// Matches if all query chars appear in order (not necessarily consecutive).
+
+function fuzzyFilter<T>(items: T[], query: string, getText: (item: T) => string): T[];
+// Filters + sorts by match quality (best first). Supports whitespace/slash-separated
+// tokens in query -- all tokens must match.
+```
+
+### Keybindings registry
+```typescript
+type Keybinding = keyof Keybindings; // e.g. "tui.editor.cursorUp", "tui.select.confirm", "tui.altScreen.search"
+interface KeybindingDefinition { defaultKeys: KeyId | KeyId[]; description?: string; }
+type KeybindingsConfig = Record<string, KeyId | KeyId[] | undefined>; // user overrides
+
+class KeybindingsManager {
+  constructor(definitions: KeybindingDefinitions, userBindings?: KeybindingsConfig);
+  matches(data: string, keybinding: Keybinding): boolean;
+  getKeys(keybinding: Keybinding): KeyId[];
+  getDefinition(keybinding: Keybinding): KeybindingDefinition;
+  getConflicts(): KeybindingConflict[];
+  setUserBindings(userBindings: KeybindingsConfig): void;
+  getUserBindings(): KeybindingsConfig;
+  getResolvedBindings(): KeybindingsConfig;
+}
+
+function setKeybindings(keybindings: KeybindingsManager): void; // register globally
+function getKeybindings(): KeybindingsManager;                   // read back globally
+const TUI_KEYBINDINGS: KeybindingDefinitions;
+// Built-in defaults for every editor/select/alt-screen action, e.g.:
+//   "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" }
+//   "tui.select.confirm":  { defaultKeys: "enter", description: "Confirm selection" }
+//   "tui.altScreen.search": { defaultKeys: "ctrl+shift+f", description: "Search the primary scroll view" }
+// Built-in components (Editor, SelectList, TuiAltScreen navigation) already read these.
+// Extend via declaration merging on the `Keybindings` interface for custom actions.
+```
+
+### LaTeX rendering
+```typescript
+interface RenderLatexOptions { display?: boolean; } // stack fractions/limits vertically
+
+function renderLatex(source: string, options?: RenderLatexOptions): string | undefined;
+// Basic LaTeX math -> terminal-friendly Unicode. Returns undefined on unsupported/malformed
+// syntax -- always handle that case (fall back to raw source).
+```
+
+### Hyperlinks (OSC 8)
+```typescript
+function hyperlink(text: string, url: string): string;
+// Wraps text in an OSC 8 escape sequence -- supporting terminals render text as clickable,
+// opening url. Use instead of hand-building the escape sequence or printing raw URLs.
+
+function getOsc8LinkAtColumn(line: string, column: number): string | undefined;
+// Given a rendered line + column (e.g. from a mouse click), returns the OSC 8 URL there, if any.
+```
+
+### Lower-level text utilities
+```typescript
+function sliceByColumn(line: string, startCol: number, length: number, strict?: boolean): string;
+// Extract a visible-column sub-range of a styled line (handles ANSI + wide chars).
+// Use over truncateToWidth() when you need a middle slice, not just a start-truncated prefix.
+
+function stripTerminalSequences(str: string): string;
+// Removes ANSI/OSC/APC control sequences, keeping visible text. Use for plain-text
+// comparison/search/copy -- not for anything meant to still be displayed styled.
+```
+
+### Low-level image encoding (Image component wraps all of this -- use Image unless building a custom image component)
+```typescript
+function detectCapabilities(tmuxForwardsHyperlink?: () => boolean): TerminalCapabilities;
+function getCapabilities(): TerminalCapabilities;
+function encodeKitty(base64Data: string, options?: {...}): string;
+function encodeITerm2(base64Data: string, options?: {...}): string;
+function renderImage(base64Data: string, imageDimensions: ImageDimensions, options?: ImageRenderOptions): {...};
+function imageFallback(mimeType: string, dimensions?: ImageDimensions, filename?: string): string;
+function getImageDimensions(...): ImageDimensions; // + per-format: getPngDimensions, getJpegDimensions, getGifDimensions, getWebpDimensions
+```
+
+### Markdown parser (re-export)
+```typescript
+import { Marked } from "@earendil-works/pi-tui"; // re-exported from the `marked` npm package
+// The parser underlying the Markdown component. Use directly if you need markdown tokens
+// without rendering them as a TUI component.
+```

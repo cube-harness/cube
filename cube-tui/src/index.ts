@@ -1,4 +1,8 @@
-import { ProcessTerminal, TUI, matchesKey } from "@earendil-works/pi-tui";
+import {
+  ProcessTerminal,
+  TUI,
+  matchesKey,
+} from "@earendil-works/pi-tui";
 import { mountChatScreen } from "./screens/chat.screen.js";
 import {
   ThreadPickerOverlay,
@@ -23,6 +27,8 @@ export type {
 } from "./components/model-picker.js";
 export { ThreadPickerOverlay } from "./components/thread-picker.js";
 export { ModelPickerComponent } from "./components/model-picker.js";
+export { SearchBar, type SearchBarOptions } from "./components/search-bar.js";
+export { KeyHint, type KeyHintItem } from "./components/key-hint.js";
 export { WorkingIndicator } from "./components/working-indicator.js";
 export { UsageBox, renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
 
@@ -223,7 +229,7 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
           providers: pickerOptions.providers,
           currentModelId: pickerOptions.currentModelId,
           currentReasoningEffort: pickerOptions.currentReasoningEffort,
-          onSelect: (result: ModelSelectionResult) => finish(result),
+          onSelect: (result) => finish(result),
           onCancel: () => finish(null),
         });
 
