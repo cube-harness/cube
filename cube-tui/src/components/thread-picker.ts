@@ -50,15 +50,19 @@ export class ThreadPickerOverlay extends Container implements Component {
     super();
     const theme = getTheme();
 
-    this.title = new Text(theme.primary.bold("Select Conversation Thread"));
+    this.title = new Text(theme.primary.bold("Select Conversation Thread"), 0, 0);
     this.searchDisplay = new Text(
       theme.muted("Search: ") +
         theme.muted("Type to filter...") +
         theme.secondary(" ▏"),
+      0,
+      0,
     );
 
     this.hint = new Text(
       theme.muted("↑/↓: Navigate • ←/→: Page • Type: Search • Enter: Select • Esc: Cancel"),
+      0,
+      0,
     );
 
     this.addChild(this.title);
@@ -96,7 +100,7 @@ export class ThreadPickerOverlay extends Container implements Component {
     // 1. Render Title
     lines.push(...this.title.render(width));
 
-    // 2. Render Search Bar
+    // 2. Render Search Bar (immediately under Title)
     lines.push(...this.searchDisplay.render(width));
     lines.push("");
 

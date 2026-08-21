@@ -63,11 +63,13 @@ export class ModelPickerComponent extends Container implements Component {
     super();
     const theme = getTheme();
 
-    this.title = new Text(theme.primary.bold("Select AI Provider"));
+    this.title = new Text(theme.primary.bold("Select AI Provider"), 0, 0);
     this.searchDisplay = new Text(
       theme.muted("Search: ") +
         theme.muted("Type to filter...") +
         theme.secondary(" ▏"),
+      0,
+      0,
     );
 
     const providerItems: SelectItem[] = options.providers.map((p) => ({
@@ -95,6 +97,8 @@ export class ModelPickerComponent extends Container implements Component {
 
     this.hint = new Text(
       theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Provider • Esc: Cancel"),
+      0,
+      0,
     );
 
     this.addChild(this.title);
@@ -232,11 +236,10 @@ export class ModelPickerComponent extends Container implements Component {
 
     // 1. Render Title
     lines.push(...this.title.render(width));
-    lines.push(""); // Spacing between Title and Search Bar
 
-    // 2. Render Search Bar
+    // 2. Render Search Bar (immediately under Title)
     lines.push(...this.searchDisplay.render(width));
-    lines.push(""); // Spacing between Search Bar and List
+    lines.push("");
 
     // 3. Render Active Step List
     if (this.step === "reasoning" && this.reasoningList) {
@@ -247,7 +250,7 @@ export class ModelPickerComponent extends Container implements Component {
       lines.push(...this.providerList.render(width));
     }
 
-    lines.push(""); // Spacing before Hint
+    lines.push("");
 
     // 4. Render Hint
     lines.push(...this.hint.render(width));
