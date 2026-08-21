@@ -54,7 +54,7 @@ export class ThreadPickerOverlay extends Container implements Component {
     this.searchDisplay = new Text(
       theme.muted("Search: ") +
         theme.muted("Type to filter...") +
-        theme.secondary(" ▏"),
+        theme.primary("█"),
       0,
       0,
     );
@@ -84,7 +84,7 @@ export class ThreadPickerOverlay extends Container implements Component {
 
   private updateSearchDisplay(): void {
     const theme = getTheme();
-    const cursor = theme.secondary(" ▏");
+    const cursor = theme.primary("█");
     const queryText = this.searchQuery
       ? theme.primary.bold(this.searchQuery)
       : theme.muted("Type to filter...");
