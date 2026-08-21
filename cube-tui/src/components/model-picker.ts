@@ -1,5 +1,4 @@
 import {
-  Box,
   Container,
   SelectList,
   Text,
@@ -56,27 +55,25 @@ export class ModelPickerComponent extends Container implements Component {
   private modelList?: SelectList;
   private reasoningList?: SelectList;
 
-  private readonly container: Container;
   private readonly title: Text;
   private readonly searchDisplay: Text;
   private readonly hint: Text;
-  private readonly box: Box;
 
   constructor(private readonly options: ModelPickerOptions) {
     super();
     const theme = getTheme();
 
-    this.container = new Container();
-    this.title = new Text(theme.primary.bold("Select AI Provider"), 1, 0);
-    this.container.addChild(this.title);
-
-    this.searchDisplay = new Text(theme.muted("Search: ") + theme.secondary("_"), 1, 0);
-    this.container.addChild(this.searchDisplay);
+    this.title = new Text(theme.primary.bold("Select AI Provider"));
+    this.searchDisplay = new Text(
+      theme.muted("Search: ") +
+        theme.muted("Type to filter...") +
+        theme.secondary(" ▏"),
+    );
 
     const providerItems: SelectItem[] = options.providers.map((p) => ({
       value: p.id,
       label: `${p.name} (${p.models.length} models)`,
-      description: p.id,
+      description: undefined,
     }));
 
     this.providerList = new SelectList(
@@ -96,26 +93,22 @@ export class ModelPickerComponent extends Container implements Component {
       options.onCancel();
     };
 
-    this.container.addChild(this.providerList);
-
     this.hint = new Text(
-      theme.muted("↑/↓: Navigate • Type: Search • Enter: Choose Provider • Esc: Close"),
-      1,
-      0,
+      theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Provider • Esc: Cancel"),
     );
-    this.container.addChild(this.hint);
 
-    this.box = new Box(1, 1);
-    this.box.addChild(this.container);
-    this.addChild(this.box);
+    this.addChild(this.title);
+    this.addChild(this.searchDisplay);
+    this.addChild(this.providerList);
+    this.addChild(this.hint);
   }
 
   private updateSearchDisplay(): void {
     const theme = getTheme();
-    const cursor = theme.secondary("_");
+    const cursor = theme.secondary(" ▏");
     const queryText = this.searchQuery
       ? theme.primary.bold(this.searchQuery)
-      : "";
+      : theme.muted("Type to filter...");
     this.searchDisplay.setText(
       theme.muted("Search: ") + queryText + cursor,
     );
@@ -132,11 +125,11 @@ export class ModelPickerComponent extends Container implements Component {
 
     const modelItems: SelectItem[] = provider.models.map((m) => {
       const isActive = m.modelId === this.options.currentModelId;
-      const activeTag = isActive ? " (Active)" : "";
+      const currentTag = isActive ? " (Current)" : "";
 
       return {
         value: m.modelId,
-        label: `${m.modelId}${activeTag}`,
+        label: `${m.modelId}${currentTag}`,
         description: undefined,
       };
     });
@@ -160,14 +153,14 @@ export class ModelPickerComponent extends Container implements Component {
       this.switchToProviderStep();
     };
 
-    this.container.removeChild(this.providerList);
-    this.container.removeChild(this.hint);
-    this.container.addChild(this.modelList);
+    this.removeChild(this.providerList);
+    this.removeChild(this.hint);
+    this.addChild(this.modelList);
 
     this.hint.setText(
       theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Model • Esc: Back"),
     );
-    this.container.addChild(this.hint);
+    this.addChild(this.hint);
   }
 
   private switchToReasoningStep(model: ModelItem): void {
@@ -180,7 +173,7 @@ export class ModelPickerComponent extends Container implements Component {
       theme.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
     );
     this.searchDisplay.setText(
-      theme.muted("Select reasoning / thinking level:"),
+      theme.muted("Select reasoning level:"),
     );
 
     const currentEffort = this.options.currentReasoningEffort || "medium";
@@ -220,15 +213,15 @@ export class ModelPickerComponent extends Container implements Component {
     };
 
     if (this.modelList) {
-      this.container.removeChild(this.modelList);
+      this.removeChild(this.modelList);
     }
-    this.container.removeChild(this.hint);
-    this.container.addChild(this.reasoningList);
+    this.removeChild(this.hint);
+    this.addChild(this.reasoningList);
 
     this.hint.setText(
-      theme.muted("↑/↓: Navigate • Enter: Confirm Config • Esc: Back to Models"),
+      theme.muted("↑/↓: Navigate • Enter: Confirm • Esc: Back"),
     );
-    this.container.addChild(this.hint);
+    this.addChild(this.hint);
   }
 
   private switchToProviderStep(): void {
@@ -242,20 +235,20 @@ export class ModelPickerComponent extends Container implements Component {
     this.title.setText(theme.primary.bold("Select AI Provider"));
 
     if (this.modelList) {
-      this.container.removeChild(this.modelList);
+      this.removeChild(this.modelList);
     }
     if (this.reasoningList) {
-      this.container.removeChild(this.reasoningList);
+      this.removeChild(this.reasoningList);
     }
-    this.container.removeChild(this.hint);
+    this.removeChild(this.hint);
 
     this.providerList.setFilter("");
-    this.container.addChild(this.providerList);
+    this.addChild(this.providerList);
 
     this.hint.setText(
-      theme.muted("↑/↓: Navigate • Type: Search • Enter: Choose Provider • Esc: Close"),
+      theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Provider • Esc: Cancel"),
     );
-    this.container.addChild(this.hint);
+    this.addChild(this.hint);
   }
 
   handleInput(data: string): void {
