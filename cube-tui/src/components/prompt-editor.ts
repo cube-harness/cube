@@ -72,14 +72,9 @@ export class PromptEditor implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const rawLines = this.editor.render(width);
+    const lines = this.editor.render(width);
     const theme = getTheme();
     const prefix = theme.primary.bold(">");
-
-    // Strip pi-tui fake inverse-block cursor characters so ONLY pure hardware cursor is shown
-    const lines = rawLines.map((line) =>
-      line.replace(/\x1b\[7m([\s\S])\x1b\[0m/g, "$1"),
-    );
 
     if (lines.length >= 3 && lines[1]) {
       if (lines[1].startsWith("  ")) {

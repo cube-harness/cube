@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-import {
-  ProcessTerminal,
-  TUI,
-  matchesKey,
-} from "@earendil-works/pi-tui";
+import { ProcessTerminal, TUI, matchesKey } from "@earendil-works/pi-tui";
 import {
   CubeRuntime,
   type CubeAction,
@@ -21,10 +17,7 @@ import {
 } from "@cube/runtime";
 
 import { mountChatScreen } from "./screens/chat.screen.js";
-import {
-  ThreadPickerOverlay,
-  type ThreadPickerViewItem,
-} from "./components/thread-picker.js";
+import { ThreadPickerOverlay, type ThreadPickerViewItem } from "./components/thread-picker.js";
 import { ModelPickerComponent } from "./components/model-picker.js";
 import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
 
@@ -82,43 +75,9 @@ export interface TuiApp {
   updateLoading: (message: string) => void;
   stopLoading: () => void;
   setInfo: (info: SystemInfo) => void;
-  openThreadPicker: (
-    options: OpenThreadPickerOptions,
-  ) => Promise<string | null>;
-  openModelPicker: (
-    options: OpenModelPickerOptions,
-  ) => Promise<ModelSelectionResult | null>;
+  openThreadPicker: (options: OpenThreadPickerOptions) => Promise<string | null>;
+  openModelPicker: (options: OpenModelPickerOptions) => Promise<ModelSelectionResult | null>;
 }
-
-export type TerminalCursorShape =
-  | "blinking-block"
-  | "block"
-  | "blinking-underline"
-  | "underline"
-  | "blinking-bar"
-  | "bar";
-
-export const setTerminalCursorShape = (
-  shape: TerminalCursorShape = "blinking-bar",
-): void => {
-  const codes: Record<TerminalCursorShape, string> = {
-    "blinking-block": "\x1b[1 q",
-    block: "\x1b[2 q",
-    "blinking-underline": "\x1b[3 q",
-    underline: "\x1b[4 q",
-    "blinking-bar": "\x1b[5 q",
-    bar: "\x1b[6 q",
-  };
-  try {
-    process.stdout.write(codes[shape] || "\x1b[5 q");
-  } catch {}
-};
-
-export const resetTerminalCursorShape = (): void => {
-  try {
-    process.stdout.write("\x1b[0 q");
-  } catch {}
-};
 
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
   const terminal = new ProcessTerminal();
@@ -143,11 +102,9 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
 
   const app: TuiApp = {
     start: () => {
-      setTerminalCursorShape("blinking-bar");
       tui.start();
     },
     stop: () => {
-      resetTerminalCursorShape();
       tui.stop();
     },
     handleEvent: (event: CubeEvent) => {
