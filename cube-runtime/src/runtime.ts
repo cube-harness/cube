@@ -299,7 +299,7 @@ export class CubeRuntime {
             this.dispatcher.emit({
               type: "message:upsert",
               message: {
-                id: currentMessage.id || "current-assistant-message",
+                id: currentMessage.id,
                 role: "assistant",
                 content: text,
                 status: event.displayState.isRunning ? "streaming" : "done",

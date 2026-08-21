@@ -155,12 +155,54 @@ export class MessageList implements Component {
     }
   }
 
+  streamDelta(text: string) {
+    const lastEntry = this.entries[this.entries.length - 1];
+    if (
+      lastEntry &&
+      lastEntry.message.role === "assistant" &&
+      lastEntry.message.status === "streaming"
+    ) {
+      lastEntry.message.content = text;
+      lastEntry.cachedWidth = undefined;
+      lastEntry.cachedLines = undefined;
+    } else {
+      this.entries.push({
+        message: {
+          role: "assistant",
+          content: text,
+          status: "streaming",
+          timestamp: new Date(),
+        },
+      });
+    }
+    if (this.autoScroll) {
+      this.scrollToBottom();
+    }
+  }
+
+  finalizeStreaming() {
+    const lastEntry = this.entries[this.entries.length - 1];
+    if (
+      lastEntry &&
+      lastEntry.message.role === "assistant" &&
+      lastEntry.message.status === "streaming"
+    ) {
+      lastEntry.message.status = "done";
+      lastEntry.cachedWidth = undefined;
+      lastEntry.cachedLines = undefined;
+    }
+  }
+
   upsertMessage(msg: ChatMessage) {
+    if (msg.status === "streaming") {
+      this.streamDelta(msg.content);
+      return;
+    }
     if (msg.id) {
       const existing = this.entries.find((e) => e.message.id === msg.id);
       if (existing) {
         existing.message.content = msg.content;
-        existing.message.status = msg.status ?? "streaming";
+        existing.message.status = msg.status ?? "done";
         existing.cachedWidth = undefined;
         existing.cachedLines = undefined;
         if (this.autoScroll) {
@@ -168,36 +210,8 @@ export class MessageList implements Component {
         }
         return;
       }
-    } else if (msg.role === "assistant" && msg.status === "streaming") {
-      const lastEntry = this.entries[this.entries.length - 1];
-      if (
-        lastEntry &&
-        lastEntry.message.role === "assistant" &&
-        lastEntry.message.status === "streaming"
-      ) {
-        lastEntry.message.content = msg.content;
-        lastEntry.cachedWidth = undefined;
-        lastEntry.cachedLines = undefined;
-        if (this.autoScroll) {
-          this.scrollToBottom();
-        }
-        return;
-      }
     }
     this.addMessage(msg);
-  }
-
-  finalizeStreaming() {
-    for (const entry of this.entries) {
-      if (entry.message.status === "streaming") {
-        entry.message.status = "done";
-        if (entry.message.id === "current-assistant-message") {
-          entry.message.id = undefined;
-        }
-        entry.cachedWidth = undefined;
-        entry.cachedLines = undefined;
-      }
-    }
   }
 
   upsertTool(tool: DisplayTool) {

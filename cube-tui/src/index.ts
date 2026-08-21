@@ -123,12 +123,7 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
           break;
         case "turn:delta":
           screen.workingIndicator.stop();
-          screen.messageList.upsertMessage({
-            id: "current-assistant-message",
-            role: "assistant",
-            content: event.text,
-            status: "streaming",
-          });
+          screen.messageList.streamDelta(event.text);
           tui.requestRender();
           break;
         case "turn:tool":
