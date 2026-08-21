@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CubeHome } from "@cube/workspace";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import {
-  createThemeCommandHandler,
-  AVAILABLE_THEMES,
-} from "../src/commands/theme.command.js";
+import { createThemeCommandHandler } from "../src/commands/theme.command.js";
 import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 test("ThemeCommand blocks execution when agent turn is active", async () => {
@@ -32,7 +29,7 @@ test("ThemeCommand opens interactive dialog when called without arguments", asyn
   const dispatcher = new ActionDispatcher();
   let dialogEvent: any;
   dispatcher.subscribe((e) => {
-    if (e.type === "dialog:theme_picker") {
+    if (e.type === "dialog:theme") {
       dialogEvent = e;
     }
   });
@@ -45,7 +42,6 @@ test("ThemeCommand opens interactive dialog when called without arguments", asyn
 
   await handler("");
   assert.ok(dialogEvent);
-  assert.equal(dialogEvent.themes.length, AVAILABLE_THEMES.length);
   assert.ok(dialogEvent.currentThemeId);
 });
 
@@ -71,5 +67,5 @@ test("ThemeCommand handles argument directly", async () => {
 
   await handler("dracula");
   assert.equal(selected, "dracula");
-  assert.ok(systemMsg.includes("Dracula"));
+  assert.ok(systemMsg.includes("dracula"));
 });

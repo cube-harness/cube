@@ -17,7 +17,6 @@ import {
   type ModelItem,
   type ModelSelectionResult,
   type ReasoningEffort,
-  type ThemeItem,
 } from "@cube/runtime";
 
 import { mountChatScreen } from "./screens/chat.screen.js";
@@ -32,7 +31,6 @@ export type {
   CubeEvent,
   SystemInfo,
   ThreadSummary,
-  ThemeItem,
   UsageBoxMetrics,
   SlashCommandSuggestion,
   ChatMessage,
@@ -65,8 +63,7 @@ export interface OpenModelPickerOptions {
 }
 
 export interface OpenThemePickerOptions {
-  themes: ThemePickerItem[];
-  currentThemeId: string;
+  currentThemeId?: string;
 }
 
 export interface CreateAppOptions {
@@ -90,7 +87,7 @@ export interface TuiApp {
   setInfo: (info: SystemInfo) => void;
   openThreadPicker: (options: OpenThreadPickerOptions) => Promise<string | null>;
   openModelPicker: (options: OpenModelPickerOptions) => Promise<ModelSelectionResult | null>;
-  openThemePicker: (options: OpenThemePickerOptions) => Promise<string | null>;
+  openThemePicker: (options?: OpenThemePickerOptions) => Promise<string | null>;
 }
 
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
@@ -192,10 +189,9 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
               }
             });
           break;
-        case "dialog:theme_picker":
+        case "dialog:theme":
           void app
             .openThemePicker({
-              themes: event.themes,
               currentThemeId: event.currentThemeId,
             })
             .then((themeId) => {
@@ -325,10 +321,10 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
         tui.requestRender();
       });
     },
-    openThemePicker: (pickerOptions: OpenThemePickerOptions) => {
+    openThemePicker: (pickerOptions: OpenThemePickerOptions = {}) => {
       return new Promise<string | null>((resolve) => {
         let closed = false;
-        const initialTheme = getTheme().name;
+        const currentThemeId = pickerOptions.currentThemeId || "default";
 
         const finish = (result: string | null) => {
           if (closed) return;
@@ -336,7 +332,7 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
           if (result) {
             setTheme(result);
           } else {
-            setTheme(pickerOptions.currentThemeId);
+            setTheme(currentThemeId);
           }
           tui.removeChild(screen.footer);
           tui.removeChild(picker);
@@ -348,8 +344,7 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
         };
 
         const picker = new ThemePickerOverlay({
-          themes: pickerOptions.themes,
-          currentThemeId: pickerOptions.currentThemeId,
+          currentThemeId,
           onSelect: (themeId) => finish(themeId),
           onCancel: () => finish(null),
         });

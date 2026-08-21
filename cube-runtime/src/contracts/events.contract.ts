@@ -86,11 +86,6 @@ export interface SlashCommandSuggestion {
   description: string;
 }
 
-export interface ThemeItem {
-  id: string;
-  name: string;
-}
-
 // Actions that any UI front-end (TUI, Web, Desktop, VSCode) dispatches to the Runtime
 export type CubeAction =
   | { type: "prompt:submit"; content: string }
@@ -123,7 +118,7 @@ export type CubeEvent =
       currentReasoningEffort?: ReasoningEffort;
     }
   | { type: "dialog:thread_picker"; threads: ThreadSummary[] }
-  | { type: "dialog:theme_picker"; themes: ThemeItem[]; currentThemeId: string }
+  | { type: "dialog:theme"; currentThemeId?: string }
   | { type: "usage:metrics"; metrics: UsageBoxMetrics }
   | { type: "system:message"; content: string }
   | { type: "system:error"; error: string };

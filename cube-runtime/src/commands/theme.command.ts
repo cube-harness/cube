@@ -2,18 +2,6 @@ import type { Home } from "@cube/workspace";
 import { ConfigStore } from "@cube/workspace";
 import type { CommandHandler } from "../command-manager.js";
 import type { ActionDispatcher } from "../dispatcher.js";
-import type { ThemeItem } from "../contracts/events.contract.js";
-
-export const AVAILABLE_THEMES: ThemeItem[] = [
-  { id: "default", name: "Default Cyan" },
-  { id: "tokyo-night", name: "Tokyo Night" },
-  { id: "dracula", name: "Dracula" },
-  { id: "nord", name: "Nord" },
-  { id: "cyberpunk", name: "Cyberpunk Neon" },
-  { id: "solarized-dark", name: "Solarized Dark" },
-  { id: "solarized-light", name: "Solarized Light" },
-  { id: "light", name: "Clean Light" },
-];
 
 export interface ThemeCommandDependencies {
   home: Home;
@@ -38,32 +26,25 @@ export const createThemeCommandHandler = (
 
   const argument = rawArgument.trim().toLowerCase();
   if (argument) {
-    const matched = AVAILABLE_THEMES.find(
-      (t) => t.id === argument || t.id.replace(/-/g, "") === argument.replace(/[\s-_]/g, ""),
-    );
-
-    const themeToSet = matched ? matched.id : argument;
-
     await ConfigStore(dependencies.home).update((current) => ({
       ...current,
-      theme: themeToSet,
+      theme: argument,
     }));
 
     dependencies.dispatcher.emit({
       type: "system:message",
-      content: `Theme set to: ${matched ? matched.name : themeToSet}`,
+      content: `Theme set to: ${argument}`,
     });
 
     if (dependencies.onThemeSelected) {
-      await dependencies.onThemeSelected(themeToSet);
+      await dependencies.onThemeSelected(argument);
     }
     return;
   }
 
-  // Open interactive theme picker dialog
+  // Open interactive theme picker dialog in UI
   dependencies.dispatcher.emit({
-    type: "dialog:theme_picker",
-    themes: AVAILABLE_THEMES,
+    type: "dialog:theme",
     currentThemeId,
   });
 };

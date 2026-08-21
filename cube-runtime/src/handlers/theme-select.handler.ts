@@ -1,7 +1,6 @@
 import type { Home } from "@cube/workspace";
 import { ConfigStore } from "@cube/workspace";
 import type { ActionDispatcher } from "../dispatcher.js";
-import { AVAILABLE_THEMES } from "../commands/theme.command.js";
 
 export interface ThemeSelectHandlerDeps {
   home: Home;
@@ -21,10 +20,9 @@ export const createThemeSelectHandler = (deps: ThemeSelectHandlerDeps) => {
     deps.onThemeApplied?.(themeId);
 
     // 3. Emit confirmation message
-    const matched = AVAILABLE_THEMES.find((t) => t.id === themeId);
     deps.dispatcher.emit({
       type: "system:message",
-      content: `Theme set to: ${matched ? matched.name : themeId}`,
+      content: `Theme set to: ${themeId}`,
     });
   };
 };

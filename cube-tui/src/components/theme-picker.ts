@@ -11,7 +11,7 @@ import {
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
-import { getTheme, THEMES, type ColorTheme } from "../themes/color.schema.js";
+import { getTheme, getAvailableThemes, THEMES, type ColorTheme } from "../themes/color.schema.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 
@@ -21,8 +21,8 @@ export interface ThemePickerItem {
 }
 
 export interface ThemePickerOptions {
-  themes: ThemePickerItem[];
-  currentThemeId: string;
+  themes?: ThemePickerItem[];
+  currentThemeId?: string;
   onSelect: (themeId: string) => void;
   onCancel: () => void;
 }
@@ -36,13 +36,15 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
 
   constructor(private readonly options: ThemePickerOptions) {
     super();
-    const theme = getTheme();
-    this.hoveredThemeId = options.currentThemeId || "default";
+    const currentTheme = getTheme();
+    const availableThemes = options.themes && options.themes.length > 0 ? options.themes : getAvailableThemes();
+    const activeId = options.currentThemeId || Object.keys(THEMES).find((k) => THEMES[k] === currentTheme) || "default";
 
-    this.title = new Text(theme.primary.bold("Select Color Scheme"), 0, 0);
+    this.hoveredThemeId = activeId;
+    this.title = new Text(currentTheme.primary.bold("Color Scheme"), 0, 0);
 
-    const items: SelectItem[] = options.themes.map((t) => {
-      const isCurrent = t.id === options.currentThemeId;
+    const items: SelectItem[] = availableThemes.map((t) => {
+      const isCurrent = t.id === activeId;
       return {
         value: t.id,
         label: `${t.name}${isCurrent ? " (current)" : ""}`,
@@ -56,7 +58,7 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     );
 
     // Initial selected index to match current theme
-    const currentIndex = options.themes.findIndex((t) => t.id === options.currentThemeId);
+    const currentIndex = availableThemes.findIndex((t) => t.id === activeId);
     if (currentIndex >= 0) {
       this.selectList.setSelectedIndex(currentIndex);
     }
@@ -142,23 +144,31 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     lines.push(formatLine(t.muted(thoughtDesc), visibleWidth(thoughtDesc)));
 
     // 8. Tool, Task, Signal tokens
-    const toolLine = `   ⚙ tool: write_file main.go`;
-    lines.push(formatLine(t.tool(toolLine), visibleWidth(toolLine)));
+    const toolPrefix = `   ⚙ tool: `;
+    const toolVal = `write_file main.go`;
+    lines.push(formatLine(`${t.muted(toolPrefix)}${t.tool(toolVal)}`, visibleWidth(`${toolPrefix}${toolVal}`)));
 
-    const taskLine = `   ◉ task: Implementing greeting`;
-    lines.push(formatLine(t.primary(taskLine), visibleWidth(taskLine)));
+    const taskPrefix = `   ◉ task: `;
+    const taskVal = `Implementing greeting`;
+    lines.push(formatLine(`${t.muted(taskPrefix)}${t.primary(taskVal)}`, visibleWidth(`${taskPrefix}${taskVal}`)));
 
-    const errLine = `   ✗ error: compilation failed`;
-    lines.push(formatLine(t.error(errLine), visibleWidth(errLine)));
+    const errPrefix = `   ✗ error: `;
+    const errVal = `compilation failed`;
+    lines.push(formatLine(`${t.error(errPrefix)}${t.assistant(errVal)}`, visibleWidth(`${errPrefix}${errVal}`)));
 
-    const warnLine = `   ⚠ warning: deprecation warning`;
-    lines.push(formatLine(t.warning(warnLine), visibleWidth(warnLine)));
+    const warnPrefix = `   ⚠ warning: `;
+    const warnVal = `deprecation warning`;
+    lines.push(formatLine(`${t.warning(warnPrefix)}${t.assistant(warnVal)}`, visibleWidth(`${warnPrefix}${warnVal}`)));
 
-    const linkLine = `   → link: file:///path/to/main.go`;
-    lines.push(formatLine(t.primary.underline(linkLine), visibleWidth(linkLine)));
+    // 9. Link line (Underline strictly on URL only, never trailing or on prefix)
+    const linkPrefix = `   → link: `;
+    const linkUrl = `file:///path/to/main.go`;
+    lines.push(formatLine(`${t.muted(linkPrefix)}${t.primary.underline(linkUrl)}`, visibleWidth(`${linkPrefix}${linkUrl}`)));
 
-    const accentLine = `   ★ accent: highlighted text`;
-    lines.push(formatLine(t.codeAccent(accentLine), visibleWidth(accentLine)));
+    // 10. Accent and Dim
+    const accentPrefix = `   ★ accent: `;
+    const accentVal = `highlighted text`;
+    lines.push(formatLine(`${t.muted(accentPrefix)}${t.codeAccent(accentVal)}`, visibleWidth(`${accentPrefix}${accentVal}`)));
 
     const dimLine = `   · dim: press Enter to continue`;
     lines.push(formatLine(t.muted(dimLine), visibleWidth(dimLine)));
@@ -175,24 +185,24 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     lines.push(...this.title.render(width));
     lines.push("");
 
-    // Calculate Column Widths
+    // Calculate Column Widths (Compact left column next to preview box)
     const previewTheme = THEMES[this.hoveredThemeId] || getTheme();
-    const minLeftWidth = 28;
-    const rightWidth = Math.min(65, Math.max(30, width - minLeftWidth - 4));
-    const leftWidth = Math.max(minLeftWidth, width - rightWidth - 4);
+    const leftWidth = 28;
+    const gap = 3;
+    const rightWidth = Math.min(65, Math.max(30, width - leftWidth - gap - 2));
 
     const leftLines = this.selectList.render(leftWidth);
     const rightLines = this.renderPreviewBox(previewTheme, rightWidth);
 
-    // Merge two columns side by side
+    // Merge two columns side by side closely
     const maxRowCount = Math.max(leftLines.length, rightLines.length);
     for (let i = 0; i < maxRowCount; i++) {
       const leftPart = leftLines[i] || "";
       const rightPart = rightLines[i] || "";
 
       const leftVis = visibleWidth(leftPart);
-      const gap = Math.max(2, leftWidth - leftVis + 2);
-      const row = `${leftPart}${" ".repeat(gap)}${rightPart}`;
+      const padLeft = Math.max(0, leftWidth - leftVis);
+      const row = `${leftPart}${" ".repeat(padLeft)}${" ".repeat(gap)}${rightPart}`;
       lines.push(truncateToWidth(row, width));
     }
 
