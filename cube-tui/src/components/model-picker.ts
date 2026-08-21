@@ -3,8 +3,10 @@ import {
   SelectList,
   Text,
   Key,
+  CURSOR_MARKER,
   matchesKey,
   type Component,
+  type Focusable,
   type SelectItem,
 } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
@@ -45,7 +47,8 @@ export interface ModelPickerOptions {
   onCancel: () => void;
 }
 
-export class ModelPickerComponent extends Container implements Component {
+export class ModelPickerComponent extends Container implements Component, Focusable {
+  focused = true;
   private step: "provider" | "model" | "reasoning" = "provider";
   private selectedProvider?: ProviderGroup;
   private selectedModel?: ModelItem;
@@ -67,7 +70,7 @@ export class ModelPickerComponent extends Container implements Component {
     this.searchDisplay = new Text(
       theme.muted("Search: ") +
         theme.muted("Type to filter...") +
-        theme.primary("█"),
+        CURSOR_MARKER,
       0,
       0,
     );
@@ -108,12 +111,12 @@ export class ModelPickerComponent extends Container implements Component {
 
   private updateSearchDisplay(): void {
     const theme = getTheme();
-    const cursor = theme.primary("█");
+    const marker = this.focused ? CURSOR_MARKER : "";
     const queryText = this.searchQuery
       ? theme.primary.bold(this.searchQuery)
       : theme.muted("Type to filter...");
     this.searchDisplay.setText(
-      theme.muted("Search: ") + queryText + cursor,
+      theme.muted("Search: ") + queryText + marker,
     );
   }
 

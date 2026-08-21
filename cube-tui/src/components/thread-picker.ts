@@ -2,10 +2,12 @@ import {
   Container,
   Text,
   Key,
+  CURSOR_MARKER,
   matchesKey,
   truncateToWidth,
   visibleWidth,
   type Component,
+  type Focusable,
 } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
 
@@ -37,7 +39,8 @@ const formatDateTime = (dateStr: string): string => {
   }
 };
 
-export class ThreadPickerOverlay extends Container implements Component {
+export class ThreadPickerOverlay extends Container implements Component, Focusable {
+  focused = true;
   private readonly title: Text;
   private readonly searchDisplay: Text;
   private readonly hint: Text;
@@ -54,7 +57,7 @@ export class ThreadPickerOverlay extends Container implements Component {
     this.searchDisplay = new Text(
       theme.muted("Search: ") +
         theme.muted("Type to filter...") +
-        theme.primary("█"),
+        CURSOR_MARKER,
       0,
       0,
     );
@@ -84,12 +87,12 @@ export class ThreadPickerOverlay extends Container implements Component {
 
   private updateSearchDisplay(): void {
     const theme = getTheme();
-    const cursor = theme.primary("█");
+    const marker = this.focused ? CURSOR_MARKER : "";
     const queryText = this.searchQuery
       ? theme.primary.bold(this.searchQuery)
       : theme.muted("Type to filter...");
     this.searchDisplay.setText(
-      theme.muted("Search: ") + queryText + cursor,
+      theme.muted("Search: ") + queryText + marker,
     );
   }
 

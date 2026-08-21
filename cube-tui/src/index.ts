@@ -84,6 +84,7 @@ export interface TuiApp {
 export const CubeApp = (options: CreateAppOptions): TuiApp => {
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
+  tui.setShowHardwareCursor(true);
 
   const screen = mountChatScreen(tui, {
     onAction: options.onAction,
