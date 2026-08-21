@@ -163,10 +163,41 @@ export class MessageList implements Component {
         existing.message.status = msg.status ?? "streaming";
         existing.cachedWidth = undefined;
         existing.cachedLines = undefined;
+        if (this.autoScroll) {
+          this.scrollToBottom();
+        }
+        return;
+      }
+    } else if (msg.role === "assistant" && msg.status === "streaming") {
+      const lastEntry = this.entries[this.entries.length - 1];
+      if (
+        lastEntry &&
+        lastEntry.message.role === "assistant" &&
+        lastEntry.message.status === "streaming"
+      ) {
+        lastEntry.message.content = msg.content;
+        lastEntry.cachedWidth = undefined;
+        lastEntry.cachedLines = undefined;
+        if (this.autoScroll) {
+          this.scrollToBottom();
+        }
         return;
       }
     }
     this.addMessage(msg);
+  }
+
+  finalizeStreaming() {
+    for (const entry of this.entries) {
+      if (entry.message.status === "streaming") {
+        entry.message.status = "done";
+        if (entry.message.id === "current-assistant-message") {
+          entry.message.id = undefined;
+        }
+        entry.cachedWidth = undefined;
+        entry.cachedLines = undefined;
+      }
+    }
   }
 
   upsertTool(tool: DisplayTool) {
