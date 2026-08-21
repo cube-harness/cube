@@ -1,12 +1,10 @@
 import type { Session } from "@cube/agent";
-import type { TuiApp } from "@cube/tui";
-import type { CommandHandler } from "../command-manager.js";
+import type { ActionDispatcher } from "../dispatcher.js";
+import type { ChatMessage } from "../contracts/events.contract.js";
 
-export interface ForkCommandDependencies {
+export interface ThreadSelectHandlerDeps {
   session: Session;
-  getApp: () => TuiApp | undefined;
-  showMessage: (message: string) => void;
-  isTurnActive?: () => boolean;
+  dispatcher: ActionDispatcher;
 }
 
 const extractMessageText = (raw: any): string => {
@@ -40,48 +38,22 @@ const extractMessageText = (raw: any): string => {
   return "";
 };
 
-export const createForkCommandHandler = (
-  deps: ForkCommandDependencies,
-): CommandHandler => async (rawArgument: string) => {
-  if (deps.isTurnActive?.()) {
-    deps.showMessage("Cannot fork thread while an agent turn is active.");
-    return;
-  }
-
-  const app = deps.getApp();
-  if (!app) {
-    deps.showMessage("Cube TUI is not ready.");
-    return;
-  }
-
-  const currentId = deps.session.thread.getId();
-  if (!currentId) {
-    deps.showMessage("Cannot fork an empty session. Start a conversation first.");
-    return;
-  }
-
-  const title = rawArgument.trim() || undefined;
-
-  try {
-    const cloned = await deps.session.thread.clone({
-      sourceThreadId: currentId,
-      title,
-    });
-
-    if (!cloned || !cloned.id) {
-      deps.showMessage("Failed to clone conversation thread.");
+export const createThreadSelectHandler = (deps: ThreadSelectHandlerDeps) => {
+  return async (threadId: string) => {
+    if (deps.session.run.isRunning()) {
+      deps.dispatcher.emit({
+        type: "system:message",
+        content: "Cannot switch threads while an agent turn is active.",
+      });
       return;
     }
 
-    await deps.session.thread.switch({ threadId: cloned.id });
+    await deps.session.thread.switch({ threadId });
     const rawMessages = await deps.session.thread.listMessages({
-      threadId: cloned.id,
+      threadId,
     });
 
-    const messages: Array<{
-      role: "user" | "assistant" | "system";
-      content: string;
-    }> = [];
+    const messages: ChatMessage[] = [];
 
     for (const raw of rawMessages) {
       if (typeof raw === "object" && raw !== null) {
@@ -98,14 +70,19 @@ export const createForkCommandHandler = (
       }
     }
 
-    app.setMessages(messages);
-    app.setInfo({ threadId: cloned.id });
-    deps.showMessage(
-      `• Forked thread into: ${cloned.id}${title ? ` ("${title}")` : ""}`,
-    );
-  } catch (error: unknown) {
-    deps.showMessage(
-      `Failed to fork thread: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+    deps.dispatcher.emit({
+      type: "messages:set",
+      messages,
+    });
+
+    deps.dispatcher.emit({
+      type: "state:info",
+      info: { threadId },
+    });
+
+    deps.dispatcher.emit({
+      type: "system:message",
+      content: `Switched to thread: ${threadId}`,
+    });
+  };
 };

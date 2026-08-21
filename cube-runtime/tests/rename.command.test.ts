@@ -1,55 +1,63 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ActionDispatcher } from "../src/dispatcher.js";
 import { createRenameCommandHandler } from "../src/commands/rename.command.js";
+import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 test("RenameCommand blocks execution when agent turn is active", async () => {
-  let message = "";
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createRenameCommandHandler({
     session: { thread: { getId: () => "thread-1" } } as any,
-    getApp: () => undefined,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => true,
   });
 
   await handler("New Title");
-  assert.ok(message.includes("Cannot rename thread while an agent turn is active"));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes("Cannot rename thread while an agent turn is active"));
 });
 
 test("RenameCommand notifies when no active thread exists", async () => {
-  let message = "";
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createRenameCommandHandler({
     session: { thread: { getId: () => null } } as any,
-    getApp: () => undefined,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => false,
   });
 
   await handler("New Title");
-  assert.ok(message.includes("No active thread to rename"));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes("No active thread to rename"));
 });
 
 test("RenameCommand requires a non-empty title argument", async () => {
-  let message = "";
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createRenameCommandHandler({
     session: { thread: { getId: () => "thread-1" } } as any,
-    getApp: () => undefined,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => false,
   });
 
   await handler("   ");
-  assert.ok(message.includes("Usage: /rename <new-title>"));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes("Usage: /rename <new-title>"));
 });
 
 test("RenameCommand calls session.thread.rename and confirms to user", async () => {
-  let message = "";
   let renamedPayload: any;
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createRenameCommandHandler({
     session: {
       thread: {
@@ -59,10 +67,7 @@ test("RenameCommand calls session.thread.rename and confirms to user", async () 
         },
       },
     } as any,
-    getApp: () => undefined,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => false,
   });
 
@@ -70,5 +75,6 @@ test("RenameCommand calls session.thread.rename and confirms to user", async () 
   assert.deepEqual(renamedPayload, {
     title: "Refactor Auth Module",
   });
-  assert.ok(message.includes('Renamed thread to: "Refactor Auth Module"'));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes('Renamed thread to: "Refactor Auth Module"'));
 });

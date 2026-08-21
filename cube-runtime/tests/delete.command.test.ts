@@ -1,25 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ActionDispatcher } from "../src/dispatcher.js";
 import { createDeleteCommandHandler } from "../src/commands/delete.command.js";
+import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 test("DeleteCommand blocks execution when agent turn is active", async () => {
-  let message = "";
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createDeleteCommandHandler({
     session: {} as any,
-    getApp: () => undefined,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => true,
   });
 
   await handler("");
-  assert.ok(message.includes("Cannot delete thread while an agent turn is active"));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes("Cannot delete thread while an agent turn is active"));
 });
 
 test("DeleteCommand deletes specified threadId directly", async () => {
-  let message = "";
   let deletedId = "";
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
+
   const handler = createDeleteCommandHandler({
     session: {
       thread: {
@@ -29,33 +35,23 @@ test("DeleteCommand deletes specified threadId directly", async () => {
         },
       },
     } as any,
-    getApp: () => ({} as any),
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => false,
   });
 
   await handler("other-thread-2");
   assert.equal(deletedId, "other-thread-2");
-  assert.ok(message.includes("Deleted thread: other-thread-2"));
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.ok(sysMsg?.content?.includes("Deleted thread: other-thread-2"));
 });
 
 test("DeleteCommand resets active thread state when deleting current active thread", async () => {
-  let message = "";
   let deletedId = "";
   let detached = false;
-  let clearedMessages = false;
-  let updatedInfo: any;
 
-  const fakeApp = {
-    clearMessages: () => {
-      clearedMessages = true;
-    },
-    setInfo: (info: any) => {
-      updatedInfo = info;
-    },
-  };
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
 
   const handler = createDeleteCommandHandler({
     session: {
@@ -69,17 +65,17 @@ test("DeleteCommand resets active thread state when deleting current active thre
         },
       },
     } as any,
-    getApp: () => fakeApp as any,
-    showMessage: (msg) => {
-      message = msg;
-    },
+    dispatcher,
     isTurnActive: () => false,
   });
 
   await handler("active-thread-1");
   assert.equal(deletedId, "active-thread-1");
   assert.equal(detached, true);
-  assert.equal(clearedMessages, true);
-  assert.equal(updatedInfo.threadId, "new thread");
-  assert.ok(message.includes("Deleted active thread. Started a fresh thread session."));
+
+  const clearEvent = events.find((e) => e.type === "messages:clear");
+  assert.ok(clearEvent);
+
+  const infoEvent = events.find((e) => e.type === "state:info") as any;
+  assert.equal(infoEvent?.info?.threadId, "new thread");
 });

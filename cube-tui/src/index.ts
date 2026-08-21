@@ -16,6 +16,7 @@ import {
   type ReasoningEffort,
 } from "./components/model-picker.js";
 import type { ChatMessage, DisplayTool } from "./components/message-list.js";
+import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
 
 export type { ChatMessage, DisplayTool } from "./components/message-list.js";
 export type { ThreadPickerViewItem } from "./components/thread-picker.js";
@@ -37,14 +38,72 @@ export interface SlashCommandSuggestion {
   description: string;
 }
 
-export type TuiAction =
-  | { type: "prompt_submit"; content: string }
+export interface SystemInfo {
+  model?: string;
+  workspace?: string;
+  agentMd?: string;
+  threadId?: string;
+}
+
+export interface ThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: string;
+  isActive: boolean;
+}
+
+export interface UsageBoxMetrics {
+  title?: string;
+  model: string;
+  reasoningEffort?: string;
+  capabilities?: string[];
+  contextLimit: number;
+  maxOutput?: number;
+  activeTurnTokens?: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens?: number;
+  cachedTokens?: number;
+  cacheCreationTokens?: number;
+  totalTokens: number;
+  threadTitle?: string;
+  threadId: string;
+}
+
+export type CubeAction =
+  | { type: "prompt:submit"; content: string }
+  | { type: "command:submit"; name: `/${string}`; argument?: string }
   | {
-      type: "command_submit";
-      name: `/${string}`;
-      argument: string;
+      type: "model:select";
+      modelId: string;
+      reasoningEffort?: ReasoningEffort;
     }
-  | { type: "cancel" };
+  | { type: "thread:select"; threadId: string }
+  | { type: "turn:cancel" }
+  | { type: "app:exit" };
+
+export type CubeEvent =
+  | { type: "state:info"; info: SystemInfo }
+  | { type: "turn:start"; message?: string }
+  | { type: "turn:delta"; text: string }
+  | { type: "turn:tool"; tool: DisplayTool }
+  | { type: "turn:end" }
+  | { type: "message:add"; message: ChatMessage | string }
+  | { type: "message:upsert"; message: ChatMessage }
+  | { type: "messages:set"; messages: ChatMessage[] }
+  | { type: "messages:clear" }
+  | {
+      type: "dialog:model_picker";
+      providers: ProviderGroup[];
+      currentModelId?: string;
+      currentReasoningEffort?: ReasoningEffort;
+    }
+  | { type: "dialog:thread_picker"; threads: ThreadSummary[] }
+  | { type: "usage:metrics"; metrics: UsageBoxMetrics }
+  | { type: "system:message"; content: string }
+  | { type: "system:error"; error: string };
+
+export type TuiAction = CubeAction;
 
 export interface OpenThreadPickerOptions {
   threads: ThreadPickerViewItem[];
@@ -57,7 +116,7 @@ export interface OpenModelPickerOptions {
 }
 
 export interface CreateAppOptions {
-  onAction: (action: TuiAction) => void;
+  onAction: (action: CubeAction) => void;
   slashCommands?: SlashCommandSuggestion[];
   basePath?: string;
 }
@@ -65,6 +124,7 @@ export interface CreateAppOptions {
 export interface TuiApp {
   start: () => void;
   stop: () => void;
+  handleEvent: (event: CubeEvent) => void;
   addMessage: (msg: ChatMessage | string) => void;
   upsertMessage: (msg: ChatMessage) => void;
   upsertTool: (tool: DisplayTool) => void;
@@ -73,12 +133,7 @@ export interface TuiApp {
   startLoading: (message?: string) => void;
   updateLoading: (message: string) => void;
   stopLoading: () => void;
-  setInfo: (info: {
-    model?: string;
-    workspace?: string;
-    agentMd?: string;
-    threadId?: string;
-  }) => void;
+  setInfo: (info: SystemInfo) => void;
   openThreadPicker: (
     options: OpenThreadPickerOptions,
   ) => Promise<string | null>;
@@ -123,20 +178,22 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
   tui.setShowHardwareCursor(true);
 
   const screen = mountChatScreen(tui, {
-    onAction: options.onAction,
+    onAction: (action) => {
+      options.onAction(action);
+    },
     slashCommands: options.slashCommands ?? [],
     basePath: options.basePath ?? process.cwd(),
   });
 
   tui.addInputListener((data: string) => {
     if (matchesKey(data, "ctrl+c")) {
-      options.onAction({ type: "cancel" });
+      options.onAction({ type: "turn:cancel" });
       return { consume: true };
     }
     return undefined;
   });
 
-  return {
+  const app: TuiApp = {
     start: () => {
       setTerminalCursorShape("blinking-bar");
       tui.start();
@@ -144,6 +201,101 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
     stop: () => {
       resetTerminalCursorShape();
       tui.stop();
+    },
+    handleEvent: (event: CubeEvent) => {
+      switch (event.type) {
+        case "state:info":
+          screen.infoBox.setInfo(event.info);
+          screen.footer.setInfo(event.info);
+          tui.requestRender();
+          break;
+        case "turn:start":
+          screen.workingIndicator.start(event.message);
+          tui.requestRender();
+          break;
+        case "turn:delta":
+          screen.workingIndicator.stop();
+          screen.messageList.upsertMessage({
+            role: "assistant",
+            content: event.text,
+            status: "streaming",
+          });
+          tui.requestRender();
+          break;
+        case "turn:tool":
+          screen.messageList.upsertTool(event.tool);
+          tui.requestRender();
+          break;
+        case "turn:end":
+          screen.workingIndicator.stop();
+          tui.requestRender();
+          break;
+        case "message:add":
+          screen.messageList.addMessage(event.message);
+          tui.requestRender();
+          break;
+        case "message:upsert":
+          screen.messageList.upsertMessage(event.message);
+          tui.requestRender();
+          break;
+        case "messages:set":
+          screen.messageList.setMessages(event.messages);
+          tui.requestRender();
+          break;
+        case "messages:clear":
+          screen.messageList.clearMessages();
+          tui.requestRender();
+          break;
+        case "dialog:model_picker":
+          void app
+            .openModelPicker({
+              providers: event.providers,
+              currentModelId: event.currentModelId,
+              currentReasoningEffort: event.currentReasoningEffort,
+            })
+            .then((result) => {
+              if (result) {
+                options.onAction({
+                  type: "model:select",
+                  modelId: result.modelId,
+                  reasoningEffort: result.reasoningEffort,
+                });
+              }
+            });
+          break;
+        case "dialog:thread_picker":
+          void app
+            .openThreadPicker({
+              threads: event.threads,
+            })
+            .then((threadId) => {
+              if (threadId) {
+                options.onAction({
+                  type: "thread:select",
+                  threadId,
+                });
+              }
+            });
+          break;
+        case "usage:metrics":
+          screen.messageList.addMessage(renderUsageBoxToString(event.metrics));
+          tui.requestRender();
+          break;
+        case "system:message":
+          screen.messageList.addMessage({
+            role: "system",
+            content: event.content,
+          });
+          tui.requestRender();
+          break;
+        case "system:error":
+          screen.messageList.addMessage({
+            role: "system",
+            content: `Error: ${event.error}`,
+          });
+          tui.requestRender();
+          break;
+      }
     },
     addMessage: (msg: ChatMessage | string) => {
       screen.messageList.addMessage(msg);
@@ -242,4 +394,6 @@ export const CubeApp = (options: CreateAppOptions): TuiApp => {
       });
     },
   };
+
+  return app;
 };

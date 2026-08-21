@@ -5,7 +5,7 @@
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @cube/cli dev",
+    "dev": "pnpm --filter @cube/runtime dev",
     "dev:factory": "pnpm --filter @cube/factory-ui dev",
     "build": "pnpm --recursive run build",
     "typecheck": "tsc --build"

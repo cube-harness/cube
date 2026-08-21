@@ -49,13 +49,13 @@ export class PromptEditor implements Component, Focusable {
           spaceIndex === -1 ? "" : trimmed.slice(spaceIndex + 1).trim();
 
         options.onAction({
-          type: "command_submit",
+          type: "command:submit",
           name,
           argument,
         });
       } else {
         options.onAction({
-          type: "prompt_submit",
+          type: "prompt:submit",
           content: trimmed,
         });
       }

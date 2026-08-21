@@ -1,13 +1,14 @@
 import type { Home } from "@cube/workspace";
 import { ConfigStore, ModelManager } from "@cube/workspace";
 import type { Session } from "@cube/agent";
-import { renderUsageBoxToString } from "@cube/tui";
 import type { CommandHandler } from "../command-manager.js";
+import type { ActionDispatcher } from "../dispatcher.js";
+import type { UsageBoxMetrics } from "../contracts/events.contract.js";
 
 export interface UsageCommandDependencies {
   home: Home;
   session: Session;
-  showMessage: (message: string) => void;
+  dispatcher: ActionDispatcher;
 }
 
 export const createUsageCommandHandler = (
@@ -68,7 +69,7 @@ export const createUsageCommandHandler = (
     }
   }
 
-  const output = renderUsageBoxToString({
+  const metrics: UsageBoxMetrics = {
     model: activeModelId,
     reasoningEffort,
     capabilities,
@@ -83,7 +84,10 @@ export const createUsageCommandHandler = (
     totalTokens: usage.totalTokens,
     threadTitle,
     threadId: activeThreadId ?? "new thread",
-  });
+  };
 
-  deps.showMessage(output);
+  deps.dispatcher.emit({
+    type: "usage:metrics",
+    metrics,
+  });
 };

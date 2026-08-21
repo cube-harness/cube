@@ -4,7 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CubeHome, createBootstrap, ConfigStore } from "@cube/workspace";
+import { ActionDispatcher } from "../src/dispatcher.js";
 import { createUsageCommandHandler } from "../src/commands/usage.command.js";
+import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(join(tmpdir(), "cube-usage-test-"));
@@ -14,7 +16,7 @@ const createTestHome = async () => {
   return { home, tmp };
 };
 
-test("UsageCommand displays token statistics, active turn tokens, and thread title in UsageBox", async () => {
+test("UsageCommand computes metrics and emits usage:metrics event", async () => {
   const { home, tmp } = await createTestHome();
   try {
     await ConfigStore(home).update((curr) => ({
@@ -23,7 +25,6 @@ test("UsageCommand displays token statistics, active turn tokens, and thread tit
       model_config: { reasoning_effort: "high" },
     }));
 
-    let output = "";
     const session = {
       thread: {
         getId: () => "thread-usage-123",
@@ -44,29 +45,29 @@ test("UsageCommand displays token statistics, active turn tokens, and thread tit
       }),
     };
 
+    const dispatcher = new ActionDispatcher();
+    const events: CubeEvent[] = [];
+    dispatcher.subscribe((e) => events.push(e));
+
     const handler = createUsageCommandHandler({
       home,
       session: session as any,
-      showMessage: (msg) => {
-        output = msg;
-      },
+      dispatcher,
     });
 
     await handler("");
 
-    assert.ok(output.includes("Usage & Context Statistics"));
-    assert.ok(output.includes("google/gemini-2.5-flash (high)"));
-    assert.ok(output.includes("Capabilities"));
-    assert.ok(output.includes("Context Window"));
-    assert.ok(output.includes("6,127 /"));
-    assert.ok(output.includes("40,016 (Active Turn: 6,127)"));
-    assert.ok(output.includes("1,840"));
-    assert.ok(output.includes("538"));
-    assert.ok(output.includes("4,096 (Read: 4,096, Write: 1,024)"));
-    assert.ok(output.includes("41,856"));
-    assert.ok(output.includes("Refactor Authentication"));
-    assert.ok(output.includes("thread-usage-123"));
-    assert.ok(!output.includes("`thread-usage-123`"));
+    const usageEvent = events.find((e) => e.type === "usage:metrics") as any;
+    assert.ok(usageEvent);
+    assert.equal(usageEvent.metrics.model, "google/gemini-2.5-flash");
+    assert.equal(usageEvent.metrics.reasoningEffort, "high");
+    assert.equal(usageEvent.metrics.activeTurnTokens, 6127);
+    assert.equal(usageEvent.metrics.promptTokens, 40016);
+    assert.equal(usageEvent.metrics.completionTokens, 1840);
+    assert.equal(usageEvent.metrics.reasoningTokens, 538);
+    assert.equal(usageEvent.metrics.totalTokens, 41856);
+    assert.equal(usageEvent.metrics.threadTitle, "Refactor Authentication");
+    assert.equal(usageEvent.metrics.threadId, "thread-usage-123");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

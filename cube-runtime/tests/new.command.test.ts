@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Session } from "@mastra/core/agent-controller";
-import type { TuiApp } from "@cube/tui";
+import type { Session } from "@cube/agent";
+import { ActionDispatcher } from "../src/dispatcher.js";
 import { createNewCommandHandler } from "../src/commands/new.command.js";
+import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 const createMockSession = (overrides?: {
   isRunning?: boolean;
@@ -20,43 +21,31 @@ const createMockSession = (overrides?: {
   } as unknown as Session;
 };
 
-const createMockApp = (overrides?: {
-  onClearMessages?: () => void;
-  onSetInfo?: (info: unknown) => void;
-}) => {
-  return {
-    clearMessages: () => overrides?.onClearMessages?.(),
-    setInfo: (info: unknown) => overrides?.onSetInfo?.(),
-  } as unknown as TuiApp;
-};
-
 test("NewCommand blocks execution when agent turn is active", async () => {
-  const messages: string[] = [];
   let detached = false;
-
   const session = createMockSession({
     isRunning: true,
     onDetach: () => {
       detached = true;
     },
   });
-  const app = createMockApp();
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
 
   const handler = createNewCommandHandler({
     session,
-    getApp: () => app,
-    showMessage: (msg) => messages.push(msg),
+    dispatcher,
   });
 
   await handler("");
   assert.equal(detached, false);
-  assert.match(messages[0], /Cannot start new thread while an agent turn is active/);
+  const sysMsg = events.find((e) => e.type === "system:message") as any;
+  assert.match(sysMsg?.content, /Cannot start new thread while an agent turn is active/);
 });
 
-test("NewCommand detaches thread, clears UI messages, and updates info", async () => {
-  const messages: string[] = [];
+test("NewCommand detaches thread, clears messages, and updates info", async () => {
   let detached = false;
-  let cleared = false;
   let rotated = false;
 
   const session = createMockSession({
@@ -65,16 +54,13 @@ test("NewCommand detaches thread, clears UI messages, and updates info", async (
       detached = true;
     },
   });
-  const app = createMockApp({
-    onClearMessages: () => {
-      cleared = true;
-    },
-  });
+  const dispatcher = new ActionDispatcher();
+  const events: CubeEvent[] = [];
+  dispatcher.subscribe((e) => events.push(e));
 
   const handler = createNewCommandHandler({
     session,
-    getApp: () => app,
-    showMessage: (msg) => messages.push(msg),
+    dispatcher,
     onNewThread: () => {
       rotated = true;
     },
@@ -82,7 +68,11 @@ test("NewCommand detaches thread, clears UI messages, and updates info", async (
 
   await handler("");
   assert.equal(detached, true);
-  assert.equal(cleared, true);
   assert.equal(rotated, true);
-  assert.match(messages[0], /Started a new conversation thread/);
+
+  const clearEvent = events.find((e) => e.type === "messages:clear");
+  assert.ok(clearEvent);
+
+  const infoEvent = events.find((e) => e.type === "state:info") as any;
+  assert.equal(infoEvent?.info?.threadId, "new thread");
 });

@@ -1,11 +1,10 @@
 import type { Session } from "@cube/agent";
-import type { TuiApp } from "@cube/tui";
 import type { CommandHandler } from "../command-manager.js";
+import type { ActionDispatcher } from "../dispatcher.js";
 
 export interface NewCommandDependencies {
   session: Session;
-  getApp: () => TuiApp | undefined;
-  showMessage: (message: string) => void;
+  dispatcher: ActionDispatcher;
   onNewThread?: () => void;
 }
 
@@ -13,7 +12,10 @@ export const createNewCommandHandler = (
   deps: NewCommandDependencies,
 ): CommandHandler => async () => {
   if (deps.session.run.isRunning()) {
-    deps.showMessage("Cannot start new thread while an agent turn is active.");
+    deps.dispatcher.emit({
+      type: "system:message",
+      content: "Cannot start new thread while an agent turn is active.",
+    });
     return;
   }
 
@@ -21,11 +23,13 @@ export const createNewCommandHandler = (
   await deps.session.thread.clearAndReleaseLock();
   deps.onNewThread?.();
 
-  const app = deps.getApp();
-  if (app) {
-    app.clearMessages();
-    app.setInfo({ threadId: "new thread" });
-  }
-
-  deps.showMessage("Started a new conversation thread.");
+  deps.dispatcher.emit({ type: "messages:clear" });
+  deps.dispatcher.emit({
+    type: "state:info",
+    info: { threadId: "new thread" },
+  });
+  deps.dispatcher.emit({
+    type: "system:message",
+    content: "Started a new conversation thread.",
+  });
 };

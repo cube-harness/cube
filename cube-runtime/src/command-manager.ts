@@ -1,4 +1,4 @@
-import type { SlashCommandSuggestion } from "@cube/tui";
+import type { SlashCommandSuggestion } from "./contracts/events.contract.js";
 
 export type CommandHandler = (argument: string) => Promise<void>;
 

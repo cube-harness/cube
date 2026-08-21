@@ -54,7 +54,7 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  cube-cli:
+  cube-runtime:
     dependencies:
       '@cube/agent':
         specifier: workspace:*
@@ -65,13 +65,16 @@ importers:
       '@cube/workspace':
         specifier: workspace:*
         version: link:../cube-workspace
-      chalk:
-        specifier: 5.6.2
-        version: 5.6.2
     devDependencies:
       '@types/node':
         specifier: 22.13.1
         version: 22.13.1
+      tsx:
+        specifier: 4.19.3
+        version: 4.19.3
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
 
   cube-tui:
     dependencies:

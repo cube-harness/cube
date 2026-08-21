@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createModelCommandHandler } from "../src/commands/model.command.js";
+import { ActionDispatcher } from "../src/dispatcher.js";
 import { Home, createBootstrap, ConfigStore } from "@cube/workspace";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
+import type { CubeEvent } from "../src/contracts/events.contract.js";
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-model-test-"));
@@ -17,19 +19,20 @@ const createTestHome = async () => {
 test("ModelCommand blocks execution when turn is active", async () => {
   const { home, tmp } = await createTestHome();
   try {
-    let message = "";
+    const dispatcher = new ActionDispatcher();
+    const emittedEvents: CubeEvent[] = [];
+    dispatcher.subscribe((e) => emittedEvents.push(e));
+
     const handler = createModelCommandHandler({
       home,
-      getApp: () => undefined,
-      showMessage: (msg) => {
-        message = msg;
-      },
+      dispatcher,
       isTurnActive: () => true,
     });
 
     await handler("");
+    const sysMsg = emittedEvents.find((e) => e.type === "system:message") as any;
     assert.equal(
-      message,
+      sysMsg?.content,
       "Cannot open model picker while an agent turn is active.",
     );
   } finally {
@@ -40,17 +43,14 @@ test("ModelCommand blocks execution when turn is active", async () => {
 test("ModelCommand handles argument directly", async () => {
   const { home, tmp } = await createTestHome();
   try {
-    let message = "";
     let selected = "";
-    const fakeApp = {
-      setInfo: (_info: any) => {},
-    };
+    const dispatcher = new ActionDispatcher();
+    const emittedEvents: CubeEvent[] = [];
+    dispatcher.subscribe((e) => emittedEvents.push(e));
+
     const handler = createModelCommandHandler({
       home,
-      getApp: () => fakeApp as any,
-      showMessage: (msg) => {
-        message = msg;
-      },
+      dispatcher,
       isTurnActive: () => false,
       onModelSelected: (modelId) => {
         selected = modelId;
@@ -58,7 +58,8 @@ test("ModelCommand handles argument directly", async () => {
     });
 
     await handler("google/gemini-2.5-flash");
-    assert.ok(message.includes("google/gemini-2.5-flash"));
+    const sysMsg = emittedEvents.find((e) => e.type === "system:message") as any;
+    assert.ok(sysMsg?.content?.includes("google/gemini-2.5-flash"));
     assert.equal(selected, "google/gemini-2.5-flash");
 
     const config = await ConfigStore(home).read();
@@ -68,48 +69,27 @@ test("ModelCommand handles argument directly", async () => {
   }
 });
 
-test("ModelCommand opens model picker, persists config, and updates InfoBox", async () => {
+test("ModelCommand emits dialog:model_picker event", async () => {
   const { home, tmp } = await createTestHome();
   const originalKey = process.env.GOOGLE_API_KEY;
   try {
     process.env.GOOGLE_API_KEY = "test-google-key";
-    let message = "";
-    let openedProvidersCount = 0;
-    let infoUpdatedWith = "";
-    const fakeApp = {
-      startLoading: (_msg?: string) => {},
-      stopLoading: () => {},
-      openModelPicker: async ({ providers }: { providers: any[] }) => {
-        openedProvidersCount = providers.length;
-        return {
-          modelId: "google/gemini-2.5-flash",
-          reasoningEffort: "high",
-        };
-      },
-      setInfo: (info: any) => {
-        infoUpdatedWith = info.model;
-      },
-    };
+    const dispatcher = new ActionDispatcher();
+    const emittedEvents: CubeEvent[] = [];
+    dispatcher.subscribe((e) => emittedEvents.push(e));
 
     const handler = createModelCommandHandler({
       home,
-      getApp: () => fakeApp as any,
-      showMessage: (msg) => {
-        message = msg;
-      },
+      dispatcher,
       isTurnActive: () => false,
     });
 
     await handler("");
-    assert.ok(openedProvidersCount > 0);
-    assert.ok(message.includes("google/gemini-2.5-flash"));
-    assert.ok(message.includes("high"));
-    assert.ok(infoUpdatedWith.includes("google/gemini-2.5-flash"));
-    assert.ok(infoUpdatedWith.includes("high"));
-
-    const config = await ConfigStore(home).read();
-    assert.equal(config.model, "google/gemini-2.5-flash");
-    assert.equal(config.model_config?.reasoning_effort, "high");
+    const dialogEvent = emittedEvents.find(
+      (e) => e.type === "dialog:model_picker",
+    ) as any;
+    assert.ok(dialogEvent);
+    assert.ok(dialogEvent.providers.length > 0);
   } finally {
     if (originalKey) {
       process.env.GOOGLE_API_KEY = originalKey;
