@@ -49,9 +49,9 @@ export class ModelPickerComponent extends Container implements Component {
   private step: "provider" | "model" | "reasoning" = "provider";
   private selectedProvider?: ProviderGroup;
   private selectedModel?: ModelItem;
-  private searchQuery: string = "";
+  private searchQuery = "";
 
-  private providerList: SelectList;
+  private readonly providerList: SelectList;
   private modelList?: SelectList;
   private reasoningList?: SelectList;
 
@@ -99,7 +99,6 @@ export class ModelPickerComponent extends Container implements Component {
 
     this.addChild(this.title);
     this.addChild(this.searchDisplay);
-    this.addChild(this.providerList);
     this.addChild(this.hint);
   }
 
@@ -153,14 +152,9 @@ export class ModelPickerComponent extends Container implements Component {
       this.switchToProviderStep();
     };
 
-    this.removeChild(this.providerList);
-    this.removeChild(this.hint);
-    this.addChild(this.modelList);
-
     this.hint.setText(
       theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Model • Esc: Back"),
     );
-    this.addChild(this.hint);
   }
 
   private switchToReasoningStep(model: ModelItem): void {
@@ -212,16 +206,9 @@ export class ModelPickerComponent extends Container implements Component {
       }
     };
 
-    if (this.modelList) {
-      this.removeChild(this.modelList);
-    }
-    this.removeChild(this.hint);
-    this.addChild(this.reasoningList);
-
     this.hint.setText(
       theme.muted("↑/↓: Navigate • Enter: Confirm • Esc: Back"),
     );
-    this.addChild(this.hint);
   }
 
   private switchToProviderStep(): void {
@@ -233,27 +220,44 @@ export class ModelPickerComponent extends Container implements Component {
     this.updateSearchDisplay();
 
     this.title.setText(theme.primary.bold("Select AI Provider"));
-
-    if (this.modelList) {
-      this.removeChild(this.modelList);
-    }
-    if (this.reasoningList) {
-      this.removeChild(this.reasoningList);
-    }
-    this.removeChild(this.hint);
-
     this.providerList.setFilter("");
-    this.addChild(this.providerList);
 
     this.hint.setText(
       theme.muted("↑/↓: Navigate • Type: Search • Enter: Select Provider • Esc: Cancel"),
     );
-    this.addChild(this.hint);
+  }
+
+  render(width: number): string[] {
+    const lines: string[] = [];
+
+    // 1. Render Title
+    lines.push(...this.title.render(width));
+    lines.push(""); // Spacing between Title and Search Bar
+
+    // 2. Render Search Bar
+    lines.push(...this.searchDisplay.render(width));
+    lines.push(""); // Spacing between Search Bar and List
+
+    // 3. Render Active Step List
+    if (this.step === "reasoning" && this.reasoningList) {
+      lines.push(...this.reasoningList.render(width));
+    } else if (this.step === "model" && this.modelList) {
+      lines.push(...this.modelList.render(width));
+    } else {
+      lines.push(...this.providerList.render(width));
+    }
+
+    lines.push(""); // Spacing before Hint
+
+    // 4. Render Hint
+    lines.push(...this.hint.render(width));
+
+    return lines;
   }
 
   handleInput(data: string): void {
     // 1. Handle Escape
-    if (matchesKey(data, Key.escape) || data === "\x1b") {
+    if (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape") {
       if (this.searchQuery.length > 0) {
         this.searchQuery = "";
         this.updateSearchDisplay();
@@ -284,6 +288,11 @@ export class ModelPickerComponent extends Container implements Component {
       matchesKey(data, Key.enter) ||
       matchesKey(data, Key.pageUp) ||
       matchesKey(data, Key.pageDown) ||
+      data === "\x1b[A" ||
+      data === "\x1b[B" ||
+      data === "up" ||
+      data === "down" ||
+      data === "enter" ||
       data === "\r" ||
       data === "\n"
     ) {
@@ -305,7 +314,8 @@ export class ModelPickerComponent extends Container implements Component {
     if (
       matchesKey(data, Key.backspace) ||
       data === "\x7f" ||
-      data === "\b"
+      data === "\b" ||
+      data === "backspace"
     ) {
       if (this.searchQuery.length > 0) {
         this.searchQuery = this.searchQuery.slice(0, -1);

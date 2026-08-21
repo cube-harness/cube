@@ -1,9 +1,9 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import chalk, { type ChalkInstance } from "chalk";
 import { getTheme } from "../themes/color.schema.js";
 
 export interface UsageBoxContent {
+  title?: string;
   model: string;
   reasoningEffort?: string;
   capabilities?: string[];
@@ -25,14 +25,29 @@ export class UsageBox implements Component {
 
   private paddingX = 2;
   private paddingY = 1;
+  private title = "Usage & Context Statistics";
 
-  constructor(private content: UsageBoxContent) {}
+  constructor(
+    title: string = "Usage & Context Statistics",
+    private content?: UsageBoxContent,
+  ) {
+    this.title = title;
+  }
+
+  setTitle(title: string): void {
+    this.title = title;
+  }
 
   setContent(content: UsageBoxContent): void {
     this.content = content;
+    if (content.title) {
+      this.title = content.title;
+    }
   }
 
   render = (width: number): string[] => {
+    if (!this.content) return [];
+
     const theme = getTheme();
     const borderChalk = theme.border;
     const titleChalk = theme.assistant;
@@ -123,8 +138,8 @@ export class UsageBox implements Component {
       if (w > maxTextWidth) maxTextWidth = w;
     }
 
-    const title = " Usage & Context Statistics ";
-    const titleWidth = visibleWidth(title);
+    const formattedTitle = ` ${this.title} `;
+    const titleWidth = visibleWidth(formattedTitle);
 
     const innerWidth = this.paddingX * 2 + maxTextWidth;
     const idealBoxWidth = Math.max(innerWidth + 2, titleWidth + 6);
@@ -134,7 +149,7 @@ export class UsageBox implements Component {
     const rightDashCount = Math.max(0, boxWidth - titleWidth - 3);
     const topLine =
       borderChalk("╭─") +
-      titleChalk(title) +
+      titleChalk(formattedTitle) +
       borderChalk("─".repeat(rightDashCount)) +
       borderChalk("╮");
     const bottomLine =
@@ -180,7 +195,8 @@ export class UsageBox implements Component {
 export const renderUsageBoxToString = (
   content: UsageBoxContent,
   width: number = 80,
+  title: string = "Usage & Context Statistics",
 ): string => {
-  const box = new UsageBox(content);
+  const box = new UsageBox(content.title || title, content);
   return box.render(width).join("\n");
 };
