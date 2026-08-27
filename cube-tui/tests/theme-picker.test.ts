@@ -39,7 +39,7 @@ test("ThemePickerOverlay supports keyboard navigation and Enter to select", () =
   });
 
   // Navigate down to Dracula
-  overlay.handleInput("down");
+  overlay.handleInput("\x1b[B");
   overlay.handleInput("\r");
 
   assert.equal(selected, "dracula");

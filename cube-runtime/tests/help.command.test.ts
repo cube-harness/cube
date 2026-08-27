@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CommandManager } from "../src/command-manager.js";
-import { createHelpCommandHandler } from "../src/commands/help.command.js";
+import { createHelpCommand } from "../src/commands/help.command.js";
 
 test("HelpCommand outputs a Markdown table of registered commands", async () => {
   let output = "";
@@ -23,7 +23,7 @@ test("HelpCommand outputs a Markdown table of registered commands", async () => 
     {
       name: "/help",
       description: "Show available commands",
-      handler: createHelpCommandHandler({
+      handler: createHelpCommand({
         commandManager,
         showMessage: (msg) => {
           output = msg;

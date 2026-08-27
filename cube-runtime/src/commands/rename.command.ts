@@ -8,7 +8,7 @@ export interface RenameCommandDependencies {
   isTurnActive?: () => boolean;
 }
 
-export const createRenameCommandHandler = (
+export const createRenameCommand = (
   deps: RenameCommandDependencies,
 ): CommandHandler => async (rawArgument: string) => {
   if (deps.isTurnActive?.()) {

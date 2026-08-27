@@ -5,7 +5,7 @@ export interface HelpCommandDependencies {
   showMessage: (message: string) => void;
 }
 
-export const createHelpCommandHandler = (
+export const createHelpCommand = (
   deps: HelpCommandDependencies,
 ): CommandHandler => async () => {
   const suggestions = deps.commandManager.suggestions;

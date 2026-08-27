@@ -1,11 +1,11 @@
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "default";
 
 export interface ModelItem {
   modelId: string;
   name: string;
-  provider: string;
   family?: string;
   reasoning?: boolean;
+  reasoning_efforts?: string[];
   tool_call?: boolean;
   attachment?: boolean;
   limit?: { context: number; output: number };
@@ -31,19 +31,14 @@ export interface ChatMessage {
   timestamp?: Date;
   status?: "pending" | "streaming" | "done" | "error";
   toolName?: string;
+  tool?: DisplayTool;
 }
 
 export interface DisplayTool {
   id: string;
   name: string;
   args: unknown;
-  status:
-    | "streaming_input"
-    | "waiting_approval"
-    | "running"
-    | "completed"
-    | "error"
-    | "declined";
+  status: "streaming_input" | "waiting_approval" | "running" | "completed" | "error" | "declined";
   partialResult?: string;
   result?: unknown;
   shellOutput?: string;
@@ -86,8 +81,8 @@ export interface SlashCommandSuggestion {
   description: string;
 }
 
-// Actions that any UI front-end (TUI, Web, Desktop, VSCode) dispatches to the Runtime
-export type CubeAction =
+/** Commands a Cube UI sends to the shared runtime. Native Session operations stay on Session. */
+export type CubeUIAction =
   | { type: "prompt:submit"; content: string }
   | { type: "command:submit"; name: `/${string}`; argument?: string }
   | {
@@ -97,19 +92,15 @@ export type CubeAction =
     }
   | { type: "thread:select"; threadId: string }
   | { type: "theme:select"; themeId: string }
-  | { type: "turn:cancel" }
+  | { type: "title:select"; appTitle: string[] }
+  | { type: "statusline:select"; statusLine: string[] }
   | { type: "app:exit" };
 
-// Typed Data Events that Runtime emits to subscribers for autonomous rendering
-export type CubeEvent =
+/** Cube-specific UI notifications. Agent lifecycle and transcript use native Session events. */
+export type CubeUIEvent =
   | { type: "state:info"; info: SystemInfo }
-  | { type: "turn:start"; message?: string }
-  | { type: "turn:delta"; text: string }
-  | { type: "turn:tool"; tool: DisplayTool }
-  | { type: "turn:end" }
-  | { type: "message:add"; message: ChatMessage | string }
-  | { type: "message:upsert"; message: ChatMessage }
-  | { type: "messages:set"; messages: ChatMessage[] }
+  | { type: "activity:start"; id: string; message: string }
+  | { type: "activity:end"; id: string }
   | { type: "messages:clear" }
   | {
       type: "dialog:model_picker";
@@ -119,8 +110,10 @@ export type CubeEvent =
     }
   | { type: "dialog:thread_picker"; threads: ThreadSummary[] }
   | { type: "dialog:theme"; currentThemeId?: string }
+  | { type: "dialog:title_picker"; currentAppTitle?: string[] }
+  | { type: "dialog:statusline_picker"; currentStatusLine?: string[] }
   | { type: "usage:metrics"; metrics: UsageBoxMetrics }
   | { type: "system:message"; content: string }
   | { type: "system:error"; error: string };
 
-export type CubeEventListener = (event: CubeEvent) => void;
+export type CubeUIEventListener = (event: CubeUIEvent) => void;

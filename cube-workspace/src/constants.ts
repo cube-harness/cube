@@ -18,6 +18,7 @@ export const HOME_FILES = {
 
 export const HOME_LIMITS = {
   soulMaxCharacters: 20000,
+  modelCatalogTtlMs: 24 * 60 * 60 * 1000,
 } as const;
 
 export type HomePath = (typeof HOME_PATHS)[keyof typeof HOME_PATHS];

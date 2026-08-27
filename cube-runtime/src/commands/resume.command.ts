@@ -1,14 +1,14 @@
 import type { Session } from "@cube/agent";
 import type { CommandHandler } from "../command-manager.js";
 import type { ActionDispatcher } from "../dispatcher.js";
-import type { ThreadSummary } from "../contracts/events.contract.js";
+import type { ThreadSummary } from "../contracts/ui.contract.js";
 
 export interface ResumeCommandDependencies {
   session: Session;
   dispatcher: ActionDispatcher;
 }
 
-export const createResumeCommandHandler = (
+export const createResumeCommand = (
   deps: ResumeCommandDependencies,
 ): CommandHandler => async () => {
   if (deps.session.run.isRunning()) {

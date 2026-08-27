@@ -1,6 +1,6 @@
 // cube-tui/src/components/footer.ts
 import type { Component } from "@earendil-works/pi-tui";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
 import type { InfoBoxContent } from "./info-box.js";
 
@@ -11,11 +11,30 @@ export class Footer implements Component {
   private workspace: string = "D:/cube";
   private agentMd: string = "AGENT.md (active)";
   private threadId: string = "thread_default";
+  private status: string = "Idle";
+  private statusLine: string[] = ["model", "workspace", "agentMd", "threadId"];
 
-  constructor(info?: InfoBoxContent) {
+  constructor(info?: InfoBoxContent, statusLine?: string[]) {
     if (info) {
       this.setInfo(info);
     }
+    if (statusLine && statusLine.length > 0) {
+      this.statusLine = statusLine;
+    }
+  }
+
+  setStatusLine(statusLine: string[]) {
+    if (statusLine && statusLine.length > 0) {
+      this.statusLine = statusLine;
+    }
+  }
+
+  getStatusLine(): string[] {
+    return [...this.statusLine];
+  }
+
+  setStatus(status: string) {
+    this.status = status;
   }
 
   setInfo(info: InfoBoxContent) {
@@ -28,12 +47,21 @@ export class Footer implements Component {
   render(width: number): string[] {
     const theme = getTheme();
     const boxWidth = Math.max(width, 20);
-
     const divider = theme.muted(" • ");
 
-    // Chỉ hiển thị giá trị thuần túy (không kèm nhãn prefix): model │ workspace │ agentMd │ threadId
-    const fullLine = `${theme.primary(this.model)}${divider}${theme.primary(this.workspace)}${divider}${theme.primary(this.agentMd)}${divider}${theme.primary(this.threadId)}`;
+    const parts: string[] = [];
+    for (const key of this.statusLine) {
+      if (key === "model" && this.model) parts.push(theme.primary(this.model));
+      else if (key === "workspace" && this.workspace) parts.push(theme.primary(this.workspace));
+      else if (key === "agentMd" && this.agentMd) parts.push(theme.primary(this.agentMd));
+      else if (key === "threadId" && this.threadId) parts.push(theme.primary(this.threadId));
+      else if (key === "status" && this.status) parts.push(theme.primary(this.status));
+    }
 
-    return [truncateToWidth(fullLine, boxWidth)];
+    const fullLine = parts.join(divider);
+    const truncated = truncateToWidth(fullLine, boxWidth);
+    const visible = visibleWidth(truncated);
+    const padding = " ".repeat(Math.max(0, boxWidth - visible));
+    return [padding + truncated];
   }
 }

@@ -1,25 +1,21 @@
-import type {
-  CubeAction,
-  CubeEvent,
-  CubeEventListener,
-} from "./contracts/events.contract.js";
+import type { CubeUIAction, CubeUIEvent, CubeUIEventListener } from "./contracts/ui.contract.js";
 
 export class ActionDispatcher {
-  private readonly listeners = new Set<CubeEventListener>();
-  private actionHandler?: (action: CubeAction) => Promise<void>;
+  private readonly listeners = new Set<CubeUIEventListener>();
+  private actionHandler?: (action: CubeUIAction) => Promise<void>;
 
-  setActionHandler(handler: (action: CubeAction) => Promise<void>): void {
+  setActionHandler(handler: (action: CubeUIAction) => Promise<void>): void {
     this.actionHandler = handler;
   }
 
-  subscribe(listener: CubeEventListener): () => void {
+  subscribe(listener: CubeUIEventListener): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
   }
 
-  emit(event: CubeEvent): void {
+  emit(event: CubeUIEvent): void {
     for (const listener of this.listeners) {
       try {
         listener(event);
@@ -29,7 +25,7 @@ export class ActionDispatcher {
     }
   }
 
-  async dispatch(action: CubeAction): Promise<void> {
+  async dispatch(action: CubeUIAction): Promise<void> {
     if (!this.actionHandler) {
       console.warn("No action handler registered on ActionDispatcher");
       return;

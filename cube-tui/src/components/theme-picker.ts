@@ -2,9 +2,8 @@
 import {
   Container,
   Text,
-  Key,
-  matchesKey,
   SelectList,
+  Markdown,
   visibleWidth,
   truncateToWidth,
   type SelectItem,
@@ -12,8 +11,9 @@ import {
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { getTheme, getAvailableThemes, THEMES, type ColorTheme } from "../themes/color.schema.js";
-import { createSelectListTheme } from "../themes/pi-tui.theme.js";
+import { createSelectListTheme, createMarkdownTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
+import { formatBinding } from "../keybindings.js";
 
 export interface ThemePickerItem {
   id: string;
@@ -27,6 +27,39 @@ export interface ThemePickerOptions {
   onCancel: () => void;
 }
 
+/**
+ * Sample markdown fed through the REAL `Markdown` component + REAL
+ * `createMarkdownTheme(previewTheme)` for every preview render. This used to
+ * be a hand-simulated box (each line built by hand with raw `t.xxx()` calls,
+ * copied over from antigravity-cli) that could silently drift from what the
+ * app actually renders — a heading, a link, or the new syntax-highlighted
+ * code block could look one way here and another way in the real TUI. Piping
+ * the same string through the same component + theme factory the rest of
+ * the app uses means the preview IS the real render, by construction, not an
+ * approximation of it — and it automatically covers every MarkdownTheme
+ * field (heading/bold/italic/strikethrough/link/code/codeBlock+highlightCode/
+ * quote/hr/list) without anyone having to keep a second hand-written sample
+ * in sync by hand.
+ */
+const MARKDOWN_PREVIEW_SAMPLE = `## greet.ts
+
+Sure — here's the plan: export \`greet(name)\` with input *validation* and a **regression test**.
+
+- Called from \`src/index.ts\`
+- Covered by [the test suite](file:///path/to/greet.test.ts)
+
+\`\`\`ts
+function greet(name: string) {
+  // guard against empty input
+  if (!name) throw new Error("name required");
+  return \`Hello, \${name}!\`;
+}
+\`\`\`
+
+> Replaces the old \`sayHi()\` helper — see the diff below.
+
+~~sayHi() removed~~`;
+
 export class ThemePickerOverlay extends Container implements Component, Focusable {
   focused = true;
   private readonly title: Text;
@@ -37,8 +70,12 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
   constructor(private readonly options: ThemePickerOptions) {
     super();
     const currentTheme = getTheme();
-    const availableThemes = options.themes && options.themes.length > 0 ? options.themes : getAvailableThemes();
-    const activeId = options.currentThemeId || Object.keys(THEMES).find((k) => THEMES[k] === currentTheme) || "default";
+    const availableThemes =
+      options.themes && options.themes.length > 0 ? options.themes : getAvailableThemes();
+    const activeId =
+      options.currentThemeId ||
+      Object.keys(THEMES).find((k) => THEMES[k] === currentTheme) ||
+      "default";
 
     this.hoveredThemeId = activeId;
     this.title = new Text(currentTheme.primary.bold("Color Scheme"), 0, 0);
@@ -76,9 +113,9 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     };
 
     this.hint = new KeyHint([
-      { key: "↑/↓", label: "Navigate" },
-      { key: "Enter", label: "Apply Theme" },
-      { key: "Esc", label: "Cancel" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      { key: formatBinding("tui.select.confirm"), label: "Apply Theme" },
+      { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
 
     this.addChild(this.title);
@@ -100,77 +137,91 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
 
     lines.push(topBorder);
 
-    // 1. User Message
+    // --- ACTOR strip: who's speaking. Not covered by MarkdownTheme, so
+    // still drawn directly from the ColorTheme, but each row now uses ONE
+    // consistent convention instead of the old ad-hoc mix: informational
+    // rows (user/assistant/tool/task) lead with a neutral `muted` label and
+    // let the VALUE carry the color (color = "what/who"); SIGNAL rows
+    // (error/warning) lead with the color ON the label itself, because an
+    // alert should grab the eye at the icon, before you've even read the
+    // message.
     const userLine = `> you: add a greeting function`;
     lines.push(formatLine(t.user(userLine), visibleWidth(userLine)));
-
-    // 2. Empty spacer
     lines.push(formatLine("", 0));
 
-    // 3. Assistant intro
-    const asstLine = `  Here's the change:`;
-    lines.push(formatLine(t.assistant(asstLine), visibleWidth(asstLine)));
-
-    // 4. Empty spacer
+    // --- Real markdown, real component, real (previewed) theme. The reply
+    // itself opens with "Sure — here's the plan..." (inside the markdown
+    // string below), so there's no separate hand-written assistant intro
+    // line here — that used to duplicate the markdown's own opening
+    // sentence. Renders
+    // heading/bold/italic/strikethrough/list/inline-code/link/quote AND the
+    // syntax-highlighted code block in one pass, guaranteed to match
+    // production because it IS production's Markdown + theme factory.
+    const markdown = new Markdown(MARKDOWN_PREVIEW_SAMPLE, 0, 0, createMarkdownTheme(t));
+    for (const mdLine of markdown.render(innerWidth)) {
+      lines.push(formatLine(mdLine, visibleWidth(mdLine)));
+    }
     lines.push(formatLine("", 0));
 
-    // 5. Code diff sample
-    const diff1 = `  3   import "fmt"`;
+    // --- Diff sample: same file/language as the code block above
+    // (src/greet.ts, TypeScript) — was Go (`func main()`) before, which had
+    // nothing to do with the TS snippet just shown two sections up. Whole
+    // line colored success/error, the established convention for +/- diff
+    // rows (not a MarkdownTheme concern).
+    const diff1 = `  3   // src/greet.ts`;
     lines.push(formatLine(t.muted(diff1), visibleWidth(diff1)));
-
-    const diff2 = `  4`;
-    lines.push(formatLine(t.muted(diff2), visibleWidth(diff2)));
-
-    const diff3Raw = `  5 - func main() {`;
-    lines.push(formatLine(t.error(diff3Raw), visibleWidth(diff3Raw)));
-
-    const diff4Raw = `  5 + func greet(name string) {`;
-    lines.push(formatLine(t.success(diff4Raw), visibleWidth(diff4Raw)));
-
-    const diff5Raw = `  6 +     fmt.Printf("Hello, %s!\\n", name)`;
-    lines.push(formatLine(t.success(diff5Raw), visibleWidth(diff5Raw)));
-
-    const diff6Raw = `  7   }`;
-    lines.push(formatLine(t.muted(diff6Raw), visibleWidth(diff6Raw)));
-
-    // 6. Empty spacer
+    const diff2Raw = `  5 - function sayHi() {`;
+    lines.push(formatLine(t.error(diff2Raw), visibleWidth(diff2Raw)));
+    const diff3Raw = `  5 + function greet(name: string) {`;
+    lines.push(formatLine(t.success(diff3Raw), visibleWidth(diff3Raw)));
     lines.push(formatLine("", 0));
 
-    // 7. Thought Process
-    const thoughtTitle = `   ▾ Thought Process`;
+    // --- Agent status strip: thought process, tool call, task, signals.
+    const thoughtTitle = `▾ Thought Process`;
     lines.push(formatLine(t.secondary(thoughtTitle), visibleWidth(thoughtTitle)));
-
-    const thoughtDesc = `     I need to add a greeting function. I'll use fmt.Printf.`;
+    const thoughtDesc = `  Need to validate empty input before formatting the greeting.`;
     lines.push(formatLine(t.muted(thoughtDesc), visibleWidth(thoughtDesc)));
 
-    // 8. Tool, Task, Signal tokens
-    const toolPrefix = `   ⚙ tool: `;
-    const toolVal = `write_file main.go`;
-    lines.push(formatLine(`${t.muted(toolPrefix)}${t.tool(toolVal)}`, visibleWidth(`${toolPrefix}${toolVal}`)));
+    const toolPrefix = `⚙ tool: `;
+    const toolVal = `write_file greet.ts`;
+    lines.push(
+      formatLine(
+        `${t.muted(toolPrefix)}${t.tool(toolVal)}`,
+        visibleWidth(`${toolPrefix}${toolVal}`),
+      ),
+    );
 
-    const taskPrefix = `   ◉ task: `;
+    const taskPrefix = `◉ task: `;
     const taskVal = `Implementing greeting`;
-    lines.push(formatLine(`${t.muted(taskPrefix)}${t.primary(taskVal)}`, visibleWidth(`${taskPrefix}${taskVal}`)));
+    lines.push(
+      formatLine(
+        `${t.muted(taskPrefix)}${t.primary(taskVal)}`,
+        visibleWidth(`${taskPrefix}${taskVal}`),
+      ),
+    );
 
-    const errPrefix = `   ✗ error: `;
+    // SIGNAL rows: color leads on the label/icon itself (see convention note
+    // above), value stays in `assistant` since the message body is ordinary
+    // readable text, not itself the alert.
+    const errPrefix = `✗ error: `;
     const errVal = `compilation failed`;
-    lines.push(formatLine(`${t.error(errPrefix)}${t.assistant(errVal)}`, visibleWidth(`${errPrefix}${errVal}`)));
+    lines.push(
+      formatLine(
+        `${t.error(errPrefix)}${t.assistant(errVal)}`,
+        visibleWidth(`${errPrefix}${errVal}`),
+      ),
+    );
 
-    const warnPrefix = `   ⚠ warning: `;
+    const warnPrefix = `⚠ warning: `;
     const warnVal = `deprecation warning`;
-    lines.push(formatLine(`${t.warning(warnPrefix)}${t.assistant(warnVal)}`, visibleWidth(`${warnPrefix}${warnVal}`)));
+    lines.push(
+      formatLine(
+        `${t.warning(warnPrefix)}${t.assistant(warnVal)}`,
+        visibleWidth(`${warnPrefix}${warnVal}`),
+      ),
+    );
 
-    // 9. Link line (Underline strictly on URL only, never trailing or on prefix)
-    const linkPrefix = `   → link: `;
-    const linkUrl = `file:///path/to/main.go`;
-    lines.push(formatLine(`${t.muted(linkPrefix)}${t.primary.underline(linkUrl)}`, visibleWidth(`${linkPrefix}${linkUrl}`)));
-
-    // 10. Accent and Dim
-    const accentPrefix = `   ★ accent: `;
-    const accentVal = `highlighted text`;
-    lines.push(formatLine(`${t.muted(accentPrefix)}${t.codeAccent(accentVal)}`, visibleWidth(`${accentPrefix}${accentVal}`)));
-
-    const dimLine = `   · dim: press Enter to continue`;
+    const dimLine = `· dim: press Enter to apply this theme`;
     lines.push(formatLine(t.muted(dimLine), visibleWidth(dimLine)));
 
     lines.push(bottomBorder);
@@ -214,33 +265,10 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape") {
-      this.options.onCancel();
-      return;
-    }
-
-    if (
-      matchesKey(data, Key.up) ||
-      matchesKey(data, Key.down) ||
-      matchesKey(data, Key.pageUp) ||
-      matchesKey(data, Key.pageDown) ||
-      matchesKey(data, Key.home) ||
-      matchesKey(data, Key.end) ||
-      matchesKey(data, Key.enter) ||
-      data === "\x1b[A" ||
-      data === "\x1b[B" ||
-      data === "\r" ||
-      data === "\n" ||
-      data === "up" ||
-      data === "down" ||
-      data === "enter"
-    ) {
-      const keyData = data === "down" ? "\x1b[B" : data === "up" ? "\x1b[A" : data === "enter" ? "\r" : data;
-      this.selectList.handleInput(keyData);
-      const currentSelected = this.selectList.getSelectedItem();
-      if (currentSelected) {
-        this.hoveredThemeId = currentSelected.value;
-      }
+    this.selectList.handleInput(data);
+    const currentSelected = this.selectList.getSelectedItem();
+    if (currentSelected) {
+      this.hoveredThemeId = currentSelected.value;
     }
   }
 }

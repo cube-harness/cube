@@ -1,60 +1,148 @@
 version: 1
-model: ollama/qwen2.5:7b
+model: google/gemini-3.7-flash
 model_config: {}
-fallback_model: google/gemini-2.5-flash
+fallback_model: ollama/qwen2.5:7b
 
-theme: dark
+theme: default
+
+app_title:
+  - model
+  - workspace
+  - threadId
+
+status_line:
+  - model
+  - workspace
+  - agentMd
+  - threadId
+
 telemetry: false
 
 soul:
   max_characters: 20000
 
 memory:
+  # Cube currently supports only local SQLite storage. Cube owns the database
+  # ID, URL and <CubeHome>/memories/memory.sqlite path.
+  storage:
+    provider: sqlite
+    mode: local
+
+  # Optional vector storage. Enable it when Semantic Recall or vector-based
+  # observational retrieval is enabled.
+  vector:
+    enabled: false
+    provider: sqlite
+    mode: local
+
+  # Required for vector search. When enabled, model must be a concrete
+  # embedding model ID such as openai/text-embedding-3-small.
+  embedder:
+    enabled: false
+    model: null
+
+  # When disabled, Cube derives the title from the first user prompt without
+  # an LLM call. model accepts inherit or a concrete provider/model ID.
+  generate_title:
+    enabled: false
+    model: inherit
+    instructions: Generate a concise title under 80 characters.
+
+  # RAG search over historical raw messages. Enabling this requires both
+  # vector.enabled and embedder.enabled.
+  semantic_recall:
+    enabled: false
+    top_k: 4
+    message_range:
+      before: 1
+      after: 1
+    scope: resource
+    # null disables similarity-score filtering.
+    threshold: null
+
   working_memory:
     enabled: true
-    scope: resource
+    scope: thread
+    # With state signals, the main-agent tool is named setWorkingMemory when
+    # agent_managed is enabled.
     use_state_signals: true
+    # The Observer owns updates by default. Set true to also give the main
+    # agent a Working Memory tool.
     agent_managed: false
     template: |
-      # Workspace State
-      - Current objective:
-      - Important constraints:
-      - Technical decisions:
-      - Open tasks:
-      - Blockers:
+      # Thread Task State
+
+      ## Objective
+
+      ## Success Criteria
+
+      ## Constraints
+
+      ## Decisions
+
+      ## Progress
+
+      ## Working Set
+
+      ## Blockers
+
+      ## Next Action
 
   observational_memory:
     enabled: true
     scope: thread
-    model: inherit
-    activate_after_idle: auto
+
+    # Observation activation settings supported through new Memory(...).
+    # activate_after_idle accepts false, auto, a duration such as 5m, or an
+    # absolute millisecond value.
+    activate_after_idle: false
     activate_on_provider_change: true
+    # Shared token budgets are incompatible with the async pipeline below.
     share_token_budget: false
     temporal_markers: false
+
+    # Gives the main agent a recall tool for historical observations. Set
+    # vector: true only when Vector and Embedder are enabled.
     retrieval:
+      enabled: true
       vector: false
       scope: thread
 
     observation:
+      # inherit follows the model active in the current session. A concrete
+      # provider/model ID can be configured instead.
+      model: inherit
       message_tokens: 30000
+      # false disables asynchronous buffering. 0.2 runs the Observer every
+      # 20% of message_tokens, approximately every 6k raw-message tokens.
       buffer_tokens: 0.2
+      buffer_on_idle: false
+      # 0.8 replaces approximately 80% of the raw-message window and retains
+      # approximately 20% when buffered observations activate.
       buffer_activation: 0.8
+      # 1-<100 is a multiplier; >=100 is an absolute token count.
       block_after: 1.2
+      # false means unlimited previous observations, not disabled.
       previous_observer_tokens: 2000
-      max_tokens_per_batch: 10000
+      # Optional instruction appended to Mastra's default Observer prompt.
+      instruction: null
+      # Uses Mastra's built-in WorkingMemoryExtractor.
       manage_working_memory: true
+      thread_title: false
+      # auto | true | false | MIME allowlist such as ["image/*"]
       observe_attachments: auto
-      model_settings:
-        temperature: 0.3
 
     reflection:
+      # inherit follows the model active in the current session. A concrete
+      # provider/model ID can be configured instead.
+      model: inherit
       observation_tokens: 40000
+      # Start background Reflection at 50% of observation_tokens.
       buffer_activation: 0.5
+      # 1-<100 is a multiplier; >=100 is an absolute token count.
       block_after: 1.2
-      model_settings:
-        temperature: 0
-
-  semantic_recall: false
+      # Optional instruction appended to Mastra's default Reflector prompt.
+      instruction: null
 
 permissions:
   require_approval_for:

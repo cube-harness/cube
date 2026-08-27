@@ -19,11 +19,11 @@ const CostSchema = z.object({
 }).strict();
 
 export const CatalogModelSchema = z.object({
-  provider: z.string().min(1),
   modelId: z.string().min(1),
   name: z.string().min(1),
   family: z.string().optional(),
   reasoning: z.boolean().default(false),
+  reasoning_efforts: z.array(z.string()).optional(),
   tool_call: z.boolean().default(false),
   structured_output: z.boolean().default(false),
   attachment: z.boolean().default(false),
@@ -33,10 +33,16 @@ export const CatalogModelSchema = z.object({
   cost: CostSchema.optional(), 
 }).strict();
 
-export const ModelCatalogSchema = z.object({
-  updatedAt: z.string(),
+export const ProviderCatalogGroupSchema = z.object({
+  name: z.string().min(1),
   models: z.array(CatalogModelSchema),
 }).strict();
 
+export const ModelCatalogSchema = z.object({
+  updatedAt: z.string(),
+  providers: z.record(z.string(), ProviderCatalogGroupSchema),
+}).strict();
+
 export type CatalogModel = z.infer<typeof CatalogModelSchema>;
+export type ProviderCatalogGroup = z.infer<typeof ProviderCatalogGroupSchema>;
 export type ModelCatalog = z.infer<typeof ModelCatalogSchema>;

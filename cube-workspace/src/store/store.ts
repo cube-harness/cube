@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, appendFile } from "node:fs/promises";
 import YAML from "yaml";
 import { ZodType } from "zod";
 import { atomicWriteFile } from "./atomic-write.js";
@@ -6,6 +6,7 @@ import { Home } from "../home.js";
 import { ConfigSchema, CubeConfig } from "../schemas/config.schema.js";
 import { ModelCatalog, ModelCatalogSchema } from "../schemas/model-catalog.schema.js";
 import { WorkspaceRegistry, WorkspaceRegistrySchema } from "../schemas/workspace.schema.js";
+import { History, HistoryEntry, HistorySchema } from "../schemas/history.schema.js";
 
 type Format = "text" | "yaml" | "json";
 
@@ -57,15 +58,47 @@ export const SoulStore = (home: Home) => {
   const store = new Store<string>(home.getSoulPath(), "text");
   const maxCharacters = home.getSoulMaxCharacters();
 
+  const validateCharacters = (content: string): void => {
+    if (content.length > maxCharacters) {
+      throw new Error(
+        `SOUL.md exceeds max length (${content.length}/${maxCharacters} characters)`,
+      );
+    }
+  };
+
   return {
-    read: () => store.read(),
+    validateCharacters,
+    read: async (): Promise<string> => {
+      const content = await store.read();
+      validateCharacters(content);
+      return content;
+    },
     write: async (content: string): Promise<void> => {
-      if (content.length > maxCharacters) {
-        throw new Error(
-          `SOUL.md exceeds max length (${content.length}/${maxCharacters} characters)`
-        );
-      }
+      validateCharacters(content);
       await store.write(content);
+    },
+  };
+};
+
+export const HistoryStore = (home: Home) => {
+  const store = new Store<string>(home.getHistoryPath(), "text");
+
+  return {
+    read: async (): Promise<History> => {
+      try {
+        const raw = await store.read();
+        const entries = raw
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        return HistorySchema.parse(entries);
+      } catch {
+        return [];
+      }
+    },
+    append: async (entry: HistoryEntry): Promise<void> => {
+      await appendFile(home.getHistoryPath(), `${JSON.stringify(entry)}\n`, "utf-8");
     },
   };
 };

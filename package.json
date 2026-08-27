@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter @cube/tui dev",
     "dev:factory": "pnpm --filter @cube/factory-ui dev",
+    "studio": "pnpm --filter @cube/agent studio",
     "build": "pnpm --recursive run build",
     "typecheck": "tsc --build"
   },

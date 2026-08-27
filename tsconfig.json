@@ -17,6 +17,6 @@
     { "path": "./cube-workspace" },
     { "path": "./cube-agent" },
     { "path": "./cube-tui" },
-    { "path": "./cube-cli" }
+    { "path": "./cube-runtime" }
   ]
 }

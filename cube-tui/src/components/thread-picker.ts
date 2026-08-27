@@ -1,8 +1,7 @@
 import {
   Container,
   Text,
-  Key,
-  matchesKey,
+  getKeybindings,
   SelectList,
   type SelectItem,
   type Component,
@@ -12,6 +11,7 @@ import { getTheme } from "../themes/color.schema.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
+import { formatBinding } from "../keybindings.js";
 
 export interface ThreadPickerViewItem {
   id: string;
@@ -58,10 +58,11 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
     const items: SelectItem[] = options.threads.map((t) => {
       const currentTag = t.isActive ? " (Current)" : "";
       const rawTitle = t.title || "Untitled Thread";
+      const dateStr = t.updatedAt ? formatDateTime(t.updatedAt) : "";
       return {
         value: t.id,
-        label: `${rawTitle} [${t.id}]${currentTag}`,
-        description: t.updatedAt ? formatDateTime(t.updatedAt) : undefined,
+        label: `${rawTitle}${currentTag}`,
+        description: `[${t.id}]${dateStr ? `  ${dateStr}` : ""}`,
       };
     });
 
@@ -76,14 +77,19 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
     };
 
     this.threadList.onCancel = () => {
+      if (this.searchBar.getQuery()) {
+        this.searchBar.clear();
+        this.threadList.setFilter("");
+        return;
+      }
       this.options.onCancel();
     };
 
     this.hint = new KeyHint([
-      { key: "↑/↓", label: "Navigate" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
       { key: "Type", label: "Search" },
-      { key: "Enter", label: "Select" },
-      { key: "Esc", label: "Cancel" },
+      { key: formatBinding("tui.select.confirm"), label: "Select" },
+      { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
 
     this.addChild(this.title);
@@ -104,48 +110,20 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape") {
-      if (this.searchBar.getQuery()) {
-        this.searchBar.clear();
-        this.threadList.setFilter("");
-        return;
-      }
-      this.options.onCancel();
+    const keys = getKeybindings();
+    const selectBindings = [
+      "tui.select.up",
+      "tui.select.down",
+      "tui.select.pageUp",
+      "tui.select.pageDown",
+      "tui.select.confirm",
+      "tui.select.cancel",
+    ] as const;
+    if (selectBindings.some((binding) => keys.matches(data, binding))) {
+      this.threadList.handleInput(data);
       return;
     }
-
-    if (
-      matchesKey(data, Key.up) ||
-      matchesKey(data, Key.down) ||
-      matchesKey(data, Key.pageUp) ||
-      matchesKey(data, Key.pageDown) ||
-      matchesKey(data, Key.home) ||
-      matchesKey(data, Key.end) ||
-      matchesKey(data, Key.enter) ||
-      data === "\x1b[A" ||
-      data === "\x1b[B" ||
-      data === "\r" ||
-      data === "\n" ||
-      data === "up" ||
-      data === "down" ||
-      data === "enter"
-    ) {
-      const keyData = data === "down" ? "\x1b[B" : data === "up" ? "\x1b[A" : data === "enter" ? "\r" : data;
-      this.threadList.handleInput(keyData);
-      return;
-    }
-
-    if (matchesKey(data, Key.backspace) || data === "\x7f" || data === "\b" || data === "backspace") {
-      if (this.searchBar.getQuery().length > 0) {
-        this.searchBar.backspace();
-        this.threadList.setFilter(this.searchBar.getQuery());
-      }
-      return;
-    }
-
-    if (data.length === 1 && data >= " " && data <= "~") {
-      this.searchBar.appendChar(data);
-      this.threadList.setFilter(this.searchBar.getQuery());
-    }
+    this.searchBar.handleInput(data);
+    this.threadList.setFilter(this.searchBar.getQuery());
   }
 }

@@ -2,9 +2,7 @@ import {
   Container,
   SelectList,
   Text,
-  Key,
-  fuzzyFilter,
-  matchesKey,
+  getKeybindings,
   type Component,
   type Focusable,
   type SelectItem,
@@ -13,15 +11,35 @@ import { getTheme } from "../themes/color.schema.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
+import { formatBinding } from "../keybindings.js";
 
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "default";
+
+const EFFORT_DESCRIPTIONS: Record<string, string> = {
+  none: "Disable reasoning (no thinking tokens)",
+  minimal: "Fast shallow reasoning",
+  low: "Light thinking pass",
+  medium: "Standard thinking effort",
+  high: "Deep multi-step analysis",
+  xhigh: "Extra high reasoning budget",
+  max: "Maximum cognitive budget",
+  default: "Provider default setting",
+};
 
 export interface ModelItem {
   modelId: string;
   name: string;
-  provider: string;
   family?: string;
   reasoning?: boolean;
+  reasoning_efforts?: string[];
   tool_call?: boolean;
   attachment?: boolean;
   limit?: {
@@ -90,14 +108,14 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.providerList.onCancel = () => {
-      options.onCancel();
+      this.handleCancel();
     };
 
     this.hint = new KeyHint([
-      { key: "↑/↓", label: "Navigate" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
       { key: "Type", label: "Search" },
-      { key: "Enter", label: "Select Provider" },
-      { key: "Esc", label: "Cancel" },
+      { key: formatBinding("tui.select.confirm"), label: "Select Provider" },
+      { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
 
     this.addChild(this.title);
@@ -141,7 +159,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
 
     this.modelList.onSelect = (item) => {
       const model = provider.models.find((m) => m.modelId === item.value);
-      if (model?.reasoning) {
+      if (model?.reasoning_efforts && model.reasoning_efforts.length > 0) {
         this.switchToReasoningStep(model);
       } else {
         this.options.onSelect({ modelId: item.value });
@@ -149,14 +167,14 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.modelList.onCancel = () => {
-      this.switchToProviderStep();
+      this.handleCancel();
     };
 
     this.hint.setHints([
-      { key: "↑/↓", label: "Navigate" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
       { key: "Type", label: "Search" },
-      { key: "Enter", label: "Select Model" },
-      { key: "Esc", label: "Back" },
+      { key: formatBinding("tui.select.confirm"), label: "Select Model" },
+      { key: formatBinding("tui.select.cancel"), label: "Back" },
     ]);
   }
 
@@ -170,25 +188,25 @@ export class ModelPickerComponent extends Container implements Component, Focusa
       theme.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
     );
 
+    const availableEfforts = model.reasoning_efforts || [];
+
     const isCurrentModel = model.modelId === this.options.currentModelId;
     const currentEffort = isCurrentModel ? this.options.currentReasoningEffort : undefined;
-    const efforts: Array<{ value: ReasoningEffort; label: string; desc: string }> = [
-      { value: "none", label: "none - Disable reasoning", desc: "No thinking tokens" },
-      { value: "low", label: "low - Fast reasoning", desc: "Light thinking pass" },
-      { value: "medium", label: "medium - Balanced reasoning", desc: "Standard thinking effort" },
-      { value: "high", label: "high - Deep reasoning", desc: "Thorough multi-step analysis" },
-      { value: "xhigh", label: "xhigh - Maximum reasoning", desc: "Full cognitive budget" },
-    ];
 
-    const items: SelectItem[] = efforts.map((e) => ({
-      value: e.value,
-      label: `${e.label}${currentEffort && e.value === currentEffort ? " (Current)" : ""}`,
-      description: e.desc,
-    }));
+    const items: SelectItem[] = availableEfforts.map((effortKey) => {
+      const desc = EFFORT_DESCRIPTIONS[effortKey] || `${effortKey} level`;
+      const isActive = currentEffort && effortKey === currentEffort;
+
+      return {
+        value: effortKey,
+        label: `${effortKey}${isActive ? " (Current)" : ""}`,
+        description: desc,
+      };
+    });
 
     this.reasoningList = new SelectList(
       items,
-      5,
+      Math.min(8, Math.max(3, items.length)),
       createSelectListTheme(),
     );
 
@@ -200,17 +218,13 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.reasoningList.onCancel = () => {
-      if (this.selectedProvider) {
-        this.switchToModelStep(this.selectedProvider);
-      } else {
-        this.switchToProviderStep();
-      }
+      this.handleCancel();
     };
 
     this.hint.setHints([
-      { key: "↑/↓", label: "Navigate" },
-      { key: "Enter", label: "Confirm" },
-      { key: "Esc", label: "Back" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      { key: formatBinding("tui.select.confirm"), label: "Confirm" },
+      { key: formatBinding("tui.select.cancel"), label: "Back" },
     ]);
   }
 
@@ -225,11 +239,28 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     this.providerList.setFilter("");
 
     this.hint.setHints([
-      { key: "↑/↓", label: "Navigate" },
+      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
       { key: "Type", label: "Search" },
-      { key: "Enter", label: "Select Provider" },
-      { key: "Esc", label: "Cancel" },
+      { key: formatBinding("tui.select.confirm"), label: "Select Provider" },
+      { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
+  }
+
+  private handleCancel(): void {
+    if (this.searchBar.getQuery().length > 0) {
+      this.searchBar.clear();
+      this.applySearchFilter();
+      return;
+    }
+    if (this.step === "reasoning" && this.selectedProvider) {
+      this.switchToModelStep(this.selectedProvider);
+      return;
+    }
+    if (this.step === "model") {
+      this.switchToProviderStep();
+      return;
+    }
+    this.options.onCancel();
   }
 
   render(width: number): string[] {
@@ -264,41 +295,16 @@ export class ModelPickerComponent extends Container implements Component, Focusa
   }
 
   handleInput(data: string): void {
-    // 1. Handle Escape
-    if (matchesKey(data, Key.escape) || data === "\x1b" || data === "escape") {
-      if (this.searchBar.getQuery().length > 0) {
-        this.searchBar.clear();
-        this.applySearchFilter();
-        return;
-      }
-
-      if (this.step === "reasoning" && this.selectedProvider) {
-        this.switchToModelStep(this.selectedProvider);
-        return;
-      }
-      if (this.step === "model") {
-        this.switchToProviderStep();
-        return;
-      }
-      this.options.onCancel();
-      return;
-    }
-
-    // 2. Handle Navigation / Action Keys
-    if (
-      matchesKey(data, Key.up) ||
-      matchesKey(data, Key.down) ||
-      matchesKey(data, Key.enter) ||
-      matchesKey(data, Key.pageUp) ||
-      matchesKey(data, Key.pageDown) ||
-      data === "\x1b[A" ||
-      data === "\x1b[B" ||
-      data === "up" ||
-      data === "down" ||
-      data === "enter" ||
-      data === "\r" ||
-      data === "\n"
-    ) {
+    const keys = getKeybindings();
+    const selectBindings = [
+      "tui.select.up",
+      "tui.select.down",
+      "tui.select.pageUp",
+      "tui.select.pageDown",
+      "tui.select.confirm",
+      "tui.select.cancel",
+    ] as const;
+    if (selectBindings.some((binding) => keys.matches(data, binding))) {
       if (this.step === "reasoning" && this.reasoningList) {
         this.reasoningList.handleInput(data);
         return;
@@ -313,25 +319,9 @@ export class ModelPickerComponent extends Container implements Component, Focusa
       }
     }
 
-    // 3. Handle Backspace in Search
-    if (
-      matchesKey(data, Key.backspace) ||
-      data === "\x7f" ||
-      data === "\b" ||
-      data === "backspace"
-    ) {
-      if (this.searchBar.getQuery().length > 0) {
-        this.searchBar.backspace();
-        this.applySearchFilter();
-      }
-      return;
-    }
-
-    // 4. Handle Text Typing for Search (single printable char)
-    if (data.length === 1 && data >= " " && data <= "~" && this.step !== "reasoning") {
-      this.searchBar.appendChar(data);
+    if (this.step !== "reasoning") {
+      this.searchBar.handleInput(data);
       this.applySearchFilter();
-      return;
     }
   }
 }

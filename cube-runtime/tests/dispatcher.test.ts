@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import type { CubeAction, CubeEvent } from "../src/contracts/events.contract.js";
+import type { CubeUIAction, CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 test("ActionDispatcher dispatches actions to actionHandler", async () => {
   const dispatcher = new ActionDispatcher();
-  let receivedAction: CubeAction | undefined;
+  let receivedAction: CubeUIAction | undefined;
 
   dispatcher.setActionHandler(async (action) => {
     receivedAction = action;
@@ -20,7 +20,7 @@ test("ActionDispatcher dispatches actions to actionHandler", async () => {
 
 test("ActionDispatcher emits events to all subscribers", () => {
   const dispatcher = new ActionDispatcher();
-  const received: CubeEvent[] = [];
+  const received: CubeUIEvent[] = [];
 
   const unsubscribe = dispatcher.subscribe((event) => {
     received.push(event);

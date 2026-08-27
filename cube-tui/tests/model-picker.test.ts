@@ -14,8 +14,8 @@ const sampleProviders: ProviderGroup[] = [
       {
         modelId: "google/gemini-2.5-flash",
         name: "Gemini 2.5 Flash",
-        provider: "google",
         reasoning: true,
+        reasoning_efforts: ["none", "low", "medium", "high"],
         tool_call: true,
         attachment: true,
         limit: { context: 1048576, output: 8192 },
@@ -23,8 +23,8 @@ const sampleProviders: ProviderGroup[] = [
       {
         modelId: "google/gemini-2.5-pro",
         name: "Gemini 2.5 Pro",
-        provider: "google",
         reasoning: true,
+        reasoning_efforts: ["none", "low", "medium", "high"],
         tool_call: true,
         attachment: true,
         limit: { context: 2097152, output: 8192 },
@@ -38,7 +38,6 @@ const sampleProviders: ProviderGroup[] = [
       {
         modelId: "anthropic/claude-3-5-sonnet-latest",
         name: "Claude 3.5 Sonnet",
-        provider: "anthropic",
         reasoning: false,
         tool_call: true,
         attachment: true,
@@ -133,4 +132,53 @@ test("ModelPickerComponent supports Esc to go back and clear search", () => {
   // Esc now cancels
   picker.handleInput("\x1b");
   assert.equal(cancelled, true);
+});
+
+test("ModelPickerComponent renders custom reasoning_efforts for models supporting xhigh and max", () => {
+  let result: ModelSelectionResult | undefined;
+  const customProviders: ProviderGroup[] = [
+    {
+      id: "openrouter",
+      name: "OpenRouter",
+      models: [
+        {
+          modelId: "openrouter/custom-reasoner",
+          name: "Custom Reasoner",
+          reasoning: true,
+          reasoning_efforts: ["none", "low", "high", "xhigh", "max"],
+          limit: { context: 128000, output: 8192 },
+        },
+      ],
+    },
+  ];
+
+  const picker = new ModelPickerComponent({
+    providers: customProviders,
+    onSelect: (r) => {
+      result = r;
+    },
+    onCancel: () => {},
+  });
+
+  // Step 1: Open OpenRouter
+  picker.handleInput("\r");
+  // Step 2: Open Custom Reasoner
+  picker.handleInput("\r");
+
+  // Step 3: Render reasoning step
+  const lines = picker.render(80);
+  const text = lines.join("\n");
+  assert.match(text, /xhigh/);
+  assert.match(text, /max/);
+
+  // Navigate down to 'max' and select
+  picker.handleInput("\x1b[B"); // low
+  picker.handleInput("\x1b[B"); // high
+  picker.handleInput("\x1b[B"); // xhigh
+  picker.handleInput("\x1b[B"); // max
+  picker.handleInput("\r");
+
+  assert.ok(result);
+  assert.equal(result.modelId, "openrouter/custom-reasoner");
+  assert.equal(result.reasoningEffort, "max");
 });

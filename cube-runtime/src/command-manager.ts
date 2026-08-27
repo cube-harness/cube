@@ -1,4 +1,4 @@
-import type { SlashCommandSuggestion } from "./contracts/events.contract.js";
+import type { SlashCommandSuggestion } from "./contracts/ui.contract.js";
 
 export type CommandHandler = (argument: string) => Promise<void>;
 

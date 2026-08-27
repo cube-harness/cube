@@ -13,7 +13,11 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "node ../scripts/clean-package.mjs",
-    "test": "tsx --test --test-isolation=none tests/**/*.test.ts"
+    "test": "tsx --test --test-isolation=none tests/**/*.test.ts",
+    "studio": "mastra dev --dir src/mastra"
+  },
+  "devDependencies": {
+    "mastra": "^1.25.0"
   },
   "dependencies": {
     "@cube/workspace": "workspace:*",
@@ -22,6 +26,7 @@
     "@mastra/loggers": "1.2.0",
     "@mastra/mcp": "1.16.0",
     "@mastra/memory": "1.25.0",
+    "@mastra/observability": "1.17.1",
     "ai": "6.0.241",
     "ollama-ai-provider-v2": "^3.6.0",
     "zod": "4.4.3"

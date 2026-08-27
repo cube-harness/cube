@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "cube": "./dist/index.js"
+    "cube": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -15,7 +15,7 @@
   },
   "scripts": {
     "predev": "pnpm --filter @cube/workspace --filter @cube/agent --filter @cube/runtime run build",
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/main.ts",
     "build": "tsc --build",
     "test": "tsx --test --test-isolation=none tests/**/*.test.ts",
     "clean": "node ../scripts/clean-package.mjs"
@@ -23,7 +23,8 @@
   "dependencies": {
     "@cube/runtime": "workspace:*",
     "@earendil-works/pi-tui": "0.84.2",
-    "chalk": "5.6.2"
+    "chalk": "5.6.2",
+    "highlight.js": "^11.12.0"
   },
   "devDependencies": {
     "@types/node": "22.13.1",

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import { createDeleteCommandHandler } from "../src/commands/delete.command.js";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import { createDeleteCommand } from "../src/commands/delete.command.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 test("DeleteCommand blocks execution when agent turn is active", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createDeleteCommandHandler({
+  const handler = createDeleteCommand({
     session: {} as any,
     dispatcher,
     isTurnActive: () => true,
@@ -23,10 +23,10 @@ test("DeleteCommand blocks execution when agent turn is active", async () => {
 test("DeleteCommand deletes specified threadId directly", async () => {
   let deletedId = "";
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createDeleteCommandHandler({
+  const handler = createDeleteCommand({
     session: {
       thread: {
         getId: () => "active-thread-1",
@@ -50,10 +50,10 @@ test("DeleteCommand resets active thread state when deleting current active thre
   let detached = false;
 
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createDeleteCommandHandler({
+  const handler = createDeleteCommand({
     session: {
       thread: {
         getId: () => "active-thread-1",

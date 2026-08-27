@@ -1,7 +1,107 @@
 import { truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 import { getTheme } from "../themes/color.schema.js";
+import { formatBinding } from "../keybindings.js";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+export type WorkingPhase =
+  | "idle"
+  | "thinking"
+  | "streaming"
+  | "tool"
+  | "approval"
+  | "input"
+  | "subagent"
+  | "memory";
+
+export interface WorkingIndicatorState {
+  active: boolean;
+  phase: WorkingPhase;
+  message: string;
+}
+
+interface SessionDisplayStateLike {
+  isRunning: boolean;
+  currentMessage: null | {
+    content?: { parts?: unknown[] };
+  };
+  activeTools: Map<string, { name: string; status: string }>;
+  pendingApproval: unknown | null;
+  pendingSuspensions: Map<string, unknown>;
+  activeSubagents: Map<
+    string,
+    { agentType: string; displayName?: string; status: string }
+  >;
+  omProgress: { status: string };
+  bufferingMessages: boolean;
+  bufferingObservations: boolean;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+export const deriveWorkingIndicatorState = (
+  state: SessionDisplayStateLike,
+): WorkingIndicatorState => {
+  if (state.pendingApproval) {
+    return { active: false, phase: "approval", message: "Waiting for approval" };
+  }
+  if (state.pendingSuspensions.size > 0) {
+    return { active: false, phase: "input", message: "Waiting for input" };
+  }
+
+  const activeTool = Array.from(state.activeTools.values()).find(
+    (tool) => tool.status === "running" || tool.status === "streaming_input",
+  );
+  if (activeTool) {
+    return {
+      active: true,
+      phase: "tool",
+      message: `Running ${activeTool.name}`,
+    };
+  }
+
+  const activeSubagent = Array.from(state.activeSubagents.values()).find(
+    (subagent) => subagent.status === "running",
+  );
+  if (activeSubagent) {
+    return {
+      active: true,
+      phase: "subagent",
+      message: `Running ${activeSubagent.displayName || activeSubagent.agentType}`,
+    };
+  }
+
+  if (state.bufferingMessages || state.bufferingObservations) {
+    return { active: true, phase: "memory", message: "Buffering memory" };
+  }
+  if (state.omProgress.status === "observing") {
+    return { active: true, phase: "memory", message: "Observing memory" };
+  }
+  if (state.omProgress.status === "reflecting") {
+    return { active: true, phase: "memory", message: "Reflecting memory" };
+  }
+
+  if (!state.isRunning) {
+    return { active: false, phase: "idle", message: "Idle" };
+  }
+
+  const parts = state.currentMessage?.content?.parts ?? [];
+  const hasText = parts.some(
+    (part) => isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.length > 0,
+  );
+  if (hasText) {
+    return { active: false, phase: "streaming", message: "Responding" };
+  }
+  const hasReasoning = parts.some(
+    (part) => isRecord(part) && part.type === "reasoning",
+  );
+  if (hasReasoning) {
+    return { active: true, phase: "thinking", message: "Thinking" };
+  }
+
+  return { active: true, phase: "thinking", message: "Thinking" };
+};
 
 export interface WorkingIndicatorOptions {
   now?: () => number;
@@ -63,6 +163,16 @@ export class WorkingIndicator implements Component {
     this.tui.requestRender();
   }
 
+  sync(displayState: SessionDisplayStateLike): WorkingIndicatorState {
+    const next = deriveWorkingIndicatorState(displayState);
+    if (next.active) {
+      this.start(next.message);
+    } else {
+      this.stop();
+    }
+    return next;
+  }
+
   stop(): void {
     if (this.timer) {
       this.cancelSchedule(this.timer);
@@ -84,7 +194,9 @@ export class WorkingIndicator implements Component {
 
     const spinner = this.spinnerStyle(frame);
     const text = this.messageStyle(this.message);
-    const timer = this.timerStyle(`(${elapsedSeconds}s)`);
+    const timer = this.timerStyle(
+      `(${elapsedSeconds}s • ${formatBinding("cube.turn.interrupt")} to interrupt)`,
+    );
 
     const line = ` ${spinner} ${text} ${timer}`;
     return [truncateToWidth(line, width)];

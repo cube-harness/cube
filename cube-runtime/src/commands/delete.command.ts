@@ -1,7 +1,7 @@
 import type { Session } from "@cube/agent";
 import type { CommandHandler } from "../command-manager.js";
 import type { ActionDispatcher } from "../dispatcher.js";
-import type { ThreadSummary } from "../contracts/events.contract.js";
+import type { ThreadSummary } from "../contracts/ui.contract.js";
 
 export interface DeleteCommandDependencies {
   session: Session;
@@ -9,7 +9,7 @@ export interface DeleteCommandDependencies {
   isTurnActive?: () => boolean;
 }
 
-export const createDeleteCommandHandler = (
+export const createDeleteCommand = (
   deps: DeleteCommandDependencies,
 ): CommandHandler => async (rawArgument: string) => {
   if (deps.isTurnActive?.()) {

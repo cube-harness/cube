@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import { createForkCommandHandler } from "../src/commands/fork.command.js";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import { createForkCommand } from "../src/commands/fork.command.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 test("ForkCommand blocks execution when agent turn is active", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createForkCommandHandler({
+  const handler = createForkCommand({
     session: {} as any,
     dispatcher,
     isTurnActive: () => true,
@@ -22,10 +22,10 @@ test("ForkCommand blocks execution when agent turn is active", async () => {
 
 test("ForkCommand notifies when no active thread exists", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createForkCommandHandler({
+  const handler = createForkCommand({
     session: { thread: { getId: () => null } } as any,
     dispatcher,
     isTurnActive: () => false,
@@ -36,13 +36,13 @@ test("ForkCommand notifies when no active thread exists", async () => {
   assert.ok(sysMsg?.content?.includes("Cannot fork an empty session"));
 });
 
-test("ForkCommand clones active thread, switches, and emits messages:set & state:info", async () => {
+test("ForkCommand clones and switches while native Session owns transcript restoration", async () => {
   let switchedTo = "";
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createForkCommandHandler({
+  const handler = createForkCommand({
     session: {
       thread: {
         getId: () => "source-thread-1",
@@ -53,10 +53,6 @@ test("ForkCommand clones active thread, switches, and emits messages:set & state
         switch: async ({ threadId }: { threadId: string }) => {
           switchedTo = threadId;
         },
-        listMessages: async () => [
-          { role: "user", content: "hello world" },
-          { role: "assistant", content: { format: 2, parts: [{ type: "text", text: "hi there!" }] } },
-        ],
       },
     } as any,
     dispatcher,
@@ -65,12 +61,6 @@ test("ForkCommand clones active thread, switches, and emits messages:set & state
 
   await handler("Experiment Feature");
   assert.equal(switchedTo, "cloned-thread-2");
-
-  const msgSetEvent = events.find((e) => e.type === "messages:set") as any;
-  assert.ok(msgSetEvent);
-  assert.equal(msgSetEvent.messages.length, 2);
-  assert.equal(msgSetEvent.messages[0].content, "hello world");
-  assert.equal(msgSetEvent.messages[1].content, "hi there!");
 
   const infoEvent = events.find((e) => e.type === "state:info") as any;
   assert.equal(infoEvent?.info?.threadId, "cloned-thread-2");

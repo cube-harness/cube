@@ -6,21 +6,12 @@ import type { ActionDispatcher } from "../dispatcher.js";
 export interface ThemeCommandDependencies {
   home: Home;
   dispatcher: ActionDispatcher;
-  isTurnActive?: () => boolean;
   onThemeSelected?: (themeId: string) => Promise<void> | void;
 }
 
-export const createThemeCommandHandler = (
+export const createThemeCommand = (
   dependencies: ThemeCommandDependencies,
 ): CommandHandler => async (rawArgument: string) => {
-  if (dependencies.isTurnActive?.()) {
-    dependencies.dispatcher.emit({
-      type: "system:message",
-      content: "Cannot change theme while an agent turn is active.",
-    });
-    return;
-  }
-
   const config = await ConfigStore(dependencies.home).read().catch(() => null);
   const currentThemeId = config?.theme || "default";
 

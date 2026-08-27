@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Session } from "@cube/agent";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import { createResumeCommandHandler } from "../src/commands/resume.command.js";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import { createResumeCommand } from "../src/commands/resume.command.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 const createMockSession = (overrides?: {
   isRunning?: boolean;
@@ -30,10 +30,10 @@ const createMockSession = (overrides?: {
 test("ResumeCommand blocks execution when agent turn is active", async () => {
   const session = createMockSession({ isRunning: true });
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createResumeCommandHandler({
+  const handler = createResumeCommand({
     session,
     dispatcher,
   });
@@ -46,10 +46,10 @@ test("ResumeCommand blocks execution when agent turn is active", async () => {
 test("ResumeCommand notifies when no threads exist in workspace", async () => {
   const session = createMockSession({ threads: [] });
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createResumeCommandHandler({
+  const handler = createResumeCommand({
     session,
     dispatcher,
   });
@@ -69,10 +69,10 @@ test("ResumeCommand emits dialog:thread_picker event", async () => {
   });
 
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createResumeCommandHandler({
+  const handler = createResumeCommand({
     session,
     dispatcher,
   });

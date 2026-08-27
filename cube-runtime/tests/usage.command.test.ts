@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CubeHome, createBootstrap, ConfigStore } from "@cube/workspace";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import { createUsageCommandHandler } from "../src/commands/usage.command.js";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import { createUsageCommand } from "../src/commands/usage.command.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(join(tmpdir(), "cube-usage-test-"));
@@ -46,10 +46,10 @@ test("UsageCommand computes metrics and emits usage:metrics event", async () => 
     };
 
     const dispatcher = new ActionDispatcher();
-    const events: CubeEvent[] = [];
+    const events: CubeUIEvent[] = [];
     dispatcher.subscribe((e) => events.push(e));
 
-    const handler = createUsageCommandHandler({
+    const handler = createUsageCommand({
       home,
       session: session as any,
       dispatcher,

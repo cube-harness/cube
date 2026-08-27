@@ -89,6 +89,10 @@ export class Home {
     return HOME_LIMITS.soulMaxCharacters;
   }
 
+  getModelCatalogTtlMs(): number {
+    return HOME_LIMITS.modelCatalogTtlMs;
+  }
+
   getPaths(): CubeWorkspacePaths {
     return {
       root: this.getRoot(),

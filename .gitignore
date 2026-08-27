@@ -37,3 +37,6 @@ pnpm-debug.log*
 # Test & Coverage
 coverage/
 .nyc_output/
+
+AGENTS.md
+docs

@@ -1,16 +1,18 @@
-import { Key, matchesKey, type TUI } from "@earendil-works/pi-tui";
+import { type TUI } from "@earendil-works/pi-tui";
 import { Banner } from "../components/banner.js";
 import { InfoBox } from "../components/info-box.js";
 import { MessageList } from "../components/message-list.js";
 import { Footer } from "../components/footer.js";
 import { PromptEditor } from "../components/prompt-editor.js";
 import { WorkingIndicator } from "../components/working-indicator.js";
-import type { SlashCommandSuggestion, TuiAction } from "../index.js";
+import type { SlashCommandSuggestion, CubeUIAction } from "../index.js";
 
 export interface MountChatScreenOptions {
-  onAction: (action: TuiAction) => void;
+  onAction: (action: CubeUIAction) => void;
   slashCommands: SlashCommandSuggestion[];
   basePath: string;
+  initialHistory?: string[];
+  statusLine?: string[];
 }
 
 export const mountChatScreen = (
@@ -20,7 +22,7 @@ export const mountChatScreen = (
   const banner = new Banner();
   const infoBox = new InfoBox();
   const messageList = new MessageList();
-  const footer = new Footer();
+  const footer = new Footer(undefined, options.statusLine);
   const promptEditor = new PromptEditor({ tui, ...options });
   const workingIndicator = new WorkingIndicator(tui);
 
@@ -31,20 +33,6 @@ export const mountChatScreen = (
   tui.addChild(promptEditor);
   tui.addChild(footer);
   tui.setFocus(promptEditor);
-
-  tui.addInputListener((data: string) => {
-    if (matchesKey(data, Key.pageUp)) {
-      messageList.pageUp(10);
-      tui.requestRender();
-      return { consume: true };
-    }
-    if (matchesKey(data, Key.pageDown)) {
-      messageList.pageDown(10);
-      tui.requestRender();
-      return { consume: true };
-    }
-    return undefined;
-  });
 
   return {
     banner,

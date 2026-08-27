@@ -6,9 +6,10 @@ export interface NewCommandDependencies {
   session: Session;
   dispatcher: ActionDispatcher;
   onNewThread?: () => void;
+  reloadSoul?: () => Promise<void>;
 }
 
-export const createNewCommandHandler = (
+export const createNewCommand = (
   deps: NewCommandDependencies,
 ): CommandHandler => async () => {
   if (deps.session.run.isRunning()) {
@@ -17,6 +18,18 @@ export const createNewCommandHandler = (
       content: "Cannot start new thread while an agent turn is active.",
     });
     return;
+  }
+
+  if (deps.reloadSoul) {
+    try {
+      await deps.reloadSoul();
+    } catch (error: unknown) {
+      deps.dispatcher.emit({
+        type: "system:message",
+        content: `Cannot start new thread: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return;
+    }
   }
 
   deps.session.thread.detachFromCurrent();

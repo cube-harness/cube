@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ActionDispatcher } from "../src/dispatcher.js";
-import { createRenameCommandHandler } from "../src/commands/rename.command.js";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import { createRenameCommand } from "../src/commands/rename.command.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 test("RenameCommand blocks execution when agent turn is active", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createRenameCommandHandler({
+  const handler = createRenameCommand({
     session: { thread: { getId: () => "thread-1" } } as any,
     dispatcher,
     isTurnActive: () => true,
@@ -22,10 +22,10 @@ test("RenameCommand blocks execution when agent turn is active", async () => {
 
 test("RenameCommand notifies when no active thread exists", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createRenameCommandHandler({
+  const handler = createRenameCommand({
     session: { thread: { getId: () => null } } as any,
     dispatcher,
     isTurnActive: () => false,
@@ -38,10 +38,10 @@ test("RenameCommand notifies when no active thread exists", async () => {
 
 test("RenameCommand requires a non-empty title argument", async () => {
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createRenameCommandHandler({
+  const handler = createRenameCommand({
     session: { thread: { getId: () => "thread-1" } } as any,
     dispatcher,
     isTurnActive: () => false,
@@ -55,10 +55,10 @@ test("RenameCommand requires a non-empty title argument", async () => {
 test("RenameCommand calls session.thread.rename and confirms to user", async () => {
   let renamedPayload: any;
   const dispatcher = new ActionDispatcher();
-  const events: CubeEvent[] = [];
+  const events: CubeUIEvent[] = [];
   dispatcher.subscribe((e) => events.push(e));
 
-  const handler = createRenameCommandHandler({
+  const handler = createRenameCommand({
     session: {
       thread: {
         getId: () => "thread-123",

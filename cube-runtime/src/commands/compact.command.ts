@@ -24,7 +24,7 @@ export interface CompactCommandDependencies {
   showMessage: (message: string) => void;
 }
 
-export const createCompactCommandHandler = (
+export const createCompactCommand = (
   dependencies: CompactCommandDependencies,
 ): CommandHandler => async () => {
   const threadId = dependencies.getThreadId();

@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createModelCommandHandler } from "../src/commands/model.command.js";
+import { createModelCommand } from "../src/commands/model.command.js";
 import { ActionDispatcher } from "../src/dispatcher.js";
 import { Home, createBootstrap, ConfigStore } from "@cube/workspace";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
-import type { CubeEvent } from "../src/contracts/events.contract.js";
+import type { CubeUIEvent } from "../src/contracts/ui.contract.js";
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-model-test-"));
@@ -20,10 +20,10 @@ test("ModelCommand blocks execution when turn is active", async () => {
   const { home, tmp } = await createTestHome();
   try {
     const dispatcher = new ActionDispatcher();
-    const emittedEvents: CubeEvent[] = [];
+    const emittedEvents: CubeUIEvent[] = [];
     dispatcher.subscribe((e) => emittedEvents.push(e));
 
-    const handler = createModelCommandHandler({
+    const handler = createModelCommand({
       home,
       dispatcher,
       isTurnActive: () => true,
@@ -45,10 +45,10 @@ test("ModelCommand handles argument directly", async () => {
   try {
     let selected = "";
     const dispatcher = new ActionDispatcher();
-    const emittedEvents: CubeEvent[] = [];
+    const emittedEvents: CubeUIEvent[] = [];
     dispatcher.subscribe((e) => emittedEvents.push(e));
 
-    const handler = createModelCommandHandler({
+    const handler = createModelCommand({
       home,
       dispatcher,
       isTurnActive: () => false,
@@ -75,10 +75,10 @@ test("ModelCommand emits dialog:model_picker event", async () => {
   try {
     process.env.GOOGLE_API_KEY = "test-google-key";
     const dispatcher = new ActionDispatcher();
-    const emittedEvents: CubeEvent[] = [];
+    const emittedEvents: CubeUIEvent[] = [];
     dispatcher.subscribe((e) => emittedEvents.push(e));
 
-    const handler = createModelCommandHandler({
+    const handler = createModelCommand({
       home,
       dispatcher,
       isTurnActive: () => false,

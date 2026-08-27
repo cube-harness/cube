@@ -13,6 +13,7 @@ export {
   ModelCatalogStore,
   WorkspaceRegistryStore,
   SoulStore,
+  HistoryStore,
 } from "./store/store.js";
 export { Bootstrap, createBootstrap, loadEnv } from "./bootstrap.js";
 
@@ -23,5 +24,6 @@ export { ModelManager, type ProviderCatalogItem } from "./model-manager.js";
 export * from "./schemas/config.schema.js";
 export * from "./schemas/workspace.schema.js";
 export * from "./schemas/model-catalog.schema.js";
+export * from "./schemas/history.schema.js";
 export { providers as snapshotProviders } from "@opencode-ai/models/snapshot";
 export * from "./constants.js";

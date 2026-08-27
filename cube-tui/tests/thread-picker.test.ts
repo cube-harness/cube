@@ -37,7 +37,7 @@ test("ThreadPickerOverlay supports navigation and search filtering", () => {
   });
 
   // Navigate down
-  overlay.handleInput("down");
+  overlay.handleInput("\x1b[B");
   overlay.handleInput("\r");
 
   assert.equal(selected, "thread-2");

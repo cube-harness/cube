@@ -2,7 +2,7 @@ import type { Home } from "@cube/workspace";
 import { ConfigStore } from "@cube/workspace";
 import { updateCubeAgentModel } from "@cube/agent";
 import type { ActionDispatcher } from "../dispatcher.js";
-import type { ReasoningEffort } from "../contracts/events.contract.js";
+import type { ReasoningEffort } from "../contracts/ui.contract.js";
 
 export interface ModelSelectHandlerDeps {
   home: Home;

@@ -4,7 +4,7 @@ export interface ExitCommandDependencies {
   shutdown: () => Promise<void>;
 }
 
-export const createExitCommandHandler = (
+export const createExitCommand = (
   dependencies: ExitCommandDependencies,
 ): CommandHandler => async () => {
   await dependencies.shutdown();

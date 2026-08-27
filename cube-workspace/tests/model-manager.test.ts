@@ -46,14 +46,59 @@ test("ModelManager builds catalog and groups by provider", async () => {
     process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
     const mgr = new ModelManager(home);
     const catalog = await mgr.getCatalog();
-    assert.ok(catalog.models.length > 0);
-    assert.ok(catalog.models.some((m) => m.provider === "anthropic"));
+    assert.ok(catalog.providers);
+    assert.ok(catalog.providers.anthropic);
+    assert.ok(catalog.providers.anthropic.models.length > 0);
 
     const providers = await mgr.getProvidersWithModels();
     assert.ok(providers.length > 0);
     const anthropicProvider = providers.find((p) => p.id === "anthropic");
     assert.ok(anthropicProvider);
     assert.ok(anthropicProvider.models.length > 0);
+  } finally {
+    if (originalKey) {
+      process.env.ANTHROPIC_API_KEY = originalKey;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("ModelManager invalidates expired cache (> 24h)", async () => {
+  const { home, tmp } = await createTestHome();
+  const originalKey = process.env.ANTHROPIC_API_KEY;
+  try {
+    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    const mgr = new ModelManager(home);
+    const store = (await import("../src/store/store.js")).ModelCatalogStore(home);
+
+    // Write an expired catalog (25 hours ago)
+    const expiredDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await store.write({
+      updatedAt: expiredDate,
+      providers: {
+        anthropic: {
+          name: "Anthropic",
+          models: [
+            {
+              modelId: "anthropic/old-model",
+              name: "Old Model",
+              reasoning: false,
+              tool_call: true,
+              structured_output: true,
+              attachment: false,
+              open_weights: false,
+              limit: { context: 100000, output: 4096 },
+              modalities: { input: ["text"], output: ["text"] },
+            },
+          ],
+        },
+      },
+    });
+
+    const catalog = await mgr.getCatalog();
+    assert.notEqual(catalog.updatedAt, expiredDate);
   } finally {
     if (originalKey) {
       process.env.ANTHROPIC_API_KEY = originalKey;

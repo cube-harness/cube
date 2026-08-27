@@ -6,10 +6,7 @@ import path from "node:path";
 import { HOME_FILES } from "./constants.js";
 
 export const loadEnv = (searchDirs?: string[]): void => {
-  const dirs = searchDirs || [
-    process.env.INIT_CWD || process.cwd(),
-    process.cwd(),
-  ];
+  const dirs = searchDirs || [process.env.INIT_CWD || process.cwd(), process.cwd()];
 
   for (const dir of dirs) {
     if (!dir) continue;
@@ -47,11 +44,7 @@ export class Bootstrap {
 
   async run(): Promise<void> {
     await this.home.ensure();
-    loadEnv([
-      this.home.getRoot(),
-      process.env.INIT_CWD || process.cwd(),
-      process.cwd(),
-    ]);
+    loadEnv([this.home.getRoot(), process.env.INIT_CWD || process.cwd(), process.cwd()]);
     await this.seedFromTemplate(HOME_FILES.config, this.home.getConfigPath());
     await this.seedFromTemplate(HOME_FILES.auth, this.home.getAuthPath());
     await this.seedFromTemplate(HOME_FILES.mcp, this.home.getMcpPath());
