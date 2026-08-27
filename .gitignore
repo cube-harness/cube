@@ -6,20 +6,29 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+.mastra/
+**/.mastra/
 
 # Turborepo Cache
 .turbo/
+
+# Cube Runtime & Storage
+.cube/
+**/.cube/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
 
 # Environment Variables & Secrets (CRITICAL)
 .env
 .env.local
 .env.*.local
 *.pem
+*.key
 
 # IDE & Editor Specific
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
+.vscode/
 .idea/
 *.swp
 *.swo
@@ -38,5 +47,7 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
+# Project Specific Ignored Directories
 AGENTS.md
-docs
+docs/
+.agents/
