@@ -3,11 +3,12 @@ import {
   Text,
   getKeybindings,
   SelectList,
+  truncateToWidth,
   type SelectItem,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
@@ -41,6 +42,11 @@ const formatDateTime = (dateStr: string): string => {
   }
 };
 
+const truncatePlainText = (str: string, maxWidth: number): string => {
+  if (str.length <= maxWidth) return str;
+  return str.slice(0, Math.max(0, maxWidth - 3)) + "...";
+};
+
 export class ThreadPickerOverlay extends Container implements Component, Focusable {
   focused = true;
   private readonly title: Text;
@@ -50,13 +56,13 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
 
   constructor(private readonly options: ThreadPickerOptions) {
     super();
-    const theme = getTheme();
 
-    this.title = new Text(theme.primary.bold("Select Conversation Thread"), 0, 0);
+    this.title = new Text(appTheme.ui.primary.bold("Select Conversation Thread"), 0, 0);
     this.searchBar = new SearchBar();
 
+    const CURRENT_TAG = " (Current)";
     const items: SelectItem[] = options.threads.map((t) => {
-      const currentTag = t.isActive ? " (Current)" : "";
+      const currentTag = t.isActive ? CURRENT_TAG : "";
       const rawTitle = t.title || "Untitled Thread";
       const dateStr = t.updatedAt ? formatDateTime(t.updatedAt) : "";
       return {
@@ -70,6 +76,20 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
       items,
       Math.min(10, Math.max(3, items.length)),
       createSelectListTheme(),
+      {
+        minPrimaryColumnWidth: 35,
+        maxPrimaryColumnWidth: 48,
+        truncatePrimary: ({ item, maxWidth }) => {
+          const isCurrent = item.label.endsWith(CURRENT_TAG);
+          if (isCurrent) {
+            const rawTitle = item.label.slice(0, -CURRENT_TAG.length);
+            const availableForTitle = Math.max(10, maxWidth - CURRENT_TAG.length);
+            const truncatedTitle = truncatePlainText(rawTitle, availableForTitle);
+            return `${truncatedTitle}${CURRENT_TAG}`;
+          }
+          return truncatePlainText(item.label, maxWidth);
+        },
+      },
     );
 
     this.threadList.onSelect = (item) => {

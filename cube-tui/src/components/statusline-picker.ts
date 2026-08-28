@@ -6,7 +6,7 @@ import {
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
 import { matchesBinding, formatBinding } from "../keybindings.js";
@@ -44,7 +44,6 @@ export class StatusLinePickerComponent extends Container implements Component, F
 
   constructor(private readonly options: StatusLinePickerOptions) {
     super();
-    const theme = getTheme();
     const current = options.currentValues ?? {};
     const initial = options.initialSelection ?? [
       "model",
@@ -53,7 +52,7 @@ export class StatusLinePickerComponent extends Container implements Component, F
       "threadId",
     ];
 
-    this.title = new Text(theme.primary.bold("Configure Footer Status Line"), 0, 0);
+    this.title = new Text(appTheme.ui.primary.bold("Configure Footer Status Line"), 0, 0);
     this.searchBar = new SearchBar({
       placeholder: "Type to filter components...",
     });
@@ -131,7 +130,6 @@ export class StatusLinePickerComponent extends Container implements Component, F
   }
 
   render(width: number): string[] {
-    const theme = getTheme();
     const lines: string[] = [];
     const availableWidth = Math.max(width, 20);
 
@@ -141,7 +139,7 @@ export class StatusLinePickerComponent extends Container implements Component, F
 
     const filtered = this.getFilteredItems();
     if (filtered.length === 0) {
-      lines.push(theme.muted("  (No matching components found)"));
+      lines.push(appTheme.ui.muted("  (No matching components found)"));
     } else {
       if (this.selectedIndex >= filtered.length) {
         this.selectedIndex = Math.max(0, filtered.length - 1);
@@ -151,14 +149,16 @@ export class StatusLinePickerComponent extends Container implements Component, F
         const { item } = filtered[i];
         const isHovered = i === this.selectedIndex;
         const isSelected = this.selectedIds.includes(item.id);
-        const cursor = isHovered ? theme.primary("❯") : " ";
+        const cursor = isHovered ? appTheme.ui.primary("❯") : " ";
         const checkbox = isSelected
-          ? theme.success("[x]")
-          : theme.muted("[ ]");
+          ? appTheme.status.success("[x]")
+          : appTheme.ui.muted("[ ]");
         const label = isHovered
-          ? theme.primary.bold(item.label)
-          : item.label;
-        const desc = theme.muted(`(${item.description})`);
+          ? appTheme.ui.primary.bold(item.label)
+          : appTheme.ui.text(item.label);
+        const desc = isHovered
+          ? appTheme.ui.primary(`(${item.description})`)
+          : appTheme.ui.muted(`(${item.description})`);
 
         const line = `  ${cursor} ${checkbox} ${label} ${desc}`;
         lines.push(truncateToWidth(line, availableWidth));
@@ -166,22 +166,22 @@ export class StatusLinePickerComponent extends Container implements Component, F
     }
 
     if (this.errorMessage) {
-      lines.push(theme.warning(`  ⚠ ${this.errorMessage}`));
+      lines.push(appTheme.status.warning(`  ⚠ ${this.errorMessage}`));
     }
 
     // Live Preview in the exact sequence of selectedIds
     const previewParts = this.selectedIds.map((id) => {
       const found = this.items.find((i) => i.id === id);
-      return theme.primary(found?.description || id);
+      return appTheme.ui.primary(found?.description || id);
     });
-    const divider = theme.muted(" • ");
+    const divider = appTheme.ui.muted(" • ");
     const previewText =
       previewParts.length > 0
         ? previewParts.join(divider)
-        : theme.muted("(empty)");
+        : "(none)";
 
     lines.push("");
-    lines.push(theme.muted("  Preview:"));
+    lines.push(appTheme.ui.muted("  Preview:"));
     lines.push(`  ${truncateToWidth(previewText, availableWidth - 4)}`);
 
     lines.push("");

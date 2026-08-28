@@ -6,7 +6,7 @@ import {
   visibleWidth,
   type Component,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { createMarkdownTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding } from "../keybindings.js";
 
@@ -65,7 +65,6 @@ const stringifyDisplayValue = (value: unknown): string => {
  * fix below for the other).
  */
 const formatToolHeader = (toolName: string, args: unknown): string => {
-  const theme = getTheme();
   let cmdPart = "";
   if (args && typeof args === "object") {
     const record = args as Record<string, unknown>;
@@ -86,7 +85,7 @@ const formatToolHeader = (toolName: string, args: unknown): string => {
     const raw = stringifyDisplayValue(args);
     if (raw) cmdPart = ` ${raw}`;
   }
-  return `${theme.tool(toolName)}${cmdPart ? theme.muted(cmdPart) : ""}`;
+  return `${appTheme.role.tool(toolName)}${cmdPart ? appTheme.ui.muted(cmdPart) : ""}`;
 };
 
 const formatToolExtraArgs = (args: unknown): string | null => {
@@ -140,30 +139,17 @@ const collapseToolOutput = (output: string, expanded: boolean): string => {
 };
 
 const createToolMessage = (tool: DisplayTool, expanded = false): ChatMessage => {
-  const theme = getTheme();
   const header = formatToolHeader(tool.name, tool.args);
   const extraArgs = formatToolExtraArgs(tool.args);
   const output =
     tool.shellOutput?.trimEnd() ||
     tool.partialResult?.trimEnd() ||
     stringifyDisplayValue(tool.result);
-  const statusLine = theme.muted(toolStatusText[tool.status]);
+  const statusLine = appTheme.ui.muted(toolStatusText[tool.status]);
 
-  // FIX: `extraArgs` (the fenced JSON argument dump) and `output` (raw
-  // shell/tool output) used to be pushed into `contentLines` completely
-  // unstyled — no theme function wrapped them at all, so they rendered in
-  // the terminal's bare default foreground. That's the other half of the
-  // "tool output looks identical to user message text" bug: both were, in
-  // fact, genuinely colorless, not just similarly colored. Wrapped in
-  // `theme.muted` (one call spanning the embedded newlines — ANSI color
-  // persists across `\n` until the trailing reset, same technique used in
-  // code-highlight.ts) so the JSON/output body reads as de-emphasized
-  // supporting detail under the `tool`-colored header, instead of invisible
-  // styling that happens to fall back to whatever gray the terminal itself
-  // defaults to.
   const contentLines: string[] = [header];
-  if (extraArgs) contentLines.push(theme.muted(extraArgs));
-  if (output) contentLines.push(theme.muted(collapseToolOutput(output, expanded)));
+  if (extraArgs) contentLines.push(extraArgs);
+  if (output) contentLines.push(appTheme.ui.muted(collapseToolOutput(output, expanded)));
   contentLines.push(statusLine);
 
   return {
@@ -448,33 +434,32 @@ export class MessageList implements Component {
    * miscolored.
    */
   private formatRolePrefix(msg: ChatMessage): string {
-    const theme = getTheme();
     switch (msg.role) {
       case "user":
-        return theme.user("  ❯ ");
+        return appTheme.ui.primary("  ❯ ");
       case "assistant":
-        return theme.assistant("  ❖ ");
+        return appTheme.role.assistant("  ❖ ");
       case "system":
-        return theme.system("  ❖ ");
+        return appTheme.ui.tertiary("  ❖ ");
       case "tool":
-        return theme.tool("  ❖ ");
+        return appTheme.ui.secondary("  ❖ ");
     }
   }
 
   private contentColorFor(role: MessageRole): (text: string) => string {
-    const theme = getTheme();
     switch (role) {
       case "user":
-        return theme.user;
+        return appTheme.role.user;
       case "system":
-        return theme.system;
+        return appTheme.role.system;
+      case "tool":
+        return appTheme.role.tool;
       default:
-        return theme.assistant;
+        return appTheme.role.assistant;
     }
   }
 
   private renderMessage(entry: CachedEntry, width: number): string[] {
-    const theme = getTheme();
     const availableWidth = Math.max(width, 20);
     const msg = entry.message;
     const prefix = this.formatRolePrefix(msg);
@@ -489,7 +474,7 @@ export class MessageList implements Component {
         0,
         0,
         createMarkdownTheme(),
-        { color: theme.assistant },
+        { color: appTheme.role.assistant },
       );
       const renderedLines = markdown.render(contentWidth);
       renderedLines.forEach((line, index) => {
@@ -504,7 +489,7 @@ export class MessageList implements Component {
       const contentLines = msg.content.split(/\r?\n/);
       for (let index = 0; index < contentLines.length; index++) {
         const wrapped = wrapTextWithAnsi(
-          theme.assistant(contentLines[index]),
+          appTheme.role.assistant(contentLines[index]),
           contentWidth,
         );
         if (wrapped.length === 0) {

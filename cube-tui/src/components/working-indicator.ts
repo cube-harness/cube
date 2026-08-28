@@ -1,8 +1,30 @@
+import chalk from "chalk";
 import { truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { formatBinding } from "../keybindings.js";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+export const renderShimmerText = (text: string, frameIndex: number): string => {
+  if (!text) return "";
+  const len = text.length;
+  const cycle = len + 6;
+  const wavePos = (frameIndex % cycle) - 2;
+
+  let result = "";
+  for (let i = 0; i < len; i++) {
+    const char = text[i];
+    const dist = Math.abs(i - wavePos);
+    if (dist === 0) {
+      result += appTheme.ui.text.bold(char);
+    } else if (dist === 1) {
+      result += appTheme.ui.text(char);
+    } else {
+      result += appTheme.ui.muted(char);
+    }
+  }
+  return result;
+};
 
 export type WorkingPhase =
   | "idle"
@@ -130,15 +152,15 @@ export class WorkingIndicator implements Component {
     private readonly tui: TUI,
     options: WorkingIndicatorOptions = {},
   ) {
-    const theme = getTheme();
     this.now = options.now ?? Date.now;
     this.schedule =
       options.schedule ??
       ((callback, intervalMs) => setInterval(callback, intervalMs));
     this.cancelSchedule = options.cancelSchedule ?? clearInterval;
-    this.spinnerStyle = options.spinnerStyle ?? theme.primary;
-    this.messageStyle = options.messageStyle ?? theme.muted;
-    this.timerStyle = options.timerStyle ?? theme.secondary;
+    this.spinnerStyle = options.spinnerStyle ?? appTheme.ui.primary;
+    this.messageStyle =
+      options.messageStyle ?? ((text) => renderShimmerText(text, this.frameIndex));
+    this.timerStyle = options.timerStyle ?? appTheme.ui.muted;
   }
 
   start(message: string = "Working"): void {
@@ -198,7 +220,7 @@ export class WorkingIndicator implements Component {
       `(${elapsedSeconds}s • ${formatBinding("cube.turn.interrupt")} to interrupt)`,
     );
 
-    const line = ` ${spinner} ${text} ${timer}`;
+    const line = `  ${spinner} ${text} ${timer}`;
     return [truncateToWidth(line, width)];
   }
 

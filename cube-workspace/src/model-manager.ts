@@ -157,7 +157,7 @@ export class ModelManager {
       .catch(() => null);
     const active: string[] = [];
 
-    // 1. Check Ollama (Local)
+    // 1. Check Ollama-local
     const ollamaUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
     if (ollamaUrl) {
       active.push("ollama");
@@ -229,7 +229,7 @@ export class ModelManager {
       const localModels = await this.fetchOllamaModels(ollamaUrl);
       if (localModels.length > 0) {
         providersMap["ollama"] = {
-          name: "Ollama (Local)",
+          name: "Ollama-local",
           models: localModels,
         };
       }

@@ -6,7 +6,7 @@ import {
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
 import { KeyHint } from "./key-hint.js";
@@ -144,7 +144,6 @@ export class PromptEditor implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const theme = getTheme();
     const innerWidth = Math.max(10, width - 2);
     let lines = this.editor.render(innerWidth);
 
@@ -154,7 +153,7 @@ export class PromptEditor implements Component, Focusable {
       );
     }
 
-    const prefix = theme.user(" ❯ ");
+    const prefix = appTheme.ui.primary(" ❯ ");
     if (lines.length >= 3 && lines[1]) {
       if (lines[1].startsWith("   ")) {
         lines[1] = `${prefix}${lines[1].slice(3)}`;
@@ -177,7 +176,7 @@ export class PromptEditor implements Component, Focusable {
       bottomBorderIndex = lines.length - 1;
     }
 
-    const borderStyle = this.focused ? theme.primary : theme.border;
+    const borderStyle = appTheme.ui.border;
     const boxLines: string[] = [];
 
     // 1. Top border with rounded corners: ╭────────────────╮
@@ -213,7 +212,7 @@ export class PromptEditor implements Component, Focusable {
     if (this.queuedPrompts.length === 0) return boxLines;
 
     const queueLines = wrapTextWithAnsi(
-      theme.muted(
+      appTheme.ui.muted(
         `• Messages to be submitted after the current turn (${formatBinding("cube.turn.interrupt")} to cancel next queued prompt)`,
       ),
       width,
@@ -221,7 +220,7 @@ export class PromptEditor implements Component, Focusable {
     for (const prompt of this.queuedPrompts) {
       queueLines.push(
         ...wrapTextWithAnsi(
-          `${theme.secondary("  ↳")} ${theme.assistant(prompt.replace(/\r?\n/g, " "))}`,
+          `${appTheme.ui.secondary("  ↳")} ${appTheme.role.assistant(prompt.replace(/\r?\n/g, " "))}`,
           width,
         ),
       );

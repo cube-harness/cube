@@ -6,7 +6,7 @@ import {
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export interface SearchBarOptions {
   placeholder?: string;
@@ -66,13 +66,12 @@ export class SearchBar implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const theme = getTheme();
     const query = this.input.getValue();
 
     if (query.length === 0) {
       const marker = this.focused ? CURSOR_MARKER : "";
       const cursorChar = this.focused ? "\x1b[7m \x1b[27m" : "";
-      const line = `${theme.muted(this.prefix)}${theme.muted(this.placeholder)}${marker}${cursorChar}`;
+      const line = `${appTheme.ui.muted(this.prefix)}${appTheme.ui.muted(this.placeholder)}${marker}${cursorChar}`;
       return [truncateToWidth(line, width)];
     }
 
@@ -84,7 +83,7 @@ export class SearchBar implements Component, Focusable {
       inputContent = inputContent.slice(2);
     }
 
-    const line = `${theme.muted(this.prefix)}${theme.primary.bold(inputContent)}`;
+    const line = `${appTheme.ui.muted(this.prefix)}${appTheme.ui.primary.bold(inputContent)}`;
     return [truncateToWidth(line, width)];
   }
 }

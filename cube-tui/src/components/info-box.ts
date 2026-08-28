@@ -1,7 +1,7 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import chalk, { type ChalkInstance } from "chalk";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 
 const CUBE_ICON = [
   "   _______   ",
@@ -64,23 +64,21 @@ export class InfoBox implements Component {
   }
 
   render = (width: number): string[] => {
-    const theme = getTheme();
-    const [light, dark] = theme.bannerGradient;
+    const [light, dark] = appTheme.bannerGradient;
 
     const borderChalk = this.borderColor
-      ? ((chalk[this.borderColor as keyof ChalkInstance] ?? theme.border) as ChalkInstance)
-      : theme.border;
+      ? ((chalk[this.borderColor as keyof ChalkInstance] ?? appTheme.ui.border) as ChalkInstance)
+      : appTheme.ui.border;
 
     const titleChalk = this.titleColor
-      ? ((chalk[this.titleColor as keyof ChalkInstance] ?? theme.primary) as ChalkInstance)
-      : theme.assistant;
+      ? ((chalk[this.titleColor as keyof ChalkInstance] ?? appTheme.ui.primary.bold) as ChalkInstance)
+      : appTheme.ui.primary.bold;
 
     const contentLines: string[] = [
-      `${theme.primary("Model     :")} ${this.model}`,
-      `${theme.primary("Workspace :")} ${this.workspace}`,
-      `${theme.primary("SOUL.md   :")} ${this.agentMd}`,
-      `${theme.primary("AGENT.md  :")} ${this.agentMd}`,
-      `${theme.primary("Thread ID :")} ${this.threadId}`,
+      `${appTheme.ui.muted("Model     :")} ${appTheme.ui.text(this.model)}`,
+      `${appTheme.ui.muted("Workspace :")} ${appTheme.ui.text(this.workspace)}`,
+      `${appTheme.ui.muted("AGENT.md  :")} ${appTheme.ui.text(this.agentMd)}`,
+      `${appTheme.ui.muted("Thread ID :")} ${appTheme.ui.text(this.threadId)}`,
     ];
 
     // Tạo gradient cho Cube Icon giống Banner cũ

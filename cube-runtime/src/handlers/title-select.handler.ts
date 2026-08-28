@@ -22,7 +22,7 @@ export const createTitleSelectHandler = (deps: TitleSelectHandlerDeps) => {
     // 3. Emit confirmation message
     deps.dispatcher.emit({
       type: "system:message",
-      content: `Terminal title configuration saved: "${appTitle.join(" • ")}"`,
+      content: `Terminal title configuration saved: "${appTitle.join(" | ")}"`,
     });
   };
 };

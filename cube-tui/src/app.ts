@@ -25,7 +25,7 @@ import { TitlePickerComponent, formatTerminalTitle, type TitlePickerOptions } fr
 import { StatusLinePickerComponent, type StatusLinePickerOptions } from "./components/statusline-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "./components/approval-picker.js";
 import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
-import { setTheme } from "./themes/color.schema.js";
+import { setSyntaxTheme as setTheme } from "./themes/syntax.theme.js";
 import { matchesBinding } from "./keybindings.js";
 
 export type {

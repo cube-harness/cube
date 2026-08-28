@@ -1,6 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export interface UsageBoxContent {
   title?: string;
@@ -48,9 +48,8 @@ export class UsageBox implements Component {
   render = (width: number): string[] => {
     if (!this.content) return [];
 
-    const theme = getTheme();
-    const borderChalk = theme.border;
-    const titleChalk = theme.assistant;
+    const borderChalk = appTheme.ui.border;
+    const titleChalk = appTheme.ui.primary.bold;
 
     const {
       model,
@@ -80,7 +79,7 @@ export class UsageBox implements Component {
     );
     const filledBars = Math.round((percent / 100) * 20);
     const emptyBars = 20 - filledBars;
-    const progressBar = `[${"█".repeat(filledBars)}${"░".repeat(emptyBars)}]`;
+    const progressBar = `${appTheme.status.success("█".repeat(filledBars))}${appTheme.ui.muted("░".repeat(emptyBars))}`;
     const remainingContext = Math.max(0, contextLimit - currentContextTokens);
 
     const capText = capabilities.length > 0 ? capabilities.join(", ") : "none";
@@ -104,33 +103,33 @@ export class UsageBox implements Component {
         : promptTokens.toLocaleString();
 
     const contentLines: string[] = [
-      `${theme.primary("Model            :")} ${modelDisplay}`,
-      `${theme.primary("Capabilities     :")} ${capText}`,
-      `${theme.primary("Context Limit    :")} ${contextLimit.toLocaleString()} tokens${maxOutputText}`,
-      `${theme.primary("Context Window   :")} ${progressBar} ${percent.toFixed(1)}% (${currentContextTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`,
-      `${theme.primary("Remaining Space  :")} ${remainingContext.toLocaleString()} tokens`,
+      `${appTheme.ui.muted("Model            :")} ${appTheme.ui.text(modelDisplay)}`,
+      `${appTheme.ui.muted("Capabilities     :")} ${appTheme.ui.text(capText)}`,
+      `${appTheme.ui.muted("Context Limit    :")} ${appTheme.ui.text(`${contextLimit.toLocaleString()} tokens${maxOutputText}`)}`,
+      `${appTheme.ui.muted("Context Window   :")} [${progressBar}] ${appTheme.ui.primary(percent.toFixed(1) + "%")} ${appTheme.ui.muted(`(${currentContextTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`)}`,
+      `${appTheme.ui.muted("Remaining Space  :")} ${appTheme.ui.text(`${remainingContext.toLocaleString()} tokens`)}`,
       "",
-      `${theme.primary("Prompt Tokens    :")} ${promptDisplay}`,
-      `${theme.primary("Completion Tokens:")} ${completionTokens.toLocaleString()}`,
+      `${appTheme.ui.muted("Prompt Tokens    :")} ${appTheme.ui.text(promptDisplay)}`,
+      `${appTheme.ui.muted("Completion Tokens:")} ${appTheme.ui.text(completionTokens.toLocaleString())}`,
     ];
 
     if (reasoningTokens !== undefined && reasoningTokens > 0) {
       contentLines.push(
-        `${theme.primary("Reasoning Tokens :")} ${reasoningTokens.toLocaleString()}`,
+        `${appTheme.ui.muted("Reasoning Tokens :")} ${appTheme.ui.text(reasoningTokens.toLocaleString())}`,
       );
     }
 
     contentLines.push(
-      `${theme.primary("Cached Tokens    :")} ${cachedDisplay}`,
-      `${theme.primary("Total Tokens     :")} ${totalTokens.toLocaleString()}`,
+      `${appTheme.ui.muted("Cached Tokens    :")} ${appTheme.ui.text(cachedDisplay)}`,
+      `${appTheme.ui.muted("Total Tokens     :")} ${appTheme.ui.text(totalTokens.toLocaleString())}`,
       "",
     );
 
     if (threadTitle) {
-      contentLines.push(`${theme.primary("Thread Title     :")} ${threadTitle}`);
+      contentLines.push(`${appTheme.ui.muted("Thread Title     :")} ${appTheme.ui.text(threadTitle)}`);
     }
 
-    contentLines.push(`${theme.primary("Thread ID        :")} ${threadId}`);
+    contentLines.push(`${appTheme.ui.muted("Thread ID        :")} ${appTheme.ui.text(threadId)}`);
 
     let maxTextWidth = 0;
     for (const line of contentLines) {

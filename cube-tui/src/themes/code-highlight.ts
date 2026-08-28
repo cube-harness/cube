@@ -1,3 +1,4 @@
+// cube-tui/src/themes/code-highlight.ts
 import hljs from "highlight.js/lib/core";
 import typescript from "highlight.js/lib/languages/typescript";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -6,16 +7,39 @@ import json from "highlight.js/lib/languages/json";
 import yaml from "highlight.js/lib/languages/yaml";
 import bash from "highlight.js/lib/languages/bash";
 import sql from "highlight.js/lib/languages/sql";
+import pgsql from "highlight.js/lib/languages/pgsql";
 import csharp from "highlight.js/lib/languages/csharp";
+import c from "highlight.js/lib/languages/c";
+import cpp from "highlight.js/lib/languages/cpp";
+import rust from "highlight.js/lib/languages/rust";
+import go from "highlight.js/lib/languages/go";
+import java from "highlight.js/lib/languages/java";
+import kotlin from "highlight.js/lib/languages/kotlin";
+import swift from "highlight.js/lib/languages/swift";
+import php from "highlight.js/lib/languages/php";
+import ruby from "highlight.js/lib/languages/ruby";
+import markdown from "highlight.js/lib/languages/markdown";
+import dockerfile from "highlight.js/lib/languages/dockerfile";
+import nginx from "highlight.js/lib/languages/nginx";
+import graphql from "highlight.js/lib/languages/graphql";
+import ini from "highlight.js/lib/languages/ini";
+import powershell from "highlight.js/lib/languages/powershell";
+import scss from "highlight.js/lib/languages/scss";
+import less from "highlight.js/lib/languages/less";
+import lua from "highlight.js/lib/languages/lua";
+import protobuf from "highlight.js/lib/languages/protobuf";
+import makefile from "highlight.js/lib/languages/makefile";
 import xml from "highlight.js/lib/languages/xml";
 import css from "highlight.js/lib/languages/css";
-import type { ColorTheme } from "./color.schema.js";
+import diff from "highlight.js/lib/languages/diff";
+import { appTheme } from "./app.theme.js";
+import type { SyntaxTheme } from "./syntax.theme.js";
+import { getSyntaxTheme } from "./syntax.theme.js";
 
 /**
- * Curated language set instead of the full `highlight.js` bundle (~192 langs):
- * this is a CLI, so startup cost matters, and this list is exactly Vy's stack
- * (TS/JS monorepo, Python tooling, JSON/YAML config, Bash scripts, C#/ABP,
- * SQL, XML/HTML, CSS). Add more `registerLanguage` calls here as needed.
+ * Curated comprehensive language set for full polyglot coding, database queries, and configs:
+ * TS/JS, Python, Rust, Go, C/C++, Java, Kotlin, Swift, PHP, Ruby, SQL/PostgreSQL, MongoDB,
+ * Bash/PowerShell, JSON/YAML/TOML, XML/HTML, CSS/SCSS/LESS, Docker, Nginx, GraphQL, Proto, Makefile, Markdown, Diff.
  */
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("javascript", javascript);
@@ -24,57 +48,108 @@ hljs.registerLanguage("json", json);
 hljs.registerLanguage("yaml", yaml);
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("sql", sql);
+hljs.registerLanguage("pgsql", pgsql);
 hljs.registerLanguage("csharp", csharp);
+hljs.registerLanguage("c", c);
+hljs.registerLanguage("cpp", cpp);
+hljs.registerLanguage("rust", rust);
+hljs.registerLanguage("go", go);
+hljs.registerLanguage("java", java);
+hljs.registerLanguage("kotlin", kotlin);
+hljs.registerLanguage("swift", swift);
+hljs.registerLanguage("php", php);
+hljs.registerLanguage("ruby", ruby);
+hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("dockerfile", dockerfile);
+hljs.registerLanguage("nginx", nginx);
+hljs.registerLanguage("graphql", graphql);
+hljs.registerLanguage("ini", ini);
+hljs.registerLanguage("powershell", powershell);
+hljs.registerLanguage("scss", scss);
+hljs.registerLanguage("less", less);
+hljs.registerLanguage("lua", lua);
+hljs.registerLanguage("protobuf", protobuf);
+hljs.registerLanguage("makefile", makefile);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("css", css);
+hljs.registerLanguage("diff", diff);
+
+// Aliases
 hljs.registerAliases(["ts", "tsx"], { languageName: "typescript" });
-hljs.registerAliases(["js", "jsx", "mjs", "cjs"], { languageName: "javascript" });
-hljs.registerAliases(["py"], { languageName: "python" });
-hljs.registerAliases(["sh", "shell", "zsh"], { languageName: "bash" });
+hljs.registerAliases(["js", "jsx", "mjs", "cjs", "mongo", "mongodb", "bson"], { languageName: "javascript" });
+hljs.registerAliases(["py", "py3", "python3"], { languageName: "python" });
+hljs.registerAliases(["sh", "shell", "zsh", "env"], { languageName: "bash" });
+hljs.registerAliases(["ps1", "pwsh"], { languageName: "powershell" });
 hljs.registerAliases(["cs", "dotnet"], { languageName: "csharp" });
-hljs.registerAliases(["html"], { languageName: "xml" });
+hljs.registerAliases(["cc", "cxx", "h", "hpp"], { languageName: "cpp" });
+hljs.registerAliases(["rs"], { languageName: "rust" });
+hljs.registerAliases(["golang"], { languageName: "go" });
+hljs.registerAliases(["kt", "kts"], { languageName: "kotlin" });
+hljs.registerAliases(["rb"], { languageName: "ruby" });
+hljs.registerAliases(["md", "mkd"], { languageName: "markdown" });
+hljs.registerAliases(["docker"], { languageName: "dockerfile" });
+hljs.registerAliases(["gql"], { languageName: "graphql" });
+hljs.registerAliases(["toml"], { languageName: "ini" });
+hljs.registerAliases(["proto"], { languageName: "protobuf" });
+hljs.registerAliases(["make"], { languageName: "makefile" });
+hljs.registerAliases(["html", "svg"], { languageName: "xml" });
 hljs.registerAliases(["yml"], { languageName: "yaml" });
+hljs.registerAliases(["jsonc", "json5", "jsonl", "ndjson", "geojson"], { languageName: "json" });
+hljs.registerAliases(["patch"], { languageName: "diff" });
+hljs.registerAliases(["postgres", "postgresql"], { languageName: "pgsql" });
+hljs.registerAliases(["mysql", "sqlite"], { languageName: "sql" });
 
 /**
- * Token role → theme hue map. Deliberately does NOT touch success/warning/error
- * (SIGNAL tier is reserved for state/alert, per color.schema.ts's own rule that
- * CONTENT must never reuse a SIGNAL hex) and does NOT touch user/system/tool
- * (ACTOR tier) — reusing `tool`'s hue for e.g. function names would visually
- * conflate "the agent just invoked a tool" (the ⚙ tool: indicator elsewhere in
- * this UI) with "this is a function identifier inside a code snippet", a
- * collision specific to a coding-agent UI that a generic editor theme wouldn't
- * have to worry about. Everything below stays inside the existing CONTENT/
- * STRUCTURAL budget (primary, secondary, codeAccent, muted, assistant, border):
- *
- *   primary.bold   — keyword (control flow: const/function/if/return/def...)
- *   secondary      — built_in / type / attr (identifier-ish: type names, object keys)
- *   secondary.bold — title (function/class name being declared)
- *   codeAccent     — string / regexp / subst (literal data — same hue as inline `code`)
- *   codeAccent.bold— number / literal (numeric & true/false/null literals)
- *   muted.italic   — comment (universal convention: de-emphasized + slanted)
- *   muted          — meta (preprocessor/shebang-ish lines)
- *   muted.strikethrough — deletion (diff `-` lines inside a fenced code block)
- *   assistant      — everything else (params, property, variable, plain text)
- *   border         — punctuation (braces/commas/colons — chrome, not content)
+ * Resolves token styling based on precise class combination (e.g. "title class_" vs "title function_").
  */
-const TOKEN_STYLE: Record<string, (t: ColorTheme) => (s: string) => string> = {
-  keyword: (t) => t.primary.bold,
-  built_in: (t) => t.secondary,
-  type: (t) => t.secondary,
-  attr: (t) => t.secondary,
-  title: (t) => t.secondary.bold,
-  string: (t) => t.codeAccent,
-  subst: (t) => t.codeAccent,
-  regexp: (t) => t.codeAccent,
-  symbol: (t) => t.codeAccent,
-  number: (t) => t.codeAccent.bold,
-  literal: (t) => t.codeAccent.bold,
-  comment: (t) => t.muted.italic,
-  meta: (t) => t.muted,
-  deletion: (t) => t.muted.strikethrough,
-  punctuation: (t) => t.border,
-  emphasis: (t) => t.assistant.italic,
-  strong: (t) => t.assistant.bold,
+const resolveTokenStyle = (rawClass: string, st: SyntaxTheme): ((s: string) => string) => {
+  const classes = rawClass.split(" ");
+  if (classes.includes("class_") || classes.includes("type") || classes.includes("built_in") || classes.includes("regexp")) {
+    return st.tokens.type;
+  }
+  if (classes.includes("function_") || classes.includes("title")) {
+    return st.tokens.function;
+  }
+  if (classes.includes("keyword") || classes.includes("selector-tag") || classes.includes("name")) {
+    return st.tokens.keyword;
+  }
+  if (classes.includes("string") || classes.includes("code")) {
+    return st.tokens.string;
+  }
+  if (classes.includes("number")) {
+    return st.tokens.number;
+  }
+  if (classes.includes("literal")) {
+    return st.tokens.boolean;
+  }
+  if (classes.includes("comment") || classes.includes("doctag") || classes.includes("quote")) {
+    return st.tokens.comment;
+  }
+  if (classes.includes("params") || classes.includes("attr") || classes.includes("selector-attr")) {
+    return st.tokens.parameter ?? st.tokens.property;
+  }
+  if (classes.includes("symbol") || classes.includes("constant") || classes.includes("selector-pseudo")) {
+    return st.tokens.constant;
+  }
+  if (classes.includes("meta")) {
+    return st.tokens.diffMeta ?? st.tokens.type;
+  }
+  if (classes.includes("addition")) {
+    return st.tokens.diffAdded ?? st.tokens.string;
+  }
+  if (classes.includes("deletion")) {
+    return st.tokens.diffRemoved ?? st.tokens.keyword;
+  }
+  if (classes.includes("punctuation") || classes.includes("tag")) {
+    return st.tokens.punctuation;
+  }
+  if (classes.includes("operator")) {
+    return st.tokens.operator;
+  }
+  if (classes.includes("property")) {
+    return st.tokens.property;
+  }
+  return st.tokens.variable;
 };
 
 const ENTITIES: Record<string, string> = {
@@ -86,71 +161,87 @@ const ENTITIES: Record<string, string> = {
   "&#39;": "'",
 };
 
-const decodeEntities = (s: string): string =>
-  s.replace(/&amp;|&lt;|&gt;|&quot;|&#x27;|&#39;/g, (m) => ENTITIES[m]);
+const decodeEntities = (html: string): string =>
+  html.replace(/&(?:amp|lt|gt|quot|#x27|#39);/g, (match) => ENTITIES[match] ?? match);
 
 /**
- * highlight.js's own HTML output is well-formed by construction (it only ever
- * emits <span class="..."> / </span> around escaped text, never arbitrary
- * markup), so a regex walk is safe here — this is not a general HTML parser.
- * Nesting (e.g. `<span class="hljs-string">...<span class="hljs-subst">`
- * for template-literal interpolation) is handled with a class stack; the
- * innermost open span wins for each text run, same as CSS cascading.
+ * Parses highlight.js HTML output containing `<span class="hljs-TOKEN">...</span>`
+ * and applies Chalk styling according to the provided SyntaxTheme.
  */
-function renderHighlightedHtml(html: string, theme: ColorTheme): string {
-  const classStack: string[] = [];
-  let out = "";
+export const highlightToAnsi = (html: string, st: SyntaxTheme): string => {
+  let result = "";
+  let i = 0;
+  const styleStack: Array<(s: string) => string> = [];
 
-  const spanOrText = /<span class="([^"]+)">|<\/span>|[^<]+/g;
-  let match: RegExpExecArray | null;
+  while (i < html.length) {
+    if (html.startsWith("<span class=\"hljs-", i)) {
+      const classStart = i + '<span class="hljs-'.length;
+      const classEnd = html.indexOf('"', classStart);
+      if (classEnd === -1) {
+        result += html[i++];
+        continue;
+      }
 
-  while ((match = spanOrText.exec(html))) {
-    const token = match[0];
-    if (token.startsWith('<span class="')) {
-      classStack.push(match[1]);
-    } else if (token === "</span>") {
-      classStack.pop();
+      const rawClass = html.slice(classStart, classEnd);
+      const styleFn = resolveTokenStyle(rawClass, st);
+
+      styleStack.push(styleFn);
+      i = html.indexOf(">", classEnd) + 1;
+    } else if (html.startsWith("</span>", i)) {
+      styleStack.pop();
+      i += "</span>".length;
     } else {
-      const text = decodeEntities(token);
-      const activeClass = classStack[classStack.length - 1];
-      const role = activeClass?.split(" ")[0]?.replace(/^hljs-/, "");
-      const styler = (role && TOKEN_STYLE[role]) || ((t: ColorTheme) => t.assistant);
-      out += styler(theme)(text);
+      const nextTag = html.indexOf("<", i);
+      const textChunk = nextTag === -1 ? html.slice(i) : html.slice(i, nextTag);
+      const decoded = decodeEntities(textChunk);
+
+      const activeStyle = styleStack[styleStack.length - 1];
+      result += activeStyle ? activeStyle(decoded) : decoded;
+
+      i = nextTag === -1 ? html.length : nextTag;
     }
   }
-  return out;
-}
+
+  return result;
+};
 
 /**
- * Takes an explicit `ColorTheme` (rather than reading a global) so callers
- * that need to render a NON-active theme — the theme-picker's live preview,
- * previewing whichever theme the cursor is hovering — get correctly-colored
- * code blocks too. `createMarkdownTheme(theme)` in pi-tui.theme.ts closes
- * over this to satisfy MarkdownTheme["highlightCode"]'s fixed
- * `(code, lang?) => string[]` shape.
+ * Creates a code highlighter function compatible with pi-tui's MarkdownTheme.highlightCode.
  */
-export const createHighlightCode = (theme: ColorTheme) => {
-  /**
-   * Matches MarkdownTheme["highlightCode"]: (code, lang?) => string[], one
-   * entry per source line, with NO indent prefix — pi-tui's Markdown renderer
-   * prepends `codeBlockIndent` itself (see markdown.js: `${indent}${hlLine}`),
-   * so adding it here would double it up.
-   */
+export const createHighlightCode = (
+  theme?: SyntaxTheme,
+): ((code: string, lang?: string) => string[]) => {
   return (code: string, lang?: string): string[] => {
-    const language = lang && hljs.getLanguage(lang) ? lang : undefined;
+    const st = theme ?? getSyntaxTheme();
+    const effectiveLang = lang && hljs.getLanguage(lang) ? lang : undefined;
 
-    let html: string;
-    try {
-      html = language
-        ? hljs.highlight(code, { language }).value
-        : hljs.highlightAuto(code).value;
-    } catch {
-      // Unknown/unsupported language, or a highlight.js internal error on
-      // malformed input — fall back to plain, unhighlighted code rather than
-      // dropping the code block entirely.
-      return code.split("\n").map((line) => theme.assistant(line));
+    if (effectiveLang === "diff") {
+      const lines = code.split("\n");
+      return lines.map((line) => {
+        if (/^\s*\d*\s*\+/.test(line) || line.startsWith("+")) {
+          return st.tokens.diffAddedBg(st.tokens.diffAdded(line));
+        }
+        if (/^\s*\d*\s*\-/.test(line) || line.startsWith("-")) {
+          return st.tokens.diffRemovedBg(st.tokens.diffRemoved(line));
+        }
+        if (line.startsWith("@@") || line.startsWith("diff ") || line.startsWith("index ")) {
+          return st.tokens.diffMeta(line);
+        }
+        return st.tokens.variable(line);
+      });
     }
 
-    return renderHighlightedHtml(html, theme).split("\n");
+    let highlightedHtml: string;
+    try {
+      if (effectiveLang) {
+        highlightedHtml = hljs.highlight(code, { language: effectiveLang, ignoreIllegals: true }).value;
+      } else {
+        highlightedHtml = hljs.highlightAuto(code).value;
+      }
+    } catch {
+      highlightedHtml = code;
+    }
+
+    return highlightedHtml.split("\n").map((lineHtml) => highlightToAnsi(lineHtml, st));
   };
 };

@@ -2,7 +2,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import fs from "fs";
 import path from "path";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 
 const FALLBACK_WORDMARK = [
   "                                                                                 ",
@@ -64,8 +64,7 @@ const gradientLines = (lines: string[], from: string, to: string): string[] => {
 export class Banner implements Component {
   invalidate = () => {};
   render = (_width: number): string[] => {
-    const theme = getTheme();
-    const [light, dark] = theme.bannerGradient;
+    const [light, dark] = appTheme.bannerGradient;
 
     const wordmark = gradientLines(WORDMARK, light, dark);
 

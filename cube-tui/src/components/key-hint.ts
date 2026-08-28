@@ -1,5 +1,5 @@
 import { Text, type Component } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export interface KeyHintItem {
   key: string;
@@ -15,11 +15,10 @@ export class KeyHint implements Component {
   }
 
   setHints(items: KeyHintItem[]): void {
-    const theme = getTheme();
     const formatted = items
       .map((item) => `${item.key}: ${item.label}`)
       .join(" • ");
-    this.text.setText(theme.muted(formatted));
+    this.text.setText(appTheme.ui.muted(formatted));
   }
 
   invalidate(): void {

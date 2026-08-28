@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { CubeRuntime } from "@cube/runtime";
 import { CubeApp, type TuiApp } from "./app.js";
-import { setTheme } from "./themes/color.schema.js";
+import { setSyntaxTheme as setTheme } from "./themes/syntax.theme.js";
 
 export const startTui = async (): Promise<void> => {
   let app: TuiApp;

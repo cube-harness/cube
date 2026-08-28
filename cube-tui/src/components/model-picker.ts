@@ -7,7 +7,7 @@ import {
   type Focusable,
   type SelectItem,
 } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
@@ -83,9 +83,8 @@ export class ModelPickerComponent extends Container implements Component, Focusa
 
   constructor(private readonly options: ModelPickerOptions) {
     super();
-    const theme = getTheme();
 
-    this.title = new Text(theme.primary.bold("Select AI Provider"), 0, 0);
+    this.title = new Text(appTheme.ui.primary.bold("Select AI Provider"), 0, 0);
     this.searchBar = new SearchBar();
 
     const providerItems: SelectItem[] = options.providers.map((p) => ({
@@ -133,12 +132,11 @@ export class ModelPickerComponent extends Container implements Component, Focusa
   }
 
   private switchToModelStep(provider: ProviderGroup): void {
-    const theme = getTheme();
     this.step = "model";
     this.selectedProvider = provider;
     this.searchBar.clear();
 
-    this.title.setText(theme.primary.bold(`Select Model [${provider.name}]`));
+    this.title.setText(appTheme.ui.primary.bold(`Select Model [${provider.name}]`));
 
     const modelItems: SelectItem[] = provider.models.map((m) => {
       const isActive = m.modelId === this.options.currentModelId;
@@ -179,13 +177,12 @@ export class ModelPickerComponent extends Container implements Component, Focusa
   }
 
   private switchToReasoningStep(model: ModelItem): void {
-    const theme = getTheme();
     this.step = "reasoning";
     this.selectedModel = model;
     this.searchBar.clear();
 
     this.title.setText(
-      theme.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
+      appTheme.ui.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
     );
 
     const availableEfforts = model.reasoning_efforts || [];
@@ -229,13 +226,12 @@ export class ModelPickerComponent extends Container implements Component, Focusa
   }
 
   private switchToProviderStep(): void {
-    const theme = getTheme();
     this.step = "provider";
     this.selectedProvider = undefined;
     this.selectedModel = undefined;
     this.searchBar.clear();
 
-    this.title.setText(theme.primary.bold("Select AI Provider"));
+    this.title.setText(appTheme.ui.primary.bold("Select AI Provider"));
     this.providerList.setFilter("");
 
     this.hint.setHints([
@@ -273,8 +269,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     if (this.step !== "reasoning") {
       lines.push(...this.searchBar.render(width));
     } else {
-      const theme = getTheme();
-      lines.push(theme.muted("Select reasoning level:"));
+      lines.push(appTheme.ui.muted("Select reasoning level:"));
     }
 
     // 3. Render Active Step List

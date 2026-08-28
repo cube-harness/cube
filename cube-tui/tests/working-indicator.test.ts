@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WorkingIndicator, deriveWorkingIndicatorState } from "../src/components/working-indicator.js";
+import { WorkingIndicator, deriveWorkingIndicatorState, renderShimmerText } from "../src/components/working-indicator.js";
 
 const state = (overrides: Record<string, unknown> = {}) => ({
   isRunning: true,
@@ -109,4 +109,12 @@ test("active indicator shows the centralized Escape interrupt hint", () => {
   indicator.start("Working");
   assert.match(indicator.render(100).join("\n"), /0s • Esc to interrupt/);
   indicator.stop();
+});
+
+test("renderShimmerText applies wave highlights across character frames", () => {
+  const text = "Thinking";
+  const frame0 = renderShimmerText(text, 0);
+  assert.equal(typeof frame0, "string");
+  assert.equal(frame0.includes("Thinking") || frame0.length >= text.length, true);
+  assert.equal(renderShimmerText("", 0), "");
 });

@@ -1,7 +1,7 @@
 // cube-tui/src/components/footer.ts
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { getTheme } from "../themes/color.schema.js";
+import { appTheme } from "../themes/app.theme.js";
 import type { InfoBoxContent } from "./info-box.js";
 
 export class Footer implements Component {
@@ -45,17 +45,16 @@ export class Footer implements Component {
   }
 
   render(width: number): string[] {
-    const theme = getTheme();
     const boxWidth = Math.max(width, 20);
-    const divider = theme.muted(" • ");
+    const divider = appTheme.ui.muted(" • ");
 
     const parts: string[] = [];
     for (const key of this.statusLine) {
-      if (key === "model" && this.model) parts.push(theme.primary(this.model));
-      else if (key === "workspace" && this.workspace) parts.push(theme.primary(this.workspace));
-      else if (key === "agentMd" && this.agentMd) parts.push(theme.primary(this.agentMd));
-      else if (key === "threadId" && this.threadId) parts.push(theme.primary(this.threadId));
-      else if (key === "status" && this.status) parts.push(theme.primary(this.status));
+      if (key === "model" && this.model) parts.push(appTheme.ui.primary(this.model));
+      else if (key === "workspace" && this.workspace) parts.push(appTheme.ui.primary(this.workspace));
+      else if (key === "agentMd" && this.agentMd) parts.push(appTheme.ui.primary(this.agentMd));
+      else if (key === "threadId" && this.threadId) parts.push(appTheme.ui.primary(this.threadId));
+      else if (key === "status" && this.status) parts.push(appTheme.ui.primary(this.status));
     }
 
     const fullLine = parts.join(divider);

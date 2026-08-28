@@ -3,15 +3,22 @@ import {
   Container,
   Text,
   SelectList,
-  Markdown,
   visibleWidth,
   truncateToWidth,
   type SelectItem,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
-import { getTheme, getAvailableThemes, THEMES, type ColorTheme } from "../themes/color.schema.js";
-import { createSelectListTheme, createMarkdownTheme } from "../themes/pi-tui.theme.js";
+import hljs from "highlight.js/lib/core";
+import { appTheme } from "../themes/app.theme.js";
+import {
+  getSyntaxTheme,
+  getAvailableSyntaxThemes,
+  SYNTAX_THEMES,
+  type SyntaxTheme,
+} from "../themes/syntax.theme.js";
+import { createSelectListTheme } from "../themes/pi-tui.theme.js";
+import { highlightToAnsi } from "../themes/code-highlight.js";
 import { KeyHint } from "./key-hint.js";
 import { formatBinding } from "../keybindings.js";
 
@@ -27,38 +34,26 @@ export interface ThemePickerOptions {
   onCancel: () => void;
 }
 
-/**
- * Sample markdown fed through the REAL `Markdown` component + REAL
- * `createMarkdownTheme(previewTheme)` for every preview render. This used to
- * be a hand-simulated box (each line built by hand with raw `t.xxx()` calls,
- * copied over from antigravity-cli) that could silently drift from what the
- * app actually renders — a heading, a link, or the new syntax-highlighted
- * code block could look one way here and another way in the real TUI. Piping
- * the same string through the same component + theme factory the rest of
- * the app uses means the preview IS the real render, by construction, not an
- * approximation of it — and it automatically covers every MarkdownTheme
- * field (heading/bold/italic/strikethrough/link/code/codeBlock+highlightCode/
- * quote/hr/list) without anyone having to keep a second hand-written sample
- * in sync by hand.
- */
-const MARKDOWN_PREVIEW_SAMPLE = `## greet.ts
-
-Sure — here's the plan: export \`greet(name)\` with input *validation* and a **regression test**.
-
-- Called from \`src/index.ts\`
-- Covered by [the test suite](file:///path/to/greet.test.ts)
-
-\`\`\`ts
-function greet(name: string) {
-  // guard against empty input
-  if (!name) throw new Error("name required");
-  return \`Hello, \${name}!\`;
+interface PreviewLine {
+  gutter: string;
+  code: string;
+  type: "ctx" | "add" | "del";
 }
-\`\`\`
 
-> Replaces the old \`sayHi()\` helper — see the diff below.
-
-~~sayHi() removed~~`;
+const UNIFIED_PREVIEW_LINES: PreviewLine[] = [
+  { gutter: "01  ", type: "ctx", code: "// @controller: Authentication Service" },
+  { gutter: "02  ", type: "ctx", code: "@Injectable()" },
+  { gutter: "03  ", type: "ctx", code: "export class AuthService {" },
+  { gutter: "04  ", type: "ctx", code: "  constructor(private readonly db: Database) {}" },
+  { gutter: "05  ", type: "ctx", code: "  async login(user: User, token: string): Promise<Session> {" },
+  { gutter: "06  ", type: "ctx", code: "    const isMatched: boolean = /^[a-z0-9_]+$/i.test(token);" },
+  { gutter: "07 -", type: "del", code: "    const expireAt = Date.now() + 1800 * 1000;" },
+  { gutter: "07 +", type: "add", code: "    const expireAt = Date.now() + 3600 * 1000;" },
+  { gutter: "08  ", type: "ctx", code: "    if (!isMatched) throw new Error(\"Invalid token\");" },
+  { gutter: "09  ", type: "ctx", code: "    return { token, expireAt, active: true };" },
+  { gutter: "10  ", type: "ctx", code: "  }" },
+  { gutter: "11  ", type: "ctx", code: "}" },
+];
 
 export class ThemePickerOverlay extends Container implements Component, Focusable {
   focused = true;
@@ -69,28 +64,28 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
 
   constructor(private readonly options: ThemePickerOptions) {
     super();
-    const currentTheme = getTheme();
+    const currentSyntax = getSyntaxTheme();
     const availableThemes =
-      options.themes && options.themes.length > 0 ? options.themes : getAvailableThemes();
-    const activeId =
-      options.currentThemeId ||
-      Object.keys(THEMES).find((k) => THEMES[k] === currentTheme) ||
-      "default";
+      options.themes && options.themes.length > 0
+        ? options.themes
+        : getAvailableSyntaxThemes();
+    const activeId = options.currentThemeId || currentSyntax.id || "default";
 
     this.hoveredThemeId = activeId;
-    this.title = new Text(currentTheme.primary.bold("Color Scheme"), 0, 0);
+    this.title = new Text(appTheme.ui.primary.bold("Syntax Highlighting Theme"), 0, 0);
 
     const items: SelectItem[] = availableThemes.map((t) => {
       const isCurrent = t.id === activeId;
       return {
         value: t.id,
-        label: `${t.name}${isCurrent ? " (current)" : ""}`,
+        label: t.name,
+        description: isCurrent ? "(current)" : undefined,
       };
     });
 
     this.selectList = new SelectList(
       items,
-      Math.min(10, Math.max(4, items.length)),
+      Math.min(12, Math.max(4, items.length)),
       createSelectListTheme(),
     );
 
@@ -113,7 +108,10 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     };
 
     this.hint = new KeyHint([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: formatBinding("tui.select.confirm"), label: "Apply Theme" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
@@ -123,108 +121,27 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     this.addChild(this.hint);
   }
 
-  private renderPreviewBox(t: ColorTheme, boxWidth: number): string[] {
+  private renderPreview(st: SyntaxTheme): string[] {
     const lines: string[] = [];
-    const innerWidth = Math.max(20, boxWidth - 4);
+    lines.push(appTheme.ui.muted("Preview:"));
+    lines.push("");
 
-    const formatLine = (content: string, visibleLen: number): string => {
-      const pad = Math.max(0, innerWidth - visibleLen);
-      return `${t.border("│")} ${content}${" ".repeat(pad)} ${t.border("│")}`;
-    };
+    const fullCode = UNIFIED_PREVIEW_LINES.map((c) => c.code).join("\n");
+    const fullHtml = hljs.highlight(fullCode, { language: "typescript", ignoreIllegals: true }).value;
+    const highlightedRows = fullHtml.split("\n").map((h) => highlightToAnsi(h, st));
 
-    const topBorder = `${t.border("╭")}${t.border("─".repeat(innerWidth + 2))}${t.border("╮")}`;
-    const bottomBorder = `${t.border("╰")}${t.border("─".repeat(innerWidth + 2))}${t.border("╯")}`;
+    UNIFIED_PREVIEW_LINES.forEach((item, idx) => {
+      const gutter = appTheme.ui.muted(item.gutter + " ");
+      const syntaxCode = highlightedRows[idx] || item.code;
 
-    lines.push(topBorder);
-
-    // --- ACTOR strip: who's speaking. Not covered by MarkdownTheme, so
-    // still drawn directly from the ColorTheme, but each row now uses ONE
-    // consistent convention instead of the old ad-hoc mix: informational
-    // rows (user/assistant/tool/task) lead with a neutral `muted` label and
-    // let the VALUE carry the color (color = "what/who"); SIGNAL rows
-    // (error/warning) lead with the color ON the label itself, because an
-    // alert should grab the eye at the icon, before you've even read the
-    // message.
-    const userLine = `> you: add a greeting function`;
-    lines.push(formatLine(t.user(userLine), visibleWidth(userLine)));
-    lines.push(formatLine("", 0));
-
-    // --- Real markdown, real component, real (previewed) theme. The reply
-    // itself opens with "Sure — here's the plan..." (inside the markdown
-    // string below), so there's no separate hand-written assistant intro
-    // line here — that used to duplicate the markdown's own opening
-    // sentence. Renders
-    // heading/bold/italic/strikethrough/list/inline-code/link/quote AND the
-    // syntax-highlighted code block in one pass, guaranteed to match
-    // production because it IS production's Markdown + theme factory.
-    const markdown = new Markdown(MARKDOWN_PREVIEW_SAMPLE, 0, 0, createMarkdownTheme(t));
-    for (const mdLine of markdown.render(innerWidth)) {
-      lines.push(formatLine(mdLine, visibleWidth(mdLine)));
-    }
-    lines.push(formatLine("", 0));
-
-    // --- Diff sample: same file/language as the code block above
-    // (src/greet.ts, TypeScript) — was Go (`func main()`) before, which had
-    // nothing to do with the TS snippet just shown two sections up. Whole
-    // line colored success/error, the established convention for +/- diff
-    // rows (not a MarkdownTheme concern).
-    const diff1 = `  3   // src/greet.ts`;
-    lines.push(formatLine(t.muted(diff1), visibleWidth(diff1)));
-    const diff2Raw = `  5 - function sayHi() {`;
-    lines.push(formatLine(t.error(diff2Raw), visibleWidth(diff2Raw)));
-    const diff3Raw = `  5 + function greet(name: string) {`;
-    lines.push(formatLine(t.success(diff3Raw), visibleWidth(diff3Raw)));
-    lines.push(formatLine("", 0));
-
-    // --- Agent status strip: thought process, tool call, task, signals.
-    const thoughtTitle = `▾ Thought Process`;
-    lines.push(formatLine(t.secondary(thoughtTitle), visibleWidth(thoughtTitle)));
-    const thoughtDesc = `  Need to validate empty input before formatting the greeting.`;
-    lines.push(formatLine(t.muted(thoughtDesc), visibleWidth(thoughtDesc)));
-
-    const toolPrefix = `⚙ tool: `;
-    const toolVal = `write_file greet.ts`;
-    lines.push(
-      formatLine(
-        `${t.muted(toolPrefix)}${t.tool(toolVal)}`,
-        visibleWidth(`${toolPrefix}${toolVal}`),
-      ),
-    );
-
-    const taskPrefix = `◉ task: `;
-    const taskVal = `Implementing greeting`;
-    lines.push(
-      formatLine(
-        `${t.muted(taskPrefix)}${t.primary(taskVal)}`,
-        visibleWidth(`${taskPrefix}${taskVal}`),
-      ),
-    );
-
-    // SIGNAL rows: color leads on the label/icon itself (see convention note
-    // above), value stays in `assistant` since the message body is ordinary
-    // readable text, not itself the alert.
-    const errPrefix = `✗ error: `;
-    const errVal = `compilation failed`;
-    lines.push(
-      formatLine(
-        `${t.error(errPrefix)}${t.assistant(errVal)}`,
-        visibleWidth(`${errPrefix}${errVal}`),
-      ),
-    );
-
-    const warnPrefix = `⚠ warning: `;
-    const warnVal = `deprecation warning`;
-    lines.push(
-      formatLine(
-        `${t.warning(warnPrefix)}${t.assistant(warnVal)}`,
-        visibleWidth(`${warnPrefix}${warnVal}`),
-      ),
-    );
-
-    const dimLine = `· dim: press Enter to apply this theme`;
-    lines.push(formatLine(t.muted(dimLine), visibleWidth(dimLine)));
-
-    lines.push(bottomBorder);
+      if (item.type === "del") {
+        lines.push(`${gutter}${st.tokens.diffRemovedBg(syntaxCode)}`);
+      } else if (item.type === "add") {
+        lines.push(`${gutter}${st.tokens.diffAddedBg(syntaxCode)}`);
+      } else {
+        lines.push(`${gutter}${syntaxCode}`);
+      }
+    });
 
     return lines;
   }
@@ -236,16 +153,15 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     lines.push(...this.title.render(width));
     lines.push("");
 
-    // Calculate Column Widths (Compact left column next to preview box)
-    const previewTheme = THEMES[this.hoveredThemeId] || getTheme();
-    const leftWidth = 28;
+    // Calculate Column Widths
+    const previewSyntaxTheme = SYNTAX_THEMES[this.hoveredThemeId] || getSyntaxTheme();
+    const leftWidth = 30;
     const gap = 3;
-    const rightWidth = Math.min(65, Math.max(30, width - leftWidth - gap - 2));
 
     const leftLines = this.selectList.render(leftWidth);
-    const rightLines = this.renderPreviewBox(previewTheme, rightWidth);
+    const rightLines = this.renderPreview(previewSyntaxTheme);
 
-    // Merge two columns side by side closely
+    // Merge two columns side by side
     const maxRowCount = Math.max(leftLines.length, rightLines.length);
     for (let i = 0; i < maxRowCount; i++) {
       const leftPart = leftLines[i] || "";
