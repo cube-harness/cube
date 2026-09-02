@@ -19,6 +19,7 @@ test("Cube installs one registry containing pi-tui and Cube actions", () => {
   assert.equal(bindings.matches("\r", "tui.select.confirm"), true);
   assert.equal(bindings.matches("y", "cube.approval.approve"), true);
   assert.equal(bindings.matches("\x14", "cube.transcript.toggle"), true);
+  assert.equal(bindings.matches("\x0f", "cube.transcript.toggle"), false);
   assert.equal(bindings.matches("\x1b", "cube.turn.interrupt"), true);
   assert.equal(bindings.matches("\x03", "cube.app.exit"), true);
   assert.equal(bindings.matches("\x03", "cube.turn.interrupt"), false);

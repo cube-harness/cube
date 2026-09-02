@@ -1,8 +1,15 @@
 import { createCodingAgent } from "@mastra/core/coding-agent";
-import { Home, ConfigStore, SoulStore, WorkspaceManager } from "@cube/workspace";
+import type { IMastraLogger } from "@mastra/core/logger";
+import {
+  SoulStore,
+  type CubeConfig,
+  type Home,
+  type WorkspaceManager,
+} from "@cube/workspace";
 import { createMemory } from "../memory.js";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createMastraWorkspace } from "../workspace.js";
+import { webFetchTool, webSearchTool } from "@mastra/core/tools";
 
 export const buildModelConfig = (
   modelId: string,
@@ -16,9 +23,7 @@ export const buildModelConfig = (
       process.env.OLLAMA_BASE_URL ||
       process.env.OLLAMA_HOST ||
       "http://127.0.0.1:11434/api";
-    const cleanUrl = rawUrl.endsWith("/api")
-      ? rawUrl
-      : `${rawUrl.replace(/\/+$/, "")}/api`;
+    const cleanUrl = rawUrl.endsWith("/api") ? rawUrl : `${rawUrl.replace(/\/+$/, "")}/api`;
 
     const ollamaClient = createOllama({ baseURL: cleanUrl });
     const modelInstance = ollamaClient(rawModel);
@@ -40,16 +45,26 @@ export const buildModelConfig = (
     effort !== "none" &&
     effort !== "default"
   ) {
-    providerOptions.google = { thinkingConfig: { thinkingLevel: effort } };
+    providerOptions.google = {
+      thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
+    };
   } else if (modelId.startsWith("google/")) {
     if (effort === "max" || effort === "xhigh") {
-      providerOptions.google = { thinkingConfig: { thinkingBudget: 32768 } };
+      providerOptions.google = {
+        thinkingConfig: { thinkingBudget: 32768, includeThoughts: true },
+      };
     } else if (effort === "high") {
-      providerOptions.google = { thinkingConfig: { thinkingBudget: 24576 } };
+      providerOptions.google = {
+        thinkingConfig: { thinkingBudget: 24576, includeThoughts: true },
+      };
     } else if (effort === "medium") {
-      providerOptions.google = { thinkingConfig: { thinkingBudget: 8192 } };
+      providerOptions.google = {
+        thinkingConfig: { thinkingBudget: 8192, includeThoughts: true },
+      };
     } else if (effort === "low" || effort === "minimal") {
-      providerOptions.google = { thinkingConfig: { thinkingBudget: 2048 } };
+      providerOptions.google = {
+        thinkingConfig: { thinkingBudget: 2048, includeThoughts: true },
+      };
     } else if (effort === "none") {
       providerOptions.google = { thinkingConfig: { thinkingBudget: 0 } };
     }
@@ -63,15 +78,15 @@ export const buildModelConfig = (
             : effort === "medium"
               ? 8192
               : 2048;
-      providerOptions.anthropic = { thinking: { type: "enabled", budget_tokens: budget } };
+      providerOptions.anthropic = { thinking: { type: "enabled", budgetTokens: budget } };
     }
   } else if (modelId.startsWith("openai/")) {
     if (effort && effort !== "none" && effort !== "default") {
-      providerOptions.openai = { reasoningEffort: effort };
+      providerOptions.openai = { reasoningEffort: effort, reasoningSummary: "auto" };
     }
   } else if (modelId.startsWith("openrouter/")) {
     if (effort && effort !== "default") {
-      providerOptions.openrouter = { reasoning: { effort } };
+      providerOptions.openrouter = { reasoning: { effort, exclude: false } };
     }
   }
 
@@ -105,8 +120,12 @@ export const reloadCubeAgentSoul = async (agent: any, home: Home): Promise<strin
   return soul;
 };
 
-export const createCubeAgent = async (home: Home, workspace: WorkspaceManager) => {
-  const config = await ConfigStore(home).read();
+export const createCubeAgent = async (
+  home: Home,
+  workspace: WorkspaceManager,
+  config: CubeConfig,
+  logger?: IMastraLogger,
+) => {
   const soul = await SoulStore(home).read();
   const paths = await workspace.getPaths();
   const effort = config.model_config?.reasoning_effort;
@@ -114,7 +133,7 @@ export const createCubeAgent = async (home: Home, workspace: WorkspaceManager) =
   const modelConfig = buildModelConfig(config.model, effort, ollamaUrl);
   const mastraWorkspace = await createMastraWorkspace(workspace);
 
-  return createCodingAgent({
+  const agent = createCodingAgent({
     id: "cube-agent",
     name: "Cube Agent",
     model: [modelConfig as any],
@@ -122,5 +141,12 @@ export const createCubeAgent = async (home: Home, workspace: WorkspaceManager) =
     memory: createMemory(config, home),
     workspace: mastraWorkspace,
     basePath: paths.root,
+    tools: {
+      // search: webSearchTool,
+      fetch: webFetchTool,
+    },
   });
+
+  if (logger) agent.__registerPrimitives({ logger });
+  return agent;
 };

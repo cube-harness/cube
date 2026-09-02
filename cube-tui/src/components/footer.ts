@@ -10,6 +10,7 @@ export class Footer implements Component {
   private model: string = "cube-agent";
   private workspace: string = "D:/cube";
   private agentMd: string = "AGENT.md (active)";
+  private threadTitle?: string;
   private threadId: string = "thread_default";
   private status: string = "Idle";
   private statusLine: string[] = ["model", "workspace", "agentMd", "threadId"];
@@ -37,10 +38,15 @@ export class Footer implements Component {
     this.status = status;
   }
 
+  getStatus(): string {
+    return this.status;
+  }
+
   setInfo(info: InfoBoxContent) {
     if (info.model !== undefined) this.model = info.model;
     if (info.workspace !== undefined) this.workspace = info.workspace;
     if (info.agentMd !== undefined) this.agentMd = info.agentMd;
+    if ("threadTitle" in info) this.threadTitle = info.threadTitle;
     if (info.threadId !== undefined) this.threadId = info.threadId;
   }
 
@@ -53,6 +59,7 @@ export class Footer implements Component {
       if (key === "model" && this.model) parts.push(appTheme.ui.primary(this.model));
       else if (key === "workspace" && this.workspace) parts.push(appTheme.ui.primary(this.workspace));
       else if (key === "agentMd" && this.agentMd) parts.push(appTheme.ui.primary(this.agentMd));
+      else if (key === "threadTitle" && this.threadTitle) parts.push(appTheme.ui.primary(this.threadTitle));
       else if (key === "threadId" && this.threadId) parts.push(appTheme.ui.primary(this.threadId));
       else if (key === "status" && this.status) parts.push(appTheme.ui.primary(this.status));
     }

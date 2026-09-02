@@ -66,7 +66,7 @@ export const createMarkdownTheme = (
     code: (s) =>
       resolvedAppTheme.markdown.codeInlineText.bgHex(resolvedAppTheme.surface.codeInline)(` ${s} `),
     codeBlock: (s) => resolvedAppTheme.role.assistant(s),
-    codeBlockBorder: (s) => resolvedAppTheme.ui.border(s),
+    codeBlockBorder: () => "",
     quote: (s) => resolvedAppTheme.markdown.quote(stripForegroundColors(s)),
     quoteBorder: (s) => resolvedAppTheme.markdown.quoteBorder(s),
     hr: (s) => resolvedAppTheme.ui.border(s),

@@ -27,7 +27,8 @@ test("TitlePickerComponent renders within width limit and displays checkboxes", 
   assert.match(fullText, /Configure Terminal Title/);
   assert.match(fullText, /Active Model/);
   assert.match(fullText, /Workspace Directory/);
-  assert.match(fullText, /Thread Title \/ ID/);
+  assert.match(fullText, /Thread Title/);
+  assert.match(fullText, /Thread ID/);
   assert.match(fullText, /Preview:/);
   assert.match(fullText, /Space/);
 });

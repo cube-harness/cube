@@ -32,6 +32,7 @@ export interface AppTheme {
     text: ChalkInstance;
   };
   surface: {
+    background: string;
     codeInline: string;
   };
   markdown: {
@@ -52,7 +53,7 @@ export const appTheme: AppTheme = {
   bannerGradient: ["#38BDF8", "#4338CA"],
   role: {
     user: chalk.hex("#F2EDE5").bold,
-    assistant: chalk.hex("#D1CCC4"),
+    assistant: chalk.hex("#D7D1C9"),
     system: chalk.hex("#F2EDE5").italic,
     tool: chalk.hex("#F2EDE5").bold,
   },
@@ -66,12 +67,13 @@ export const appTheme: AppTheme = {
     primary: chalk.hex("#38BDF8"),
     secondary: chalk.hex("#BC97FF"),
     tertiary: chalk.hex("#FEBC2E"),
-    border: chalk.hex("#3E3B38"),
+    border: chalk.hex("#313131"),
     muted: chalk.hex("#8D867E"),
     text: chalk.hex("#F2EDE5"),
   },
   surface: {
-    codeInline: "#2A2A2A",
+    background: "#202020",
+    codeInline: "#313131",
   },
   markdown: {
     heading: chalk.hex("#38BDF8").bold,

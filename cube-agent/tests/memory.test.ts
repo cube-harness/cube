@@ -9,7 +9,10 @@ import {
   type CubeConfig,
   type Home,
 } from "@cube/workspace";
-import { createMemory } from "../src/memory.js";
+import {
+  createMemory,
+  finalizeCubeAgentMemory,
+} from "../src/memory.js";
 
 const createConfig = (): CubeConfig => ConfigSchema.parse({
   version: 1,
@@ -194,4 +197,58 @@ test("uses Cube's local memory database for optional vector storage", async () =
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
     await removeTestHome(root);
   }
+});
+
+test("finalizes the installed observational-memory processor without exposing its record", async () => {
+  const calls: unknown[] = [];
+  const agent = {
+    resolveProcessorById: async (id: string) => {
+      assert.equal(id, "observational-memory");
+      return {
+        id,
+        engine: {
+          finalize: async (input: unknown) => {
+            calls.push(input);
+            return {
+              activated: true,
+              observed: false,
+              reflected: false,
+              record: { private: "mastra-internal" },
+            };
+          },
+        },
+      };
+    },
+  };
+
+  assert.deepEqual(
+    await finalizeCubeAgentMemory(agent, {
+      threadId: "thread-1",
+      resourceId: "workspace-1",
+    }),
+    {
+      enabled: true,
+      activated: true,
+      observed: false,
+      reflected: false,
+    },
+  );
+  assert.deepEqual(calls, [
+    { threadId: "thread-1", resourceId: "workspace-1" },
+  ]);
+});
+
+test("reports observational memory as disabled when no finalizable processor exists", async () => {
+  assert.deepEqual(
+    await finalizeCubeAgentMemory(
+      { resolveProcessorById: async () => null },
+      { threadId: "thread-1", resourceId: "workspace-1" },
+    ),
+    {
+      enabled: false,
+      activated: false,
+      observed: false,
+      reflected: false,
+    },
+  );
 });

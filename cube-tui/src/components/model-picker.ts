@@ -84,7 +84,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
   constructor(private readonly options: ModelPickerOptions) {
     super();
 
-    this.title = new Text(appTheme.ui.primary.bold("Select AI Provider"), 0, 0);
+    this.title = new Text(appTheme.ui.text.bold("Select Provider"), 0, 0);
     this.searchBar = new SearchBar();
 
     const providerItems: SelectItem[] = options.providers.map((p) => ({
@@ -111,7 +111,10 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.hint = new KeyHint([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: "Type", label: "Search" },
       { key: formatBinding("tui.select.confirm"), label: "Select Provider" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },
@@ -136,7 +139,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     this.selectedProvider = provider;
     this.searchBar.clear();
 
-    this.title.setText(appTheme.ui.primary.bold(`Select Model [${provider.name}]`));
+    this.title.setText(appTheme.ui.text.bold(`Select Model [${provider.name}]`));
 
     const modelItems: SelectItem[] = provider.models.map((m) => {
       const isActive = m.modelId === this.options.currentModelId;
@@ -169,7 +172,10 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.hint.setHints([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: "Type", label: "Search" },
       { key: formatBinding("tui.select.confirm"), label: "Select Model" },
       { key: formatBinding("tui.select.cancel"), label: "Back" },
@@ -181,9 +187,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     this.selectedModel = model;
     this.searchBar.clear();
 
-    this.title.setText(
-      appTheme.ui.primary.bold(`Configure Reasoning Effort [${model.modelId}]`),
-    );
+    this.title.setText(appTheme.ui.text.bold(`Select Reasoning Effort [${model.modelId}]`));
 
     const availableEfforts = model.reasoning_efforts || [];
 
@@ -219,7 +223,10 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     };
 
     this.hint.setHints([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: formatBinding("tui.select.confirm"), label: "Confirm" },
       { key: formatBinding("tui.select.cancel"), label: "Back" },
     ]);
@@ -235,7 +242,10 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     this.providerList.setFilter("");
 
     this.hint.setHints([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: "Type", label: "Search" },
       { key: formatBinding("tui.select.confirm"), label: "Select Provider" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },
@@ -273,7 +283,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     }
 
     // 3. Render Active Step List
-    lines.push("")
+    lines.push("");
     if (this.step === "reasoning" && this.reasoningList) {
       lines.push(...this.reasoningList.render(width));
     } else if (this.step === "model" && this.modelList) {
@@ -283,7 +293,7 @@ export class ModelPickerComponent extends Container implements Component, Focusa
     }
 
     // 4. Render Hint
-    lines.push("")
+    lines.push("");
     lines.push(...this.hint.render(width));
 
     return lines;

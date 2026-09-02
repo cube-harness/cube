@@ -10,11 +10,11 @@ import { appTheme } from "../themes/app.theme.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
 import { KeyHint } from "./key-hint.js";
-import type { SlashCommandSuggestion, CubeUIAction } from "../index.js";
+import type { SlashCommandSuggestion } from "@cube/runtime";
 
 export interface PromptEditorOptions {
   tui: TUI;
-  onAction: (action: CubeUIAction) => void;
+  onSubmit: (text: string) => void | Promise<void>;
   slashCommands?: SlashCommandSuggestion[];
   basePath?: string;
   initialHistory?: string[];
@@ -69,22 +69,7 @@ export class PromptEditor implements Component, Focusable {
       this.historyIndex = -1;
       this.currentDraft = "";
 
-      if (trimmed.startsWith("/")) {
-        const spaceIndex = trimmed.indexOf(" ");
-        const name = (spaceIndex === -1 ? trimmed : trimmed.slice(0, spaceIndex)) as `/${string}`;
-        const argument = spaceIndex === -1 ? "" : trimmed.slice(spaceIndex + 1).trim();
-
-        options.onAction({
-          type: "command:submit",
-          name,
-          argument,
-        });
-      } else {
-        options.onAction({
-          type: "prompt:submit",
-          content: trimmed,
-        });
-      }
+      void options.onSubmit(trimmed);
       this.editor.setText("");
     };
 
@@ -295,12 +280,8 @@ export class PromptEditor implements Component, Focusable {
     this.queuedPrompts.push(content);
   }
 
-  prependQueuedPrompt(content: string): void {
-    this.queuedPrompts.unshift(content);
-  }
-
-  dequeueQueuedPrompt(): string | undefined {
-    return this.queuedPrompts.shift();
+  popQueuedPrompt(): string | undefined {
+    return this.queuedPrompts.pop();
   }
 
   dequeueQueuedPrompts(count: number): string[] {

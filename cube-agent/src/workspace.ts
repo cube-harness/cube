@@ -14,10 +14,20 @@ export const createMastraWorkspace = async (workspace: WorkspaceManager): Promis
       [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: { name: "create_file" },
       [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: { name: "delete_file" },
       [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: { name: "file_stat" },
+      [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: { name: "execute_command" },
+      [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: { name: "get_process" },
+      [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: { name: "kill_process" },
     },
     sandbox: new LocalSandbox({
       workingDirectory: paths.root,
       env: process.env,
+      instructions: ({ defaultInstructions }) =>
+        [
+          defaultInstructions,
+          process.platform === "win32"
+            ? "Commands run through cmd.exe, not PowerShell. PowerShell cmdlets such as Get-Date must be invoked with `powershell -NoProfile -Command \"...\"`."
+            : "Commands run through the host POSIX shell.",
+        ].join("\n"),
     }),
   });
 };

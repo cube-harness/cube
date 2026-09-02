@@ -72,7 +72,7 @@ export class ThemePickerOverlay extends Container implements Component, Focusabl
     const activeId = options.currentThemeId || currentSyntax.id || "default";
 
     this.hoveredThemeId = activeId;
-    this.title = new Text(appTheme.ui.primary.bold("Syntax Highlighting Theme"), 0, 0);
+    this.title = new Text(appTheme.ui.text.bold("Syntax Highlighting Theme"), 0, 0);
 
     const items: SelectItem[] = availableThemes.map((t) => {
       const isCurrent = t.id === activeId;
