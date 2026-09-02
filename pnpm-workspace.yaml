@@ -11,3 +11,12 @@ allowBuilds:
   msw: true
   onnxruntime-node: true
   protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@mastra/core@1.63.2'
+  - '@mastra/libsql@1.22.2'
+  - '@mastra/memory@1.28.1'
+  - '@mastra/observability@1.17.4'
+  - '@mastra/deployer@1.63.2'
+  - '@mastra/server@1.63.2'
+  - mastra@1.27.2

@@ -1,11 +1,11 @@
 import {
-  askUserTool,
   taskCheckTool,
   taskCompleteTool,
   taskUpdateTool,
   taskWriteTool,
 } from "@mastra/core/tools";
 import { MCPServer } from "@mastra/mcp";
+import { cubeAskUserTool } from "../tools/ask-user.tool.js";
 
 export const createMcpServer = (): MCPServer =>
   new MCPServer({
@@ -14,5 +14,11 @@ export const createMcpServer = (): MCPServer =>
     description: "A server that provides weather data and agent capabilities",
     instructions:
       "Use the available tools to help users with weather information and data processing tasks.",
-    tools: { askUserTool, taskWriteTool, taskCheckTool, taskCompleteTool, taskUpdateTool },
+    tools: {
+      ask_user: cubeAskUserTool,
+      taskWriteTool,
+      taskCheckTool,
+      taskCompleteTool,
+      taskUpdateTool,
+    },
   });

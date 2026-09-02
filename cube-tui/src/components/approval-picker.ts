@@ -1,12 +1,12 @@
 import {
   SelectList,
-  truncateToWidth,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
+import { renderPickerCard } from "./picker-card.js";
 
 export type ToolApprovalDecision = "approve" | "decline" | "approve_prefix";
 
@@ -34,21 +34,15 @@ export const extractCommandPrefix = (cmd: string): string => {
   if (!trimmed) return "";
 
   // 1. Check for `pnpm/yarn/bun --filter <target> exec <runner>`
-  const pnpmExecMatch = trimmed.match(
-    /^(?:pnpm|yarn|bun)\s+--filter\s+\S+\s+exec\s+\S+/i,
-  );
+  const pnpmExecMatch = trimmed.match(/^(?:pnpm|yarn|bun)\s+--filter\s+\S+\s+exec\s+\S+/i);
   if (pnpmExecMatch) return pnpmExecMatch[0];
 
   // 2. Check for `npm/pnpm/yarn/bun run <script>`
-  const runMatch = trimmed.match(
-    /^(?:npm|pnpm|yarn|bun)\s+run\s+\S+/i,
-  );
+  const runMatch = trimmed.match(/^(?:npm|pnpm|yarn|bun)\s+run\s+\S+/i);
   if (runMatch) return runMatch[0];
 
   // 3. Check for `npm/pnpm/yarn/bun <script>`
-  const scriptMatch = trimmed.match(
-    /^(?:npm|pnpm|yarn|bun)\s+[a-zA-Z0-9_\-:]+/i,
-  );
+  const scriptMatch = trimmed.match(/^(?:npm|pnpm|yarn|bun)\s+[a-zA-Z0-9_\-:]+/i);
   if (scriptMatch) return scriptMatch[0];
 
   // 4. Fallback: match first 2 tokens (e.g. "git status", "docker compose") or single binary
@@ -192,51 +186,64 @@ export class ApprovalPicker implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const lines: string[] = [];
+    const cardContentLines: string[] = [];
 
-    lines.push("");
+    cardContentLines.push("");
     if (this.parsed.command) {
-      lines.push(appTheme.ui.primary.bold("Would you like to run the following command?"));
-      lines.push("");
-      lines.push(
-        `  ${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment || "local")}`,
+      cardContentLines.push(
+        appTheme.ui.text.bold("Would you like to run the following command?"),
+      );
+      cardContentLines.push("");
+      cardContentLines.push(
+        `${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment || "local")}`,
       );
       if (this.parsed.reason) {
-        lines.push("");
-        lines.push(
-          `  ${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
+        cardContentLines.push(
+          `${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
         );
       }
-      lines.push("");
-      lines.push(`  ${appTheme.ui.secondary("$")} ${appTheme.markdown.codeInlineText(this.parsed.command)}`);
+      cardContentLines.push("");
+      const cmdLines = this.parsed.command.split(/\r?\n/);
+      cardContentLines.push(
+        `${appTheme.ui.secondary("$")} ${appTheme.markdown.codeInlineText(cmdLines[0])}`,
+      );
+      for (let i = 1; i < cmdLines.length; i++) {
+        cardContentLines.push(
+          `  ${appTheme.markdown.codeInlineText(cmdLines[i])}`,
+        );
+      }
     } else {
-      lines.push(
-        appTheme.ui.primary.bold(
+      cardContentLines.push(
+        appTheme.ui.text.bold(
           `Would you like to run the tool: ${this.options.toolName}?`,
         ),
       );
       if (this.parsed.environment) {
-        lines.push(
-          `  ${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment)}`,
+        cardContentLines.push(
+          `${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment)}`,
         );
       }
       if (this.parsed.reason) {
-        lines.push(
-          `  ${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
+        cardContentLines.push(
+          `${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
         );
       }
       if (this.parsed.rawLines.length > 0) {
-        lines.push("");
+        cardContentLines.push("");
         for (const rawLine of this.parsed.rawLines) {
-          lines.push(`  ${appTheme.role.tool(rawLine)}`);
+          for (const line of rawLine.split(/\r?\n/)) {
+            cardContentLines.push(appTheme.role.tool(line));
+          }
         }
       }
     }
 
-    lines.push("");
-    lines.push(...this.list.render(width));
-    lines.push("");
+    cardContentLines.push("");
+    const maxInnerContentWidth = Math.max(10, width - 4);
+    const listLines = this.list.render(maxInnerContentWidth);
+    cardContentLines.push(...listLines);
+    cardContentLines.push("");
 
-    return lines.map((line) => truncateToWidth(line, width));
+    return renderPickerCard(cardContentLines, width);
   }
 }

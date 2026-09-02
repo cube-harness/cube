@@ -1,677 +1,403 @@
-import { ProcessTerminal, TuiMainScreen, type TUI } from "@earendil-works/pi-tui";
-import {
-  type CubeUIAction,
-  type CubeUIEvent,
-  type Session,
-  type AgentControllerEvent,
-  type AgentControllerDisplayState,
-  type SystemInfo,
-  type ThreadSummary,
-  type UsageBoxMetrics,
-  type SlashCommandSuggestion,
-  type ChatMessage,
-  type DisplayTool,
-  type ProviderGroup,
-  type ModelItem,
-  type ModelSelectionResult,
-  type ReasoningEffort,
+import type {
+  CubeRuntime,
+  ModelState,
+  PreferenceState,
+  PromptResult,
+  RuntimeDisplayState,
+  RuntimeEvent,
 } from "@cube/runtime";
-
-import { mountChatScreen } from "./screens/chat.screen.js";
-import { ThreadPickerOverlay, type ThreadPickerViewItem } from "./components/thread-picker.js";
-import { ModelPickerComponent } from "./components/model-picker.js";
-import { ThemePickerOverlay, type ThemePickerItem } from "./components/theme-picker.js";
-import { TitlePickerComponent, formatTerminalTitle, type TitlePickerOptions } from "./components/title-picker.js";
-import { StatusLinePickerComponent, type StatusLinePickerOptions } from "./components/statusline-picker.js";
-import { ApprovalPicker, type ToolApprovalDecision } from "./components/approval-picker.js";
-import { renderUsageBoxToString, type UsageBoxContent } from "./components/usage-box.js";
-import { setSyntaxTheme as setTheme } from "./themes/syntax.theme.js";
+import { copyToClipboard } from "./clipboard.js";
 import { matchesBinding } from "./keybindings.js";
+import type { ChatScreen } from "./screens/chat.screen.js";
+import { formatTerminalTitle } from "./components/title-picker.js";
+import { setSyntaxTheme } from "./themes/syntax.theme.js";
 
-export type {
-  CubeUIAction,
-  CubeUIEvent,
-  Session,
-  AgentControllerEvent,
-  AgentControllerDisplayState,
-  SystemInfo,
-  ThreadSummary,
-  UsageBoxMetrics,
-  SlashCommandSuggestion,
-  ChatMessage,
-  DisplayTool,
-  ProviderGroup,
-  ModelItem,
-  ModelSelectionResult,
-  ReasoningEffort,
+export type CubeAppOptions = {
+  copyToClipboard?: (content: string) => Promise<boolean>;
+  onExitRequested: () => void | Promise<void>;
 };
 
-export type { ThreadPickerViewItem } from "./components/thread-picker.js";
-export { ThreadPickerOverlay } from "./components/thread-picker.js";
-export { ModelPickerComponent } from "./components/model-picker.js";
-export { ThemePickerOverlay, type ThemePickerItem } from "./components/theme-picker.js";
-export {
-  ApprovalPicker,
-  type ApprovalPickerOptions,
-  type ToolApprovalDecision,
-} from "./components/approval-picker.js";
-export { SearchBar, type SearchBarOptions } from "./components/search-bar.js";
-export { KeyHint, type KeyHintItem } from "./components/key-hint.js";
-export { WorkingIndicator } from "./components/working-indicator.js";
-export { TitlePickerComponent, type TitlePickerOptions, type TitlePickerItem } from "./components/title-picker.js";
-export { StatusLinePickerComponent, type StatusLinePickerOptions, type StatusLinePickerItem } from "./components/statusline-picker.js";
+export class CubeApp {
+  private unsubscribeRuntime: () => void = () => undefined;
+  private unsubscribeInput: () => void = () => undefined;
+  private activeApprovalId: string | null = null;
+  private readonly activeSuspensionIds = new Set<string>();
+  private readonly cancelledSuspensionIds = new Set<string>();
+  private suspensionInputQueue: Promise<void> = Promise.resolve();
+  private suspensionQueueCancelled = false;
+  private nativeQueuedFollowUps: number;
+  private locallyCancelledQueueTransitions = 0;
+  private currentModel: ModelState;
+  private preferences: PreferenceState;
+  private started = false;
 
-export interface OpenThreadPickerOptions {
-  threads: ThreadPickerViewItem[];
-}
+  constructor(
+    private readonly runtime: CubeRuntime,
+    private readonly screen: ChatScreen,
+    private readonly options: CubeAppOptions,
+  ) {
+    this.nativeQueuedFollowUps = runtime.getDisplayState().queuedFollowUps ?? 0;
+    this.currentModel = runtime.model.current();
+    this.preferences = runtime.preference.get();
+  }
 
-export interface OpenModelPickerOptions {
-  providers: ProviderGroup[];
-  currentModelId?: string;
-  currentReasoningEffort?: ReasoningEffort;
-}
-
-export interface OpenThemePickerOptions {
-  currentThemeId?: string;
-}
-
-export interface OpenToolApprovalOptions {
-  toolName: string;
-  args: unknown;
-}
-
-export interface CreateAppOptions {
-  session: Session;
-  onAction: (action: CubeUIAction) => void;
-  slashCommands?: SlashCommandSuggestion[];
-  basePath?: string;
-  tui?: TUI;
-  initialHistory?: string[];
-  appTitle?: string[];
-  statusLine?: string[];
-}
-
-export interface TuiApp {
-  start: () => void;
-  stop: () => void;
-  handleUIEvent: (event: CubeUIEvent) => void;
-  handleSessionEvent: (event: AgentControllerEvent) => void;
-  openThreadPicker: (options: OpenThreadPickerOptions) => Promise<string | null>;
-  openModelPicker: (options: OpenModelPickerOptions) => Promise<ModelSelectionResult | null>;
-  openThemePicker: (options?: OpenThemePickerOptions) => Promise<string | null>;
-  openTitlePicker: () => Promise<string[] | null>;
-  openStatusLinePicker: () => Promise<string[] | null>;
-  openToolApproval: (options: OpenToolApprovalOptions) => Promise<ToolApprovalDecision>;
-}
-
-export const CubeApp = (options: CreateAppOptions): TuiApp => {
-  const tui = options.tui ?? new TuiMainScreen(new ProcessTerminal());
-  let unsubscribeSession: () => void = () => {};
-  let activeApprovalId: string | null = null;
-  let historyRevision = 0;
-  let nativeQueuedFollowUps = options.session.displayState.get().queuedFollowUps ?? 0;
-  let locallyCancelledQueueTransitions = 0;
-  let latestInfo: SystemInfo = {};
-  let currentTitleFields = options.appTitle ?? ["model", "workspace", "threadId"];
-
-  const updateTerminalTitle = (fields: string[] = currentTitleFields) => {
-    currentTitleFields = fields;
-    const title = formatTerminalTitle(fields, {
-      model: latestInfo.model,
-      workspace: latestInfo.workspace,
-      threadId: latestInfo.threadId,
-      status: options.session.displayState.get().isRunning ? "Busy" : "Idle",
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    this.screen.mount({ onSubmit: (content) => this.submitPrompt(content) });
+    this.unsubscribeRuntime = this.runtime.subscribe((event) => this.handleRuntimeEvent(event));
+    this.unsubscribeInput = this.screen.addInputListener((data) => {
+      if (matchesBinding(data, "cube.transcript.toggle")) {
+        this.screen.messageList.toggleTranscript();
+        this.screen.requestRender();
+        return { consume: true };
+      }
+      if (matchesBinding(data, "cube.app.exit")) {
+        void this.handleExit();
+        return { consume: true };
+      }
+      if (matchesBinding(data, "cube.turn.interrupt")) {
+        return this.handleInterrupt() ? { consume: true } : undefined;
+      }
+      return undefined;
     });
-    try {
-      process.stdout.write(`\x1b]0;${title}\x07`);
-      process.title = title;
-    } catch {
-      // ignore
-    }
-  };
+    this.screen.renderDisplayState(
+      this.runtime.getDisplayState(),
+      this.runtime.isApprovalPending(),
+    );
+    this.applyPreferences(this.preferences);
+    this.screen.startTerminal();
+  }
 
-  const screen = mountChatScreen(tui, {
-    onAction: (action) => {
-      if (action.type === "prompt:submit") {
-        const state = options.session.displayState.get();
-        if (state.isRunning || (state.queuedFollowUps ?? 0) > 0) {
-          screen.promptEditor.enqueueQueuedPrompt(action.content);
-        } else {
-          screen.messageList.addMessage({
-            role: "user",
-            content: action.content,
-            status: "done",
+  async stop(): Promise<void> {
+    if (!this.started) return;
+    this.started = false;
+    this.unsubscribeRuntime();
+    this.unsubscribeRuntime = () => undefined;
+    this.unsubscribeInput();
+    this.unsubscribeInput = () => undefined;
+    this.runtime.interrupt();
+    this.screen.stopTerminal();
+  }
+
+  async submitPrompt(content: string): Promise<void> {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    const state = this.runtime.getDisplayState();
+    const isSlashCommand = trimmed.startsWith("/");
+    if (!isSlashCommand) {
+      if (state.isRunning || (state.queuedFollowUps ?? 0) > 0) {
+        this.screen.promptEditor.enqueueQueuedPrompt(trimmed);
+        this.screen.requestRender();
+      } else {
+        this.screen.addUserMessage(trimmed);
+      }
+    }
+
+    try {
+      await this.handlePromptResult(await this.runtime.prompt.submit(trimmed));
+    } catch (error: unknown) {
+      this.screen.showNotice({
+        level: "error",
+        message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
+  async handlePromptResult(result: PromptResult): Promise<void> {
+    switch (result.kind) {
+      case "ignored":
+      case "submitted":
+        return;
+      case "notice":
+        this.screen.showNotice(result.notice);
+        return;
+      case "models": {
+        const selection = await this.screen.pickModel(result.catalog, result.current);
+        if (selection) {
+          await this.handlePromptResult({
+            kind: "model",
+            model: await this.runtime.model.set(selection),
           });
         }
-        tui.requestRender();
+        return;
       }
-      options.onAction(action);
-    },
-    slashCommands: options.slashCommands ?? [],
-    basePath: options.basePath ?? process.cwd(),
-    initialHistory: options.initialHistory,
-    statusLine: options.statusLine,
-  });
+      case "model":
+        this.currentModel = result.model;
+        this.screen.setInfo({ model: this.formatModel(result.model) });
+        this.updateTerminalTitle();
+        return;
+      case "threads": {
+        const threadId = await this.screen.pickThread(result.threads);
+        if (!threadId) return;
+        if (result.operation === "resume") {
+          this.screen.showThread(await this.runtime.thread.resume(threadId));
+        } else {
+          const deleted = await this.runtime.thread.delete(threadId);
+          if (deleted.wasActive) this.screen.clearConversation();
+          else {
+            this.screen.showNotice({
+              level: "info",
+              message: `Deleted thread: ${threadId}`,
+            });
+          }
+        }
+        return;
+      }
+      case "thread":
+        this.screen.showThread(result.snapshot);
+        return;
+      case "thread-reset":
+        this.screen.clearConversation();
+        return;
+      case "preferences": {
+        const request = result.request;
+        if (request.target === "theme") {
+          const theme = await this.screen.pickTheme(request.current);
+          if (theme) {
+            await this.handlePromptResult({
+              kind: "preference",
+              preference: await this.runtime.preference.setTheme(theme),
+            });
+          }
+        } else if (request.target === "title") {
+          const title = await this.screen.pickTitle(request.current);
+          if (title?.length) {
+            await this.handlePromptResult({
+              kind: "preference",
+              preference: await this.runtime.preference.setTitle(title),
+            });
+          }
+        } else {
+          const statusLine = await this.screen.pickStatusLine(request.current);
+          if (statusLine?.length) {
+            await this.handlePromptResult({
+              kind: "preference",
+              preference: await this.runtime.preference.setStatusLine(statusLine),
+            });
+          }
+        }
+        return;
+      }
+      case "preference":
+        this.preferences = result.preference;
+        this.applyPreferences(result.preference);
+        return;
+      case "usage":
+        this.screen.showUsage(result.metrics);
+        return;
+      case "command-catalog":
+        this.screen.showNotice({
+          level: "info",
+          message: [
+            "### Available Slash Commands",
+            "",
+            ...result.commands.map((command) => `- \`${command.name}\`: ${command.description}`),
+          ].join("\n"),
+        });
+        return;
+      case "copy-content": {
+        const copied = await (this.options.copyToClipboard ?? copyToClipboard)(result.content);
+        this.screen.showNotice({
+          level: copied ? "info" : "error",
+          message: copied
+            ? "Copied last response to clipboard as markdown."
+            : "Failed to copy response to clipboard.",
+        });
+        return;
+      }
+      case "exit-requested":
+        await this.options.onExitRequested();
+    }
+  }
 
-  const cancelNextQueuedPrompt = (): boolean => {
-    const queuedPrompt = screen.promptEditor.dequeueQueuedPrompt();
-    if (queuedPrompt === undefined) return false;
+  handleRuntimeEvent(event: RuntimeEvent): void {
+    switch (event.type) {
+      case "display_state_changed":
+        this.applyDisplayState(event.displayState);
+        return;
+      case "tool_approval_required":
+        if (this.activeApprovalId === event.toolCallId) return;
+        this.activeApprovalId = event.toolCallId;
+        void this.screen
+          .requestApproval({ toolName: event.toolName, args: event.args })
+          .then((decision) => {
+            this.runtime.respondToApproval({
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              decision,
+              ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}),
+            });
+            this.applyDisplayState(this.runtime.getDisplayState());
+          })
+          .finally(() => {
+            this.activeApprovalId = null;
+          });
+        return;
+      case "tool_suspended":
+        if (this.activeSuspensionIds.has(event.toolCallId)) return;
+        if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
+        this.activeSuspensionIds.add(event.toolCallId);
+        this.suspensionInputQueue = this.suspensionInputQueue.then(async () => {
+          try {
+            if (
+              this.suspensionQueueCancelled ||
+              this.cancelledSuspensionIds.has(event.toolCallId)
+            ) return;
+            const resolution = await this.screen.requestToolSuspension({
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              args: event.args,
+              suspendPayload: event.suspendPayload,
+              ...(event.resumeSchema ? { resumeSchema: event.resumeSchema } : {}),
+            });
+            if (resolution.kind === "dismissed") return;
+            if (resolution.kind === "cancel") {
+              this.suspensionQueueCancelled = true;
+              this.runtime.interrupt();
+              return;
+            }
+            await this.runtime.respondToSuspension({
+              toolCallId: event.toolCallId,
+              resumeData: resolution.resumeData,
+            });
+          } catch (error: unknown) {
+            this.screen.showNotice({
+              level: "error",
+              message: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          } finally {
+            this.activeSuspensionIds.delete(event.toolCallId);
+            this.cancelledSuspensionIds.delete(event.toolCallId);
+            this.applyDisplayState(this.runtime.getDisplayState());
+            if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
+          }
+        });
+        return;
+      case "tool_suspension_cancelled":
+        this.cancelledSuspensionIds.add(event.toolCallId);
+        this.screen.cancelToolSuspension(event.toolCallId);
+        return;
+      case "thread_created":
+        this.screen.setInfo({
+          threadId: event.thread.id,
+          threadTitle: event.thread.title,
+        });
+        this.updateTerminalTitle();
+        return;
+      case "thread_title_updated":
+        this.screen.setInfo({
+          threadId: (event as { threadId: string }).threadId,
+          threadTitle: (event as { title?: string }).title,
+        });
+        this.updateTerminalTitle();
+        return;
+      case "thread_changed":
+        this.screen.setInfo({
+          threadId: event.threadId,
+        });
+        this.screen.promptEditor.clearQueuedPrompts();
+        this.nativeQueuedFollowUps = 0;
+        this.locallyCancelledQueueTransitions = 0;
+        this.updateTerminalTitle();
+        return;
+      case "error":
+        this.screen.showNotice({
+          level: "error",
+          message: `Error: ${event.error.message}`,
+        });
+        return;
+      case "workspace_status_changed":
+        if (String(event.status) !== "ready") {
+          this.screen.workingIndicator.start(`Workspace: ${String(event.status)}`);
+        }
+        return;
+      case "workspace_ready":
+        this.screen.workingIndicator.stop();
+        return;
+      case "workspace_error":
+        this.screen.workingIndicator.stop();
+        this.screen.showNotice({
+          level: "error",
+          message: `Workspace error: ${event.error.message}`,
+        });
+    }
+  }
 
-    const nativePrompt = options.session.followUps.dequeue();
-    if (nativePrompt === undefined) {
-      screen.promptEditor.prependQueuedPrompt(queuedPrompt);
+  handleInterrupt(): boolean {
+    const queued = this.screen.promptEditor.popQueuedPrompt();
+    if (queued !== undefined) {
+      const nativeQueued = this.runtime.prompt.cancelLatestQueued();
+      if (nativeQueued === null) {
+        this.screen.promptEditor.enqueueQueuedPrompt(queued);
+      } else {
+        this.locallyCancelledQueueTransitions += 1;
+      }
+      this.screen.requestRender();
       return true;
     }
 
-    locallyCancelledQueueTransitions += 1;
-    options.session.emit({
-      type: "follow_up_queued",
-      count: options.session.followUps.count(),
+    const state = this.runtime.getDisplayState();
+    if (this.runtime.isApprovalPending() || state.pendingSuspensions.size > 0) {
+      return false;
+    }
+    return this.runtime.interrupt();
+  }
+
+  async handleExit(): Promise<void> {
+    if (this.handleInterrupt()) return;
+    const state = this.runtime.getDisplayState();
+    if (
+      this.runtime.isApprovalPending() ||
+      state.pendingSuspensions.size > 0 ||
+      this.screen.workingIndicator.isActive()
+    ) {
+      return;
+    }
+    await this.options.onExitRequested();
+  }
+
+  private applyDisplayState(state: RuntimeDisplayState): void {
+    const nextQueued = state.queuedFollowUps ?? 0;
+    if (nextQueued < this.nativeQueuedFollowUps) {
+      let removed = this.nativeQueuedFollowUps - nextQueued;
+      const locallyCancelled = Math.min(removed, this.locallyCancelledQueueTransitions);
+      this.locallyCancelledQueueTransitions -= locallyCancelled;
+      removed -= locallyCancelled;
+      for (const content of this.screen.promptEditor.dequeueQueuedPrompts(removed)) {
+        this.screen.addUserMessage(content);
+      }
+    }
+    this.nativeQueuedFollowUps = nextQueued;
+    this.screen.renderDisplayState(state, this.runtime.isApprovalPending());
+  }
+
+  private applyPreferences(preference: PreferenceState): void {
+    setSyntaxTheme(preference.theme);
+    this.screen.setStatusLine(preference.statusLine);
+    this.updateTerminalTitle(preference.appTitle);
+  }
+
+  private updateTerminalTitle(fields: string[] = this.preferences.appTitle): void {
+    const state = this.runtime.getDisplayState();
+    const title = formatTerminalTitle(fields, {
+      model: this.formatModel(this.currentModel),
+      workspace: this.runtime.workspaceRoot,
+      threadTitle: this.screen.infoBox?.getThreadTitle?.(),
+      threadId: this.runtime.thread.current() ?? "new thread",
+      status: state.isRunning ? "Busy" : "Idle",
     });
-    tui.requestRender();
-    return true;
-  };
-
-  const handleInterrupt = (): { consume: true } | undefined => {
-    if (cancelNextQueuedPrompt()) return { consume: true };
-
-    const state = options.session.displayState.get();
-    if (state.pendingApproval || state.pendingSuspensions.size > 0) {
-      return undefined;
+    try {
+      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${title}\x07`);
+      process.title = title;
+    } catch {
+      // Terminal title updates are best effort.
     }
-    if (state.isRunning) {
-      options.session.abort();
-      return { consume: true };
-    }
-    return undefined;
-  };
+  }
 
-  tui.addInputListener((data: string) => {
-    if (matchesBinding(data, "cube.transcript.toggle")) {
-      screen.messageList.toggleToolOutput();
-      tui.requestRender();
-      return { consume: true };
-    }
-    if (matchesBinding(data, "cube.app.exit")) {
-      const interruptResult = handleInterrupt();
-      if (interruptResult) return interruptResult;
-
-      const state = options.session.displayState.get();
-      if (
-        state.pendingApproval ||
-        state.pendingSuspensions.size > 0 ||
-        screen.workingIndicator.isActive()
-      ) {
-        return undefined;
-      }
-      options.onAction({ type: "app:exit" });
-      return { consume: true };
-    }
-    if (matchesBinding(data, "cube.turn.interrupt")) {
-      return handleInterrupt();
-    }
-    return undefined;
-  });
-
-  const app: TuiApp = {
-    start: () => {
-      updateTerminalTitle();
-      tui.start();
-    },
-    stop: () => {
-      unsubscribeSession();
-      if (options.session.displayState.get().isRunning) {
-        options.session.abort();
-      }
-      screen.workingIndicator.stop();
-      tui.stop();
-    },
-    handleUIEvent: (event: CubeUIEvent) => {
-      switch (event.type) {
-        case "state:info":
-          latestInfo = { ...latestInfo, ...event.info };
-          screen.infoBox.setInfo(event.info);
-          screen.footer.setInfo(event.info);
-          updateTerminalTitle();
-          tui.requestRender();
-          break;
-        case "activity:start":
-          screen.workingIndicator.start(event.message);
-          tui.requestRender();
-          break;
-        case "activity:end":
-          screen.workingIndicator.stop();
-          tui.requestRender();
-          break;
-        case "messages:clear":
-          screen.messageList.clearMessages();
-          tui.requestRender();
-          break;
-        case "dialog:model_picker":
-          void app
-            .openModelPicker({
-              providers: event.providers,
-              currentModelId: event.currentModelId,
-              currentReasoningEffort: event.currentReasoningEffort,
-            })
-            .then((result) => {
-              if (result) {
-                options.onAction({
-                  type: "model:select",
-                  modelId: result.modelId,
-                  reasoningEffort: result.reasoningEffort,
-                });
-              }
-            });
-          break;
-        case "dialog:thread_picker":
-          void app
-            .openThreadPicker({
-              threads: event.threads,
-            })
-            .then((threadId) => {
-              if (threadId) {
-                options.onAction({
-                  type: "thread:select",
-                  threadId,
-                });
-              }
-            });
-          break;
-        case "dialog:theme":
-          void app
-            .openThemePicker({
-              currentThemeId: event.currentThemeId,
-            })
-            .then((themeId) => {
-              if (themeId) {
-                setTheme(themeId);
-                tui.requestRender();
-                options.onAction({
-                  type: "theme:select",
-                  themeId,
-                });
-              }
-            });
-          break;
-        case "dialog:title_picker":
-          void app.openTitlePicker().then((selectedIds) => {
-            if (selectedIds && selectedIds.length > 0) {
-              options.onAction({
-                type: "title:select",
-                appTitle: selectedIds,
-              });
-            }
-          });
-          break;
-        case "dialog:statusline_picker":
-          void app.openStatusLinePicker().then((selectedIds) => {
-            if (selectedIds && selectedIds.length > 0) {
-              options.onAction({
-                type: "statusline:select",
-                statusLine: selectedIds,
-              });
-            }
-          });
-          break;
-        case "usage:metrics":
-          screen.messageList.addMessage(renderUsageBoxToString(event.metrics));
-          tui.requestRender();
-          break;
-        case "system:message":
-          screen.messageList.addMessage({
-            role: "system",
-            content: event.content,
-          });
-          tui.requestRender();
-          break;
-        case "system:error":
-          screen.messageList.addMessage({
-            role: "system",
-            content: `Error: ${event.error}`,
-          });
-          tui.requestRender();
-          break;
-      }
-    },
-    handleSessionEvent: (event: AgentControllerEvent) => {
-      switch (event.type) {
-        case "display_state_changed": {
-          const nextQueuedFollowUps = event.displayState.queuedFollowUps ?? 0;
-          if (nextQueuedFollowUps < nativeQueuedFollowUps) {
-            let removedCount = nativeQueuedFollowUps - nextQueuedFollowUps;
-            const cancelledCount = Math.min(removedCount, locallyCancelledQueueTransitions);
-            locallyCancelledQueueTransitions -= cancelledCount;
-            removedCount -= cancelledCount;
-            for (const content of screen.promptEditor.dequeueQueuedPrompts(removedCount)) {
-              screen.messageList.addMessage({
-                role: "user",
-                content,
-                status: "done",
-              });
-            }
-          }
-          nativeQueuedFollowUps = nextQueuedFollowUps;
-          const tools = new Map<string, DisplayTool>();
-          for (const [toolCallId, tool] of event.displayState.activeTools) {
-            tools.set(toolCallId, {
-              id: toolCallId,
-              name: tool.name,
-              args: tool.args,
-              status: tool.status,
-              partialResult: tool.partialResult,
-              result: tool.result,
-              shellOutput: tool.shellOutput,
-            });
-          }
-          screen.messageList.applySessionDisplayState({
-            currentMessage: event.displayState.currentMessage,
-            isRunning: event.displayState.isRunning,
-            activeTools: tools,
-            pendingApproval: event.displayState.pendingApproval,
-          });
-          screen.workingIndicator.sync(event.displayState);
-          tui.requestRender();
-          break;
-        }
-        case "tool_approval_required":
-          if (activeApprovalId === event.toolCallId) break;
-          activeApprovalId = event.toolCallId;
-          screen.workingIndicator.stop();
-          void app
-            .openToolApproval({
-              toolName: event.toolName,
-              args: event.args,
-            })
-            .then((decision) => {
-              if (decision === "approve_prefix") {
-                options.session.grantTool(event.toolName);
-              }
-              options.session.respondToToolApproval({
-                toolCallId: event.toolCallId,
-                decision: decision === "decline" ? "decline" : "approve",
-                ...(decision === "decline"
-                  ? { declineContext: { reason: "User declined tool execution." } }
-                  : {}),
-              });
-            })
-            .finally(() => {
-              activeApprovalId = null;
-            });
-          break;
-        case "thread_changed": {
-          screen.promptEditor.clearQueuedPrompts();
-          nativeQueuedFollowUps = 0;
-          locallyCancelledQueueTransitions = 0;
-          const revision = ++historyRevision;
-          void options.session.thread
-            .listMessages({ threadId: event.threadId })
-            .then((messages) => {
-              if (revision !== historyRevision || options.session.thread.getId() !== event.threadId)
-                return;
-              if (messages.length > 0 || screen.messageList.getMessages().length === 0) {
-                screen.messageList.setSessionMessages(messages);
-                tui.requestRender();
-              }
-            })
-            .catch((error: unknown) => {
-              screen.messageList.addMessage({
-                role: "system",
-                content: `Error loading thread: ${error instanceof Error ? error.message : String(error)}`,
-                status: "error",
-              });
-              tui.requestRender();
-            });
-          break;
-        }
-        case "error":
-          screen.workingIndicator.stop();
-          screen.messageList.addMessage({
-            role: "system",
-            content: `Error: ${event.error.message}`,
-            status: "error",
-          });
-          tui.requestRender();
-          break;
-        case "workspace_status_changed":
-          if (String(event.status) !== "ready") {
-            screen.workingIndicator.start(`Workspace: ${String(event.status)}`);
-          }
-          break;
-        case "workspace_ready":
-          screen.workingIndicator.stop();
-          break;
-        case "workspace_error":
-          screen.workingIndicator.stop();
-          screen.messageList.addMessage({
-            role: "system",
-            content: `Workspace error: ${event.error.message}`,
-            status: "error",
-          });
-          tui.requestRender();
-          break;
-      }
-    },
-    openThreadPicker: (pickerOptions: OpenThreadPickerOptions) => {
-      return new Promise<string | null>((resolve) => {
-        let closed = false;
-
-        const finish = (result: string | null) => {
-          if (closed) return;
-          closed = true;
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-          resolve(result);
-        };
-
-        const picker = new ThreadPickerOverlay({
-          threads: pickerOptions.threads,
-          onSelect: (threadId: string) => finish(threadId),
-          onCancel: () => finish(null),
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-    openModelPicker: (pickerOptions: OpenModelPickerOptions) => {
-      return new Promise<ModelSelectionResult | null>((resolve) => {
-        let closed = false;
-
-        const finish = (result: ModelSelectionResult | null) => {
-          if (closed) return;
-          closed = true;
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-          resolve(result);
-        };
-
-        const picker = new ModelPickerComponent({
-          providers: pickerOptions.providers,
-          currentModelId: pickerOptions.currentModelId,
-          currentReasoningEffort: pickerOptions.currentReasoningEffort,
-          onSelect: (result) => finish(result),
-          onCancel: () => finish(null),
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-    openThemePicker: (pickerOptions: OpenThemePickerOptions = {}) => {
-      return new Promise<string | null>((resolve) => {
-        let closed = false;
-        const currentThemeId = pickerOptions.currentThemeId || "default";
-
-        const finish = (result: string | null) => {
-          if (closed) return;
-          closed = true;
-          if (result) {
-            setTheme(result);
-          } else {
-            setTheme(currentThemeId);
-          }
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-          resolve(result);
-        };
-
-        const picker = new ThemePickerOverlay({
-          currentThemeId,
-          onSelect: (themeId) => finish(themeId),
-          onCancel: () => finish(null),
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-    openTitlePicker: () => {
-      return new Promise<string[] | null>((resolve) => {
-        let closed = false;
-
-        const finish = (selectedIds: string[] | null) => {
-          if (closed) return;
-          closed = true;
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-
-          if (selectedIds && selectedIds.length > 0) {
-            updateTerminalTitle(selectedIds);
-            tui.requestRender();
-          }
-
-          resolve(selectedIds);
-        };
-
-        const picker = new TitlePickerComponent({
-          initialSelection: currentTitleFields,
-          currentValues: {
-            model: latestInfo.model,
-            threadId: latestInfo.threadId,
-            workspace: latestInfo.workspace,
-            status: options.session.displayState.get().isRunning ? "Busy" : "Idle",
-          },
-          onSelect: (ids) => finish(ids),
-          onCancel: () => finish(null),
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-    openStatusLinePicker: () => {
-      return new Promise<string[] | null>((resolve) => {
-        let closed = false;
-
-        const finish = (selectedIds: string[] | null) => {
-          if (closed) return;
-          closed = true;
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-
-          if (selectedIds && selectedIds.length > 0) {
-            screen.footer.setStatusLine(selectedIds);
-            tui.requestRender();
-          }
-
-          resolve(selectedIds);
-        };
-
-        const picker = new StatusLinePickerComponent({
-          initialSelection: screen.footer.getStatusLine(),
-          currentValues: {
-            model: latestInfo.model,
-            workspace: latestInfo.workspace,
-            agentMd: latestInfo.agentMd,
-            threadId: latestInfo.threadId,
-            status: options.session.displayState.get().isRunning ? "Busy" : "Idle",
-          },
-          onSelect: (ids: string[]) => finish(ids),
-          onCancel: () => finish(null),
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-    openToolApproval: (pickerOptions: OpenToolApprovalOptions) => {
-      return new Promise<ToolApprovalDecision>((resolve) => {
-        let closed = false;
-
-        const finish = (decision: ToolApprovalDecision) => {
-          if (closed) return;
-          closed = true;
-          tui.removeChild(screen.footer);
-          tui.removeChild(picker);
-          tui.addChild(screen.promptEditor);
-          tui.addChild(screen.footer);
-          tui.setFocus(screen.promptEditor);
-          tui.requestRender();
-          resolve(decision);
-        };
-
-        const picker = new ApprovalPicker({
-          toolName: pickerOptions.toolName,
-          args: pickerOptions.args,
-          onDecision: finish,
-        });
-
-        tui.removeChild(screen.footer);
-        tui.removeChild(screen.promptEditor);
-        tui.addChild(picker);
-        tui.addChild(screen.footer);
-        tui.setFocus(picker);
-        tui.requestRender();
-      });
-    },
-  };
-
-  unsubscribeSession = options.session.subscribe(app.handleSessionEvent);
-  app.handleSessionEvent({
-    type: "display_state_changed",
-    displayState: options.session.displayState.get(),
-  });
-
-  return app;
-};
+  private formatModel(model: ModelState): string {
+    return `${model.modelId}${
+      model.reasoningEffort && model.reasoningEffort !== "none" ? ` (${model.reasoningEffort})` : ""
+    }`;
+  }
+}

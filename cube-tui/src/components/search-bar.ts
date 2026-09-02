@@ -20,7 +20,7 @@ export class SearchBar implements Component, Focusable {
   private readonly prefix: string;
 
   constructor(options: SearchBarOptions = {}) {
-    this.placeholder = options.placeholder ?? "Type to filter...";
+    this.placeholder = options.placeholder ?? "Type to search...";
     this.prefix = options.prefix ?? "Search: ";
     this.input.setValue(options.initialQuery ?? "");
     this.input.focused = true;
@@ -83,7 +83,7 @@ export class SearchBar implements Component, Focusable {
       inputContent = inputContent.slice(2);
     }
 
-    const line = `${appTheme.ui.muted(this.prefix)}${appTheme.ui.primary.bold(inputContent)}`;
+    const line = `${appTheme.ui.muted(this.prefix)}${appTheme.ui.text.bold(inputContent)}`;
     return [truncateToWidth(line, width)];
   }
 }

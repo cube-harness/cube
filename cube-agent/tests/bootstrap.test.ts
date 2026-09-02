@@ -3,7 +3,7 @@ import test from "node:test";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
-import { CubeHome, Workspace, createBootstrap } from "@cube/workspace";
+import { ConfigStore, CubeHome, Workspace, createBootstrap } from "@cube/workspace";
 
 test("createCubeMastra composes the agent and controller into one Mastra runtime", async () => {
   const module = await import("../src/bootstrap.js").catch(() => ({}));
@@ -23,6 +23,7 @@ test("createCubeMastra composes the agent and controller into one Mastra runtime
       createCubeMastra: (
         home: typeof home,
         workspace: typeof workspace,
+        config: Awaited<ReturnType<ReturnType<typeof ConfigStore>["read"]>>,
       ) => Promise<{
         agent: unknown;
         controller: { getMastra: () => unknown };
@@ -40,7 +41,8 @@ test("createCubeMastra composes the agent and controller into one Mastra runtime
     | undefined;
 
   try {
-    composition = await createCubeMastra(home, workspace);
+    const config = await ConfigStore(home).read();
+    composition = await createCubeMastra(home, workspace, config);
 
     assert.equal(composition.controller.getMastra(), composition.mastra);
     assert.equal(composition.mastra.getAgentById("cube-agent"), composition.agent);

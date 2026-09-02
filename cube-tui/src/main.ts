@@ -1,48 +1,46 @@
 #!/usr/bin/env node
-import { CubeRuntime } from "@cube/runtime";
-import { CubeApp, type TuiApp } from "./app.js";
-import { setSyntaxTheme as setTheme } from "./themes/syntax.theme.js";
+import { createCubeRuntime } from "@cube/runtime";
+import { ProcessTerminal, TuiMainScreen } from "@earendil-works/pi-tui";
+import { CubeApp } from "./app.js";
+import { ChatScreen } from "./screens/chat.screen.js";
 
 export const startTui = async (): Promise<void> => {
-  let app: TuiApp;
-
-  const runtime = new CubeRuntime({
-    onExit: () => {
-      app?.stop();
-      process.exit(0);
-    },
-  });
-
-  await runtime.start();
-  setTheme(runtime.theme);
-  const initialHistory = await runtime.getHistory();
-
-  app = CubeApp({
-    session: runtime.session,
-    onAction: (action) => {
-      void runtime.dispatch(action);
-    },
+  const runtime = await createCubeRuntime();
+  const preference = runtime.preference.get();
+  const model = runtime.model.current();
+  const screen = new ChatScreen({
+    tui: new TuiMainScreen(new ProcessTerminal()),
+    basePath: runtime.workspaceRoot,
+    initialHistory: await runtime.getHistory(),
     slashCommands: runtime.suggestions,
-    basePath: process.cwd(),
-    initialHistory,
-    appTitle: runtime.appTitle,
-    statusLine: runtime.statusLine,
+    statusLine: preference.statusLine,
+    initialInfo: {
+      model: `${model.modelId}${
+        model.reasoningEffort && model.reasoningEffort !== "none"
+          ? ` (${model.reasoningEffort})`
+          : ""
+      }`,
+      workspace: runtime.workspaceRoot,
+      agentMd: "AGENT.md (active)",
+      threadId: runtime.thread.current() ?? "new thread",
+    },
   });
 
-  runtime.subscribe((event) => {
-    app.handleUIEvent(event);
-  });
+  let app: CubeApp;
+  let exitPromise: Promise<void> | undefined;
+  const exit = (): Promise<void> => {
+    exitPromise ??= (async () => {
+      await app.stop();
+      await runtime.shutdown();
+      process.exit(0);
+    })();
+    return exitPromise;
+  };
 
-  process.once("SIGTERM", () => {
-    void runtime.dispatch({ type: "app:exit" });
-  });
-
-  process.once("SIGINT", () => {
-    void runtime.dispatch({ type: "app:exit" });
-  });
-
-  app.start();
-  runtime.emitInitialState();
+  app = new CubeApp(runtime, screen, { onExitRequested: exit });
+  process.once("SIGTERM", () => void exit());
+  process.on("SIGINT", () => void app.handleExit());
+  await app.start();
 };
 
 startTui().catch((error: unknown) => {

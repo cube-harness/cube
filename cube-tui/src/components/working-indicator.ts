@@ -37,7 +37,8 @@ export type WorkingPhase =
   | "memory";
 
 export interface WorkingIndicatorState {
-  active: boolean;
+  visible: boolean;
+  spinning: boolean;
   phase: WorkingPhase;
   message: string;
 }
@@ -48,7 +49,7 @@ interface SessionDisplayStateLike {
     content?: { parts?: unknown[] };
   };
   activeTools: Map<string, { name: string; status: string }>;
-  pendingApproval: unknown | null;
+  pendingApproval: { toolName?: string } | null;
   pendingSuspensions: Map<string, unknown>;
   activeSubagents: Map<
     string,
@@ -64,12 +65,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export const deriveWorkingIndicatorState = (
   state: SessionDisplayStateLike,
+  approvalPending: boolean,
 ): WorkingIndicatorState => {
-  if (state.pendingApproval) {
-    return { active: false, phase: "approval", message: "Waiting for approval" };
+  if (approvalPending && state.pendingApproval) {
+    const suffix = state.pendingApproval.toolName ? `: ${state.pendingApproval.toolName}` : "";
+    return { visible: true, spinning: false, phase: "approval", message: `Waiting for approval${suffix}` };
   }
   if (state.pendingSuspensions.size > 0) {
-    return { active: false, phase: "input", message: "Waiting for input" };
+    return { visible: true, spinning: true, phase: "input", message: "Waiting for input" };
   }
 
   const activeTool = Array.from(state.activeTools.values()).find(
@@ -77,9 +80,10 @@ export const deriveWorkingIndicatorState = (
   );
   if (activeTool) {
     return {
-      active: true,
+      visible: true,
+      spinning: true,
       phase: "tool",
-      message: `Running ${activeTool.name}`,
+      message: `${activeTool.status === "streaming_input" ? "Preparing" : "Running"} ${activeTool.name}`,
     };
   }
 
@@ -88,24 +92,28 @@ export const deriveWorkingIndicatorState = (
   );
   if (activeSubagent) {
     return {
-      active: true,
+      visible: true,
+      spinning: true,
       phase: "subagent",
       message: `Running ${activeSubagent.displayName || activeSubagent.agentType}`,
     };
   }
 
-  if (state.bufferingMessages || state.bufferingObservations) {
-    return { active: true, phase: "memory", message: "Buffering memory" };
+  if (state.bufferingMessages) {
+    return { visible: true, spinning: true, phase: "memory", message: "Buffering messages" };
+  }
+  if (state.bufferingObservations) {
+    return { visible: true, spinning: true, phase: "memory", message: "Buffering observations" };
   }
   if (state.omProgress.status === "observing") {
-    return { active: true, phase: "memory", message: "Observing memory" };
+    return { visible: true, spinning: true, phase: "memory", message: "Observing memory" };
   }
   if (state.omProgress.status === "reflecting") {
-    return { active: true, phase: "memory", message: "Reflecting memory" };
+    return { visible: true, spinning: true, phase: "memory", message: "Reflecting memory" };
   }
 
   if (!state.isRunning) {
-    return { active: false, phase: "idle", message: "Idle" };
+    return { visible: false, spinning: false, phase: "idle", message: "Idle" };
   }
 
   const parts = state.currentMessage?.content?.parts ?? [];
@@ -113,16 +121,16 @@ export const deriveWorkingIndicatorState = (
     (part) => isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.length > 0,
   );
   if (hasText) {
-    return { active: false, phase: "streaming", message: "Responding" };
+    return { visible: true, spinning: true, phase: "streaming", message: "Responding" };
   }
   const hasReasoning = parts.some(
     (part) => isRecord(part) && part.type === "reasoning",
   );
   if (hasReasoning) {
-    return { active: true, phase: "thinking", message: "Thinking" };
+    return { visible: true, spinning: true, phase: "thinking", message: "Thinking" };
   }
 
-  return { active: true, phase: "thinking", message: "Thinking" };
+  return { visible: true, spinning: true, phase: "thinking", message: "Working" };
 };
 
 export interface WorkingIndicatorOptions {
@@ -142,7 +150,9 @@ export class WorkingIndicator implements Component {
   private readonly messageStyle: (text: string) => string;
   private readonly timerStyle: (text: string) => string;
 
-  private active = false;
+  private visible = false;
+  private spinning = false;
+  private phase: WorkingPhase = "idle";
   private message = "Working";
   private startedAt = 0;
   private frameIndex = 0;
@@ -164,19 +174,29 @@ export class WorkingIndicator implements Component {
   }
 
   start(message: string = "Working"): void {
+    this.show(message, true, "thinking");
+  }
+
+  private show(message: string, spinning: boolean, phase: WorkingPhase): void {
+    const phaseChanged = !this.visible || this.message !== message || this.spinning !== spinning || this.phase !== phase;
     this.message = message;
-    if (this.active) {
-      this.tui.requestRender();
-      return;
+    this.phase = phase;
+    if (phaseChanged) {
+      this.startedAt = this.now();
+      this.frameIndex = 0;
     }
-    this.active = true;
-    this.startedAt = this.now();
-    this.frameIndex = 0;
-    this.timer = this.schedule(() => {
-      this.frameIndex += 1;
-      this.tui.requestRender();
-    }, 80);
-    this.timer.unref?.();
+    this.visible = true;
+    this.spinning = spinning;
+    if (spinning && !this.timer) {
+      this.timer = this.schedule(() => {
+        this.frameIndex += 1;
+        this.tui.requestRender();
+      }, 80);
+      this.timer.unref?.();
+    } else if (!spinning && this.timer) {
+      this.cancelSchedule(this.timer);
+      this.timer = undefined;
+    }
     this.tui.requestRender();
   }
 
@@ -185,10 +205,13 @@ export class WorkingIndicator implements Component {
     this.tui.requestRender();
   }
 
-  sync(displayState: SessionDisplayStateLike): WorkingIndicatorState {
-    const next = deriveWorkingIndicatorState(displayState);
-    if (next.active) {
-      this.start(next.message);
+  sync(
+    displayState: SessionDisplayStateLike,
+    approvalPending: boolean,
+  ): WorkingIndicatorState {
+    const next = deriveWorkingIndicatorState(displayState, approvalPending);
+    if (next.visible) {
+      this.show(next.message, next.spinning, next.phase);
     } else {
       this.stop();
     }
@@ -200,25 +223,34 @@ export class WorkingIndicator implements Component {
       this.cancelSchedule(this.timer);
       this.timer = undefined;
     }
-    this.active = false;
+    this.visible = false;
+    this.spinning = false;
+    this.phase = "idle";
     this.tui.requestRender();
   }
 
   isActive(): boolean {
-    return this.active;
+    return this.visible;
   }
 
   render(width: number): string[] {
-    if (!this.active) return [];
+    if (!this.visible) return [];
+
+    if (!this.spinning) {
+      return [truncateToWidth(`  ${this.spinnerStyle("•")} ${this.messageStyle(this.message)}`, width)];
+    }
 
     const elapsedSeconds = Math.floor((this.now() - this.startedAt) / 1000);
     const frame = SPINNER_FRAMES[this.frameIndex % SPINNER_FRAMES.length];
 
     const spinner = this.spinnerStyle(frame);
     const text = this.messageStyle(this.message);
-    const timer = this.timerStyle(
-      `(${elapsedSeconds}s • ${formatBinding("cube.turn.interrupt")} to interrupt)`,
-    );
+    const suffix = this.phase === "input"
+      ? ` • ${formatBinding("cube.turn.interrupt")} to cancel`
+      : this.phase === "memory" && this.message.startsWith("Buffering")
+        ? ""
+        : ` • ${formatBinding("cube.turn.interrupt")} to interrupt`;
+    const timer = this.timerStyle(`(${elapsedSeconds}s${suffix})`);
 
     const line = `  ${spinner} ${text} ${timer}`;
     return [truncateToWidth(line, width)];

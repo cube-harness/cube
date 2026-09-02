@@ -5,6 +5,7 @@
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
   "type": "module",
   "scripts": {
+    "bench:internal": "tsx benchmarks/internal-latency.ts",
     "dev": "pnpm --filter @cube/tui dev",
     "dev:factory": "pnpm --filter @cube/factory-ui dev",
     "studio": "pnpm --filter @cube/agent studio",
@@ -13,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "22.13.1",
-    "mastra": "^1.25.0",
+    "mastra": "^1.27.2",
     "tsx": "4.19.3",
     "turbo": "2.10.8",
     "typescript": "5.7.3"

@@ -7,6 +7,8 @@ export interface UsageBoxContent {
   model: string;
   reasoningEffort?: string;
   capabilities?: string[];
+  directory?: string;
+  sessionId?: string;
   contextLimit: number;
   maxOutput?: number;
   activeTurnTokens?: number;
@@ -20,15 +22,28 @@ export interface UsageBoxContent {
   threadId: string;
 }
 
+const formatTokensK = (tokens: number): string => {
+  if (tokens <= 0) return "0";
+  if (tokens >= 1_048_576) {
+    const m = tokens / 1_048_576;
+    return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+  if (tokens >= 1024) {
+    const k = tokens / 1024;
+    return Number.isInteger(k) ? `${k}K` : `${k.toFixed(1)}K`;
+  }
+  return tokens.toLocaleString();
+};
+
 export class UsageBox implements Component {
   invalidate = () => {};
 
   private paddingX = 2;
   private paddingY = 1;
-  private title = "Usage & Context Statistics";
+  private title = "Session Status";
 
   constructor(
-    title: string = "Usage & Context Statistics",
+    title: string = "Session Status",
     private content?: UsageBoxContent,
   ) {
     this.title = title;
@@ -55,81 +70,70 @@ export class UsageBox implements Component {
       model,
       reasoningEffort,
       capabilities = [],
+      directory,
+      sessionId,
       contextLimit,
-      maxOutput,
       activeTurnTokens,
       promptTokens,
-      completionTokens,
-      reasoningTokens,
       cachedTokens = 0,
       cacheCreationTokens = 0,
-      totalTokens,
       threadTitle,
       threadId,
     } = this.content;
 
     const currentContextTokens =
-      activeTurnTokens !== undefined && activeTurnTokens > 0
-        ? activeTurnTokens
-        : promptTokens;
+      activeTurnTokens !== undefined && activeTurnTokens > 0 ? activeTurnTokens : promptTokens;
 
-    const percent = Math.min(
-      100,
-      Math.max(0, (currentContextTokens / (contextLimit || 1)) * 100),
-    );
+    const percent = Math.min(100, Math.max(0, (currentContextTokens / (contextLimit || 1)) * 100));
     const filledBars = Math.round((percent / 100) * 20);
     const emptyBars = 20 - filledBars;
     const progressBar = `${appTheme.status.success("█".repeat(filledBars))}${appTheme.ui.muted("░".repeat(emptyBars))}`;
-    const remainingContext = Math.max(0, contextLimit - currentContextTokens);
 
     const capText = capabilities.length > 0 ? capabilities.join(", ") : "none";
-    const maxOutputText = maxOutput ? ` (Max Output: ${maxOutput.toLocaleString()} tokens)` : "";
 
     const modelDisplay =
-      reasoningEffort && reasoningEffort !== "none"
-        ? `${model} (${reasoningEffort})`
-        : model;
+      reasoningEffort && reasoningEffort !== "none" ? `${model} (${reasoningEffort})` : model;
 
-    let cachedDisplay = `${cachedTokens.toLocaleString()}`;
+    let cachedDisplay = `${formatTokensK(cachedTokens)} (Read)`;
     if (cacheCreationTokens > 0) {
-      cachedDisplay += ` (Read: ${cachedTokens.toLocaleString()}, Write: ${cacheCreationTokens.toLocaleString()})`;
+      cachedDisplay = `${formatTokensK(cachedTokens)} (Read: ${formatTokensK(cachedTokens)}, Write: ${formatTokensK(cacheCreationTokens)})`;
     }
-
-    const promptDisplay =
-      activeTurnTokens !== undefined &&
-      activeTurnTokens > 0 &&
-      activeTurnTokens !== promptTokens
-        ? `${promptTokens.toLocaleString()} (Active Turn: ${activeTurnTokens.toLocaleString()})`
-        : promptTokens.toLocaleString();
 
     const contentLines: string[] = [
       `${appTheme.ui.muted("Model            :")} ${appTheme.ui.text(modelDisplay)}`,
       `${appTheme.ui.muted("Capabilities     :")} ${appTheme.ui.text(capText)}`,
-      `${appTheme.ui.muted("Context Limit    :")} ${appTheme.ui.text(`${contextLimit.toLocaleString()} tokens${maxOutputText}`)}`,
-      `${appTheme.ui.muted("Context Window   :")} [${progressBar}] ${appTheme.ui.primary(percent.toFixed(1) + "%")} ${appTheme.ui.muted(`(${currentContextTokens.toLocaleString()} / ${contextLimit.toLocaleString()} tokens)`)}`,
-      `${appTheme.ui.muted("Remaining Space  :")} ${appTheme.ui.text(`${remainingContext.toLocaleString()} tokens`)}`,
-      "",
-      `${appTheme.ui.muted("Prompt Tokens    :")} ${appTheme.ui.text(promptDisplay)}`,
-      `${appTheme.ui.muted("Completion Tokens:")} ${appTheme.ui.text(completionTokens.toLocaleString())}`,
     ];
 
-    if (reasoningTokens !== undefined && reasoningTokens > 0) {
+    if (directory) {
       contentLines.push(
-        `${appTheme.ui.muted("Reasoning Tokens :")} ${appTheme.ui.text(reasoningTokens.toLocaleString())}`,
+        `${appTheme.ui.muted("Directory        :")} ${appTheme.ui.text(directory)}`,
+      );
+    }
+
+    if (sessionId) {
+      contentLines.push(
+        `${appTheme.ui.muted("Session ID       :")} ${appTheme.ui.text(sessionId)}`,
+      );
+    }
+
+    contentLines.push(`${appTheme.ui.muted("Thread ID        :")} ${appTheme.ui.text(threadId)}`);
+
+    if (threadTitle) {
+      contentLines.push(
+        `${appTheme.ui.muted("Thread Title     :")} ${appTheme.ui.text(threadTitle)}`,
       );
     }
 
     contentLines.push(
-      `${appTheme.ui.muted("Cached Tokens    :")} ${appTheme.ui.text(cachedDisplay)}`,
-      `${appTheme.ui.muted("Total Tokens     :")} ${appTheme.ui.text(totalTokens.toLocaleString())}`,
       "",
+      `${appTheme.ui.muted("Context Window   :")} [${progressBar}] ${appTheme.ui.primary(percent.toFixed(1) + "%")} ${appTheme.ui.muted(`(${formatTokensK(currentContextTokens)} / ${formatTokensK(contextLimit)} tokens)`)}`,
     );
 
-    if (threadTitle) {
-      contentLines.push(`${appTheme.ui.muted("Thread Title     :")} ${appTheme.ui.text(threadTitle)}`);
+    if (cachedTokens > 0 || cacheCreationTokens > 0) {
+      contentLines.push(
+        `${appTheme.ui.muted("Cache            :")} ${appTheme.ui.text(cachedDisplay)}`,
+      );
     }
-
-    contentLines.push(`${appTheme.ui.muted("Thread ID        :")} ${appTheme.ui.text(threadId)}`);
 
     let maxTextWidth = 0;
     for (const line of contentLines) {
@@ -151,8 +155,7 @@ export class UsageBox implements Component {
       titleChalk(formattedTitle) +
       borderChalk("─".repeat(rightDashCount)) +
       borderChalk("╮");
-    const bottomLine =
-      borderChalk("╰") + borderChalk("─".repeat(boxWidth - 2)) + borderChalk("╯");
+    const bottomLine = borderChalk("╰") + borderChalk("─".repeat(boxWidth - 2)) + borderChalk("╯");
 
     const renderedLines: string[] = [topLine];
 
@@ -175,9 +178,7 @@ export class UsageBox implements Component {
       const rightSpaceCount = Math.max(0, effectiveInnerWidth - combinedVisWidth);
       const rightPad = " ".repeat(rightSpaceCount);
 
-      renderedLines.push(
-        `${borderChalk("│")}${combinedLeft}${rightPad}${borderChalk("│")}`,
-      );
+      renderedLines.push(`${borderChalk("│")}${combinedLeft}${rightPad}${borderChalk("│")}`);
     }
 
     for (let i = 0; i < this.paddingY; i++) {
@@ -194,7 +195,7 @@ export class UsageBox implements Component {
 export const renderUsageBoxToString = (
   content: UsageBoxContent,
   width: number = 80,
-  title: string = "Usage & Context Statistics",
+  title: string = "Session Status",
 ): string => {
   const box = new UsageBox(content.title || title, content);
   return box.render(width).join("\n");

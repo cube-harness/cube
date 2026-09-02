@@ -12,10 +12,9 @@ test("PromptEditor navigates history with Up and Down arrows", () => {
     requestRender() {},
   } as any;
 
-  const actions: any[] = [];
   const editor = new PromptEditor({
     tui,
-    onAction: (action) => actions.push(action),
+    onSubmit: () => undefined,
     initialHistory: ["prompt 1", "prompt 2", "prompt 3"],
   });
 
@@ -58,7 +57,7 @@ test("PromptEditor preserves user draft when navigating history", () => {
 
   const editor = new PromptEditor({
     tui,
-    onAction: () => {},
+    onSubmit: () => undefined,
     initialHistory: ["first command"],
   });
 
@@ -78,20 +77,43 @@ test("PromptEditor adds submitted prompts to history", () => {
     requestRender() {},
   } as any;
 
-  const actions: any[] = [];
+  const submissions: string[] = [];
   const editor = new PromptEditor({
     tui,
-    onAction: (action) => actions.push(action),
+    onSubmit: (text) => submissions.push(text),
   });
 
   editor.setText("new prompt from user");
   editor.handleInput("\r");
 
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].content, "new prompt from user");
+  assert.deepEqual(submissions, ["new prompt from user"]);
   assert.equal(editor.getText(), "");
 
   // Now Up arrow should bring up "new prompt from user"
   editor.handleInput("\u001b[A");
   assert.equal(editor.getText(), "new prompt from user");
+});
+
+test("PromptEditor submits slash commands as unchanged raw text", () => {
+  const submissions: string[] = [];
+  const editor = new PromptEditor({
+    tui: { requestRender() {} } as any,
+    onSubmit: (text) => submissions.push(text),
+  });
+  editor.setText("/model openrouter/test --effort high");
+  editor.handleInput("\r");
+  assert.deepEqual(submissions, ["/model openrouter/test --effort high"]);
+});
+
+test("PromptEditor cancels queued prompts newest first while draining stays FIFO", () => {
+  const editor = new PromptEditor({
+    tui: { requestRender() {} } as any,
+    onSubmit: () => undefined,
+  });
+  editor.enqueueQueuedPrompt("first");
+  editor.enqueueQueuedPrompt("second");
+  editor.enqueueQueuedPrompt("third");
+
+  assert.equal(editor.popQueuedPrompt(), "third");
+  assert.deepEqual(editor.dequeueQueuedPrompts(2), ["first", "second"]);
 });

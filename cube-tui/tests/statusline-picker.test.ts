@@ -30,7 +30,8 @@ test("StatusLinePickerComponent renders within width limit and displays checkbox
   assert.match(fullText, /Active Model/);
   assert.match(fullText, /Workspace Directory/);
   assert.match(fullText, /AGENT\.md Status/);
-  assert.match(fullText, /Thread Title \/ ID/);
+  assert.match(fullText, /Thread Title/);
+  assert.match(fullText, /Thread ID/);
   assert.match(fullText, /Preview:/);
   assert.match(fullText, /Space/);
 });

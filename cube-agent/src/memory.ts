@@ -37,6 +37,49 @@ const toSemanticRecall = (config: CubeConfig["memory"]["semantic_recall"]) => {
   };
 };
 
+export type CubeMemoryFinalizeResult = {
+  enabled: boolean;
+  activated: boolean;
+  observed: boolean;
+  reflected: boolean;
+};
+
+export const finalizeCubeAgentMemory = async (
+  agent: {
+    resolveProcessorById(id: "observational-memory"): Promise<unknown>;
+  },
+  input: { threadId: string; resourceId?: string },
+): Promise<CubeMemoryFinalizeResult> => {
+  const processor = await agent.resolveProcessorById("observational-memory");
+  const engine =
+    processor && typeof processor === "object" && "engine" in processor
+      ? (processor as { engine?: unknown }).engine
+      : undefined;
+  const finalize =
+    engine && typeof engine === "object" && "finalize" in engine
+      ? (engine as { finalize?: unknown }).finalize
+      : undefined;
+
+  if (typeof finalize !== "function") {
+    return {
+      enabled: false,
+      activated: false,
+      observed: false,
+      reflected: false,
+    };
+  }
+
+  const { activated, observed, reflected } = (await finalize.call(
+    engine,
+    input,
+  )) as {
+    activated: boolean;
+    observed: boolean;
+    reflected: boolean;
+  };
+  return { enabled: true, activated, observed, reflected };
+};
+
 export const createMemory = (config: CubeConfig, home: Home): Memory => {
   const memoryConfig = config.memory;
   const wm = memoryConfig.working_memory;

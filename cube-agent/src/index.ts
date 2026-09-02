@@ -13,9 +13,15 @@ export {
 } from "./agents/main.agent.js";
 export { createCubeController } from "./agents/controller.js";
 export {
+  configureCubePermissions,
+  resolveCubeToolCategory,
+} from "./permission.js";
+export {
   createCubeLogger,
   runWithCubeLogContext,
   type CubeLogContext,
   type CubeLogging,
 } from "./logger.js";
 export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
+export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
+export { cubeAskUserTool } from "./tools/ask-user.tool.js";

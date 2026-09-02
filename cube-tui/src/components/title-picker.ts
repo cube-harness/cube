@@ -21,6 +21,7 @@ export interface TitlePickerItem {
 export interface TerminalTitleValues {
   model?: string;
   workspace?: string;
+  threadTitle?: string;
   threadId?: string;
   status?: string;
 }
@@ -36,12 +37,11 @@ export function formatTerminalTitle(
   for (const field of fields) {
     if (field === "model" && values.model) parts.push(values.model);
     else if (field === "workspace" && values.workspace) parts.push(values.workspace);
+    else if (field === "threadTitle" && values.threadTitle) parts.push(values.threadTitle);
     else if (field === "threadId" && values.threadId) parts.push(values.threadId);
     else if (field === "status" && values.status) parts.push(values.status);
   }
-  return parts.length > 0
-    ? parts.join(separator)
-    : values.model || values.workspace || "Cube";
+  return parts.length > 0 ? parts.join(separator) : values.model || values.workspace || "Cube";
 }
 
 export interface TitlePickerOptions {
@@ -65,12 +65,10 @@ export class TitlePickerComponent extends Container implements Component, Focusa
   constructor(private readonly options: TitlePickerOptions) {
     super();
     const current = options.currentValues ?? {};
-    const initial = options.initialSelection ?? ["model", "workspace", "threadId"];
+    const initial = options.initialSelection ?? ["model", "workspace", "threadTitle"];
 
-    this.title = new Text(appTheme.ui.primary.bold("Configure Terminal Title"), 0, 0);
-    this.searchBar = new SearchBar({
-      placeholder: "Type to filter components...",
-    });
+    this.title = new Text(appTheme.ui.text.bold("Configure Terminal Title"), 0, 0);
+    this.searchBar = new SearchBar();
 
     this.items = options.items ?? [
       {
@@ -86,9 +84,15 @@ export class TitlePickerComponent extends Container implements Component, Focusa
         selected: initial.includes("workspace"),
       },
       {
+        id: "threadTitle",
+        label: "Thread Title",
+        description: current.threadTitle || "Untitled Thread",
+        selected: initial.includes("threadTitle"),
+      },
+      {
         id: "threadId",
-        label: "Thread Title / ID",
-        description: current.threadId || "thread_default",
+        label: "Thread ID",
+        description: current.threadId || "new thread",
         selected: initial.includes("threadId"),
       },
       {
@@ -159,9 +163,7 @@ export class TitlePickerComponent extends Container implements Component, Focusa
         const isHovered = i === this.selectedIndex;
         const isSelected = this.selectedIds.includes(item.id);
         const cursor = isHovered ? appTheme.ui.primary("❯") : " ";
-        const checkbox = isSelected
-          ? appTheme.status.success("[x]")
-          : appTheme.ui.muted("[ ]");
+        const checkbox = isSelected ? appTheme.status.success("[x]") : appTheme.ui.muted("[ ]");
         const label = isHovered
           ? appTheme.ui.primary.bold(item.label)
           : appTheme.ui.text(item.label);

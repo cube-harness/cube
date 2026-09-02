@@ -57,7 +57,7 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
   constructor(private readonly options: ThreadPickerOptions) {
     super();
 
-    this.title = new Text(appTheme.ui.primary.bold("Select Conversation Thread"), 0, 0);
+    this.title = new Text(appTheme.ui.text.bold("Select Conversation Thread"), 0, 0);
     this.searchBar = new SearchBar();
 
     const CURRENT_TAG = " (Current)";
@@ -106,7 +106,10 @@ export class ThreadPickerOverlay extends Container implements Component, Focusab
     };
 
     this.hint = new KeyHint([
-      { key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`, label: "Navigate" },
+      {
+        key: `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}`,
+        label: "Navigate",
+      },
       { key: "Type", label: "Search" },
       { key: formatBinding("tui.select.confirm"), label: "Select" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },

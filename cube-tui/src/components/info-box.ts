@@ -17,6 +17,7 @@ export interface InfoBoxContent {
   model?: string;
   workspace?: string;
   agentMd?: string;
+  threadTitle?: string;
   threadId?: string;
 }
 
@@ -28,6 +29,7 @@ export class InfoBox implements Component {
   private model: string = "cube-agent";
   private workspace: string = "D:/cube";
   private agentMd: string = "AGENT.md (active)";
+  private threadTitle?: string;
   private threadId: string = "thread_default";
 
   private paddingX: number = 2;
@@ -56,10 +58,31 @@ export class InfoBox implements Component {
     this.titleColor = color;
   }
 
+  getModel(): string {
+    return this.model;
+  }
+
+  getWorkspace(): string {
+    return this.workspace;
+  }
+
+  getAgentMd(): string {
+    return this.agentMd;
+  }
+
+  getThreadTitle(): string | undefined {
+    return this.threadTitle;
+  }
+
+  getThreadId(): string {
+    return this.threadId;
+  }
+
   setInfo(info: InfoBoxContent) {
     if (info.model !== undefined) this.model = info.model;
     if (info.workspace !== undefined) this.workspace = info.workspace;
     if (info.agentMd !== undefined) this.agentMd = info.agentMd;
+    if ("threadTitle" in info) this.threadTitle = info.threadTitle;
     if (info.threadId !== undefined) this.threadId = info.threadId;
   }
 
@@ -75,11 +98,20 @@ export class InfoBox implements Component {
       : appTheme.ui.primary.bold;
 
     const contentLines: string[] = [
-      `${appTheme.ui.muted("Model     :")} ${appTheme.ui.text(this.model)}`,
-      `${appTheme.ui.muted("Workspace :")} ${appTheme.ui.text(this.workspace)}`,
-      `${appTheme.ui.muted("AGENT.md  :")} ${appTheme.ui.text(this.agentMd)}`,
-      `${appTheme.ui.muted("Thread ID :")} ${appTheme.ui.text(this.threadId)}`,
+      `${appTheme.ui.muted("Model        :")} ${appTheme.ui.text(this.model)}`,
+      `${appTheme.ui.muted("Workspace    :")} ${appTheme.ui.text(this.workspace)}`,
+      `${appTheme.ui.muted("AGENT.md     :")} ${appTheme.ui.text(this.agentMd)}`,
     ];
+
+    if (this.threadTitle) {
+      contentLines.push(
+        `${appTheme.ui.muted("Thread Title :")} ${appTheme.ui.text(this.threadTitle)}`,
+      );
+    }
+
+    contentLines.push(
+      `${appTheme.ui.muted("Thread ID    :")} ${appTheme.ui.text(this.threadId)}`,
+    );
 
     // Tạo gradient cho Cube Icon giống Banner cũ
     const iconHeight = CUBE_ICON.length;

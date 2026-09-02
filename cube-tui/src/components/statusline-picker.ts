@@ -25,6 +25,7 @@ export interface StatusLinePickerOptions {
     model?: string;
     workspace?: string;
     agentMd?: string;
+    threadTitle?: string;
     threadId?: string;
     status?: string;
   };
@@ -49,13 +50,11 @@ export class StatusLinePickerComponent extends Container implements Component, F
       "model",
       "workspace",
       "agentMd",
-      "threadId",
+      "threadTitle",
     ];
 
-    this.title = new Text(appTheme.ui.primary.bold("Configure Footer Status Line"), 0, 0);
-    this.searchBar = new SearchBar({
-      placeholder: "Type to filter components...",
-    });
+    this.title = new Text(appTheme.ui.text.bold("Configure Footer Status Line"), 0, 0);
+    this.searchBar = new SearchBar();
 
     this.items = options.items ?? [
       {
@@ -77,9 +76,15 @@ export class StatusLinePickerComponent extends Container implements Component, F
         selected: initial.includes("agentMd"),
       },
       {
+        id: "threadTitle",
+        label: "Thread Title",
+        description: current.threadTitle || "Untitled Thread",
+        selected: initial.includes("threadTitle"),
+      },
+      {
         id: "threadId",
-        label: "Thread Title / ID",
-        description: current.threadId || "thread_default",
+        label: "Thread ID",
+        description: current.threadId || "new thread",
         selected: initial.includes("threadId"),
       },
       {

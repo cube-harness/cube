@@ -16,6 +16,7 @@ declare module "@earendil-works/pi-tui" {
     "cube.approval.approve": true;
     "cube.approval.approvePrefix": true;
     "cube.approval.decline": true;
+    "cube.askUser.toggle": true;
     "cube.history.previous": true;
     "cube.history.next": true;
   }
@@ -32,7 +33,7 @@ export const CUBE_KEYBINDINGS = {
   },
   "cube.transcript.toggle": {
     defaultKeys: "ctrl+t",
-    description: "Toggle expanded tool transcripts",
+    description: "Toggle reasoning and expanded tool transcripts",
   },
   "cube.approval.approve": {
     defaultKeys: ["y", "shift+y", "1"],
@@ -45,6 +46,10 @@ export const CUBE_KEYBINDINGS = {
   "cube.approval.decline": {
     defaultKeys: ["n", "shift+n", "3"],
     description: "Decline the pending tool call",
+  },
+  "cube.askUser.toggle": {
+    defaultKeys: "space",
+    description: "Toggle an option in a multi-select user question",
   },
   "cube.history.previous": {
     defaultKeys: "up",
@@ -88,7 +93,7 @@ const DISPLAY_NAMES: Record<string, string> = {
 export const formatBinding = (binding: Keybinding): string =>
   getKeybindings()
     .getKeys(binding)
-    .map((key) => DISPLAY_NAMES[key] ?? key)
+    .map((key) => DISPLAY_NAMES[key] ?? key.replace(/^ctrl\+(.+)$/i, (_, value: string) => `Ctrl+${value.toUpperCase()}`))
     .join("/");
 
 // Package bootstrap: every exported Cube component observes the same registry,
