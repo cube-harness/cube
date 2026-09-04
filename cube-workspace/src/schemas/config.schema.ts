@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GatewayIdSchema } from "../gateway.js";
 
 const ratio = z.number().gt(0).lte(1);
 const positiveInteger = z.number().int().positive();
@@ -208,11 +209,8 @@ export const ModelConfigSchema = z.object({
   reasoning_effort: ReasoningEffortSchema.optional(),
 }).strict();
 
-export const ConfigSchema = z.object({
-  version: z.literal(1),
-  model: z.string().min(1),
+const configSettingsShape = {
   model_config: ModelConfigSchema.nullish().transform((val) => val ?? {}),
-  fallback_model: z.string().min(1).nullable(),
   theme: z.string().min(1).default("default"),
   app_title: z.array(z.string().min(1)).min(1).default(["model", "workspace", "threadId"]),
   status_line: z.array(z.string().min(1)).min(1).default(["model", "workspace", "agentMd", "threadId"]),
@@ -224,8 +222,42 @@ export const ConfigSchema = z.object({
   permissions: z.object({
     require_approval_for: z.array(z.string().min(1)),
   }).strict(),
-});
+};
+
+const gatewayOptions = z.object({
+  "local/ollama": z.object({
+    base_url: z.string().url(),
+  }).strict().optional(),
+  "local/lmstudio": z.object({
+    base_url: z.string().url(),
+  }).strict().optional(),
+}).strict().default({});
+
+export const LegacyConfigSchema = z.object({
+  version: z.literal(1),
+  model: modelReference,
+  fallback_model: modelReference.nullable(),
+  ...configSettingsShape,
+}).strict();
+
+export const ConfigSchema = z.object({
+  version: z.literal(2),
+  gateway: GatewayIdSchema.optional(),
+  model: modelReference.optional(),
+  gateway_options: gatewayOptions,
+  ...configSettingsShape,
+}).strict();
+
+export const RunnableConfigSchema = z.object({
+  version: z.literal(2),
+  gateway: GatewayIdSchema,
+  model: modelReference,
+  gateway_options: gatewayOptions,
+  ...configSettingsShape,
+}).strict();
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type CubeConfig = z.infer<typeof ConfigSchema>;
+export type RunnableCubeConfig = z.infer<typeof RunnableConfigSchema>;
+export type LegacyCubeConfig = z.infer<typeof LegacyConfigSchema>;

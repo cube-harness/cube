@@ -1,7 +1,11 @@
-version: 1
-model: google/gemini-3.7-flash
+version: 2
 model_config: {}
-fallback_model: ollama/qwen2.5:7b
+
+gateway_options:
+  local/ollama:
+    base_url: http://127.0.0.1:11434
+  local/lmstudio:
+    base_url: http://127.0.0.1:1234/v1
 
 theme: default
 

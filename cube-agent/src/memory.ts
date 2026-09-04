@@ -16,15 +16,15 @@ type DynamicModelContext = {
 };
 
 const resolveActiveAgentModel =
-  (fallbackModel: string) =>
+  (activeModel: string) =>
   async ({ requestContext, mastra }: DynamicModelContext) => {
-    if (!mastra) return fallbackModel;
+    if (!mastra) return activeModel;
 
     return mastra.getAgentById("cube-agent").getModel({ requestContext });
   };
 
-const toModel = (model: string, fallbackModel: string) =>
-  model === "inherit" ? resolveActiveAgentModel(fallbackModel) : model;
+const toModel = (model: string, activeModel: string) =>
+  model === "inherit" ? resolveActiveAgentModel(activeModel) : model;
 
 const toSemanticRecall = (config: CubeConfig["memory"]["semantic_recall"]) => {
   if (!config.enabled) return false;

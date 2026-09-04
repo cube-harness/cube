@@ -20,6 +20,8 @@ export { Bootstrap, createBootstrap, loadEnv } from "./bootstrap.js";
 
 // Export Model Manager
 export { ModelManager, type ProviderCatalogItem } from "./model-manager.js";
+export * from "./gateway.js";
+export * from "./config-migration.js";
 
 // Export Schemas & Types
 export * from "./schemas/config.schema.js";
