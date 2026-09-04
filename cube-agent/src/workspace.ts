@@ -1,19 +1,11 @@
 import { Workspace, LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS } from "@mastra/core/workspace";
-import type { HomeManager, WorkspaceManager } from "@cube/workspace";
+import type { WorkspaceManager } from "@cube/workspace";
 
-export const createMastraWorkspace = async (
-  home: HomeManager,
-  workspace: WorkspaceManager,
-): Promise<Workspace> => {
+export const createMastraWorkspace = async (workspace: WorkspaceManager): Promise<Workspace> => {
   const projectPaths = await workspace.getPaths();
   return new Workspace({
     filesystem: new LocalFilesystem({ basePath: projectPaths.root }),
-    skills: [
-      // project-level
-      ...projectPaths.skillsDirs,
-      // global-level
-      home.getSkillDir(),
-    ],
+    skills: projectPaths.skillsDirs,
     bm25: true,
     tools: {
       [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: { name: "read_file" },

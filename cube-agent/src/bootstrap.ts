@@ -6,6 +6,7 @@ import { createCubeAgent } from "./agents/main.agent.js";
 import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
 import { createMcpServer } from "./mcp/server.js";
+import { createMemory } from "./memory.js";
 
 export interface CubeMastraComposition {
   agent: Awaited<ReturnType<typeof createCubeAgent>>;
@@ -23,6 +24,7 @@ export const createCubeMastra = async (
   const logging = await createCubeLogger(home);
   const agent = await createCubeAgent(home, workspace, config, logging.logger);
   const controller = await createCubeController(home, workspace, config, agent);
+  const memory = createMemory(config,home);
   const mcpServer = createMcpServer();
 
   const mastra = new Mastra({

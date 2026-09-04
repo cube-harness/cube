@@ -12,7 +12,7 @@ export const createCubeController = async (
   config: CubeConfig,
   agent: Agent,
 ) => {
-  const mastraWorkspace = await createMastraWorkspace(home, workspace);
+  const mastraWorkspace = await createMastraWorkspace(workspace);
 
   return new AgentController({
     id: "cube-controller",

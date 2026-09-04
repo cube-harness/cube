@@ -139,6 +139,48 @@ test("ChatScreen routes only the native message to the list and lifecycle to the
   screen.unmount();
 });
 
+test("ChatScreen pauses prompt cursor blinking while the working indicator spins", () => {
+  const fake = createTui();
+  const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });
+  const blinking: boolean[] = [];
+  const promptEditor = screen.promptEditor as typeof screen.promptEditor & {
+    setCursorBlinking(enabled: boolean): void;
+  };
+  promptEditor.setCursorBlinking = (enabled) => blinking.push(enabled);
+
+  const displayState = {
+    isRunning: true,
+    currentMessage: null,
+    activeTools: new Map(),
+    pendingApproval: null,
+    pendingSuspensions: new Map(),
+    activeSubagents: new Map(),
+    queuedFollowUps: 0,
+    omProgress: { status: "idle" },
+    bufferingMessages: false,
+    bufferingObservations: false,
+  } as unknown as RuntimeDisplayState;
+
+  screen.workingIndicator.sync = () => ({
+    visible: true,
+    spinning: true,
+    phase: "thinking",
+    message: "Working",
+  });
+  screen.renderDisplayState(displayState, false);
+
+  screen.workingIndicator.sync = () => ({
+    visible: false,
+    spinning: false,
+    phase: "streaming",
+    message: "Responding",
+  });
+  screen.renderDisplayState(displayState, false);
+
+  assert.deepEqual(blinking, [false, true]);
+  screen.unmount();
+});
+
 test("ChatScreen passes the elapsed native reasoning phase duration to the message list", () => {
   const fake = createTui();
   const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });

@@ -39,17 +39,16 @@ export type ChatScreenOptions = {
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null
-    ? value as Record<string, unknown>
-    : null;
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 
 const inspectReasoning = (
   message: RuntimeDisplayState["currentMessage"],
   streaming: boolean,
 ): { present: boolean; complete: boolean } => {
-  const parts = message?.content && typeof message.content === "object" && "parts" in message.content
-    ? message.content.parts
-    : [];
+  const parts =
+    message?.content && typeof message.content === "object" && "parts" in message.content
+      ? message.content.parts
+      : [];
   if (!Array.isArray(parts)) return { present: false, complete: false };
 
   const reasoningIndex = parts.findIndex((part) => {
@@ -60,7 +59,9 @@ const inspectReasoning = (
   const hasFollowingOutput = parts.slice(reasoningIndex + 1).some((part) => {
     const record = asRecord(part);
     if (record?.type === "tool-invocation") return true;
-    return record?.type === "text" && typeof record.text === "string" && record.text.trim().length > 0;
+    return (
+      record?.type === "text" && typeof record.text === "string" && record.text.trim().length > 0
+    );
   });
   return { present: true, complete: !streaming || hasFollowingOutput };
 };
@@ -100,9 +101,7 @@ export class ChatScreen {
     this.footer = new Footer(options.initialInfo, options.statusLine);
   }
 
-  mount(handlers: {
-    onSubmit(content: string): void | Promise<void>;
-  }): void {
+  mount(handlers: { onSubmit(content: string): void | Promise<void> }): void {
     this.onSubmit = handlers.onSubmit;
     if (this.mounted) return;
     this.mounted = true;
@@ -141,16 +140,11 @@ export class ChatScreen {
     this.options.tui.stop();
   }
 
-  addInputListener(
-    listener: Parameters<TUI["addInputListener"]>[0],
-  ): () => void {
+  addInputListener(listener: Parameters<TUI["addInputListener"]>[0]): () => void {
     return this.options.tui.addInputListener(listener);
   }
 
-  renderDisplayState(
-    state: RuntimeDisplayState,
-    approvalPending: boolean,
-  ): void {
+  renderDisplayState(state: RuntimeDisplayState, approvalPending: boolean): void {
     const reasoning = inspectReasoning(state.currentMessage, state.isRunning);
     let reasoningDurationMs: number | undefined;
     if (reasoning.present && state.currentMessage) {
@@ -171,14 +165,12 @@ export class ChatScreen {
           reasoningDurationMs,
         );
       } else {
-        this.messageList.applySessionMessage(
-          state.currentMessage,
-          state.isRunning,
-        );
+        this.messageList.applySessionMessage(state.currentMessage, state.isRunning);
       }
     }
     if (!state.isRunning && !reasoning.present) this.reasoningTiming = undefined;
-    this.workingIndicator.sync(state, approvalPending);
+    const indicator = this.workingIndicator.sync(state, approvalPending);
+    this.promptEditor.setCursorBlinking(!indicator.spinning);
     this.footer.setStatus(state.isRunning ? "Busy" : "Idle");
     this.requestRender();
   }
@@ -238,96 +230,94 @@ export class ChatScreen {
   }
 
   pickThread(threads: ThreadSummary[]): Promise<string | null> {
-    return this.showOverlay<string | null>((finish) =>
-      new ThreadPickerOverlay({
-        threads,
-        onSelect: finish,
-        onCancel: () => finish(null),
-      }),
+    return this.showOverlay<string | null>(
+      (finish) =>
+        new ThreadPickerOverlay({
+          threads,
+          onSelect: finish,
+          onCancel: () => finish(null),
+        }),
     );
   }
 
-  pickModel(
-    catalog: ModelCatalog,
-    current: ModelState,
-  ): Promise<ModelSelection | null> {
+  pickModel(catalog: ModelCatalog, current: ModelState): Promise<ModelSelection | null> {
     const providers = Object.entries(catalog.providers).map(([id, provider]) => ({
       id,
       name: provider.name,
       models: provider.models,
     }));
-    return this.showOverlay<ModelSelection | null>((finish) =>
-      new ModelPickerComponent({
-        providers,
-        currentModelId: current.modelId,
-        currentReasoningEffort: current.reasoningEffort,
-        onSelect: finish,
-        onCancel: () => finish(null),
-      }),
+    return this.showOverlay<ModelSelection | null>(
+      (finish) =>
+        new ModelPickerComponent({
+          providers,
+          currentModelId: current.modelId,
+          currentReasoningEffort: current.reasoningEffort,
+          onSelect: finish,
+          onCancel: () => finish(null),
+        }),
     );
   }
 
   pickTheme(current: string): Promise<string | null> {
-    return this.showOverlay<string | null>((finish) =>
-      new ThemePickerOverlay({
-        currentThemeId: current,
-        onSelect: finish,
-        onCancel: () => finish(null),
-      }),
+    return this.showOverlay<string | null>(
+      (finish) =>
+        new ThemePickerOverlay({
+          currentThemeId: current,
+          onSelect: finish,
+          onCancel: () => finish(null),
+        }),
     );
   }
 
   pickTitle(current: string[]): Promise<string[] | null> {
-    return this.showOverlay<string[] | null>((finish) =>
-      new TitlePickerComponent({
-        initialSelection: current,
-        currentValues: {
-          model: this.infoBox.getModel(),
-          workspace: this.infoBox.getWorkspace(),
-          threadTitle: this.infoBox.getThreadTitle(),
-          threadId: this.infoBox.getThreadId(),
-          status: this.footer.getStatus(),
-        },
-        onSelect: finish,
-        onCancel: () => finish(null),
-      }),
+    return this.showOverlay<string[] | null>(
+      (finish) =>
+        new TitlePickerComponent({
+          initialSelection: current,
+          currentValues: {
+            model: this.infoBox.getModel(),
+            workspace: this.infoBox.getWorkspace(),
+            threadTitle: this.infoBox.getThreadTitle(),
+            threadId: this.infoBox.getThreadId(),
+            status: this.footer.getStatus(),
+          },
+          onSelect: finish,
+          onCancel: () => finish(null),
+        }),
     );
   }
 
   pickStatusLine(current: string[]): Promise<string[] | null> {
-    return this.showOverlay<string[] | null>((finish) =>
-      new StatusLinePickerComponent({
-        initialSelection: current,
-        currentValues: {
-          model: this.infoBox.getModel(),
-          workspace: this.infoBox.getWorkspace(),
-          agentMd: this.infoBox.getAgentMd(),
-          threadTitle: this.infoBox.getThreadTitle(),
-          threadId: this.infoBox.getThreadId(),
-          status: this.footer.getStatus(),
-        },
-        onSelect: finish,
-        onCancel: () => finish(null),
-      }),
+    return this.showOverlay<string[] | null>(
+      (finish) =>
+        new StatusLinePickerComponent({
+          initialSelection: current,
+          currentValues: {
+            model: this.infoBox.getModel(),
+            workspace: this.infoBox.getWorkspace(),
+            agentMd: this.infoBox.getAgentMd(),
+            threadTitle: this.infoBox.getThreadTitle(),
+            threadId: this.infoBox.getThreadId(),
+            status: this.footer.getStatus(),
+          },
+          onSelect: finish,
+          onCancel: () => finish(null),
+        }),
     );
   }
 
-  requestApproval(input: {
-    toolName: string;
-    args: unknown;
-  }): Promise<ToolApprovalDecision> {
-    return this.showOverlay<ToolApprovalDecision>((finish) =>
-      new ApprovalPicker({
-        toolName: input.toolName,
-        args: input.args,
-        onDecision: finish,
-      }),
+  requestApproval(input: { toolName: string; args: unknown }): Promise<ToolApprovalDecision> {
+    return this.showOverlay<ToolApprovalDecision>(
+      (finish) =>
+        new ApprovalPicker({
+          toolName: input.toolName,
+          args: input.args,
+          onDecision: finish,
+        }),
     );
   }
 
-  requestToolSuspension(
-    request: ToolSuspensionRequest,
-  ): Promise<ToolSuspensionResolution> {
+  requestToolSuspension(request: ToolSuspensionRequest): Promise<ToolSuspensionResolution> {
     return this.showOverlay<ToolSuspensionResolution>(
       (finish) => new ToolSuspensionPicker({ request, onResolve: finish }),
       (finish) => {
