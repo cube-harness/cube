@@ -15,10 +15,11 @@ import {
 } from "../src/memory.js";
 
 const createConfig = (): CubeConfig => ConfigSchema.parse({
-  version: 1,
+  version: 2,
+  gateway: "api_key/google",
   model: "google/gemini-3.7-flash",
   model_config: { reasoning_effort: "high" },
-  fallback_model: null,
+  gateway_options: {},
   theme: "dark",
   telemetry: false,
   soul: { max_characters: 20_000 },

@@ -56,8 +56,11 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
     await createBootstrap(home).run();
 
     const config = await ConfigStore(home).read();
-    assert.equal(config.version, 1);
-    assert.ok(config.model);
+    assert.equal(config.version, 2);
+    assert.equal(config.gateway, undefined);
+    assert.equal(config.model, undefined);
+    assert.equal(config.gateway_options["local/ollama"]?.base_url, "http://127.0.0.1:11434");
+    assert.equal(config.gateway_options["local/lmstudio"]?.base_url, "http://127.0.0.1:1234/v1");
     assert.deepEqual(config.memory.storage, {
       provider: "sqlite",
       mode: "local",
