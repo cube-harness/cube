@@ -3,7 +3,7 @@ import YAML from "yaml";
 import { ZodType } from "zod";
 import { atomicWriteFile } from "./atomic-write.js";
 import { HomeManager } from "../home-manager.js";
-import { ConfigSchema, CubeConfig } from "../schemas/config.schema.js";
+import { ConfigSchema, type CubeConfigDocument } from "../schemas/config.schema.js";
 import { ModelCatalog, ModelCatalogSchema } from "../schemas/model-catalog.schema.js";
 import { WorkspaceRegistry, WorkspaceRegistrySchema } from "../schemas/workspace.schema.js";
 import { History, HistoryEntry, HistorySchema } from "../schemas/history.schema.js";
@@ -46,7 +46,7 @@ export class Store<T> {
 }
 
 export const ConfigStore = (home: HomeManager) =>
-  new Store<CubeConfig>(home.getConfigPath(), "yaml", ConfigSchema);
+  new Store<CubeConfigDocument>(home.getConfigPath(), "yaml", ConfigSchema);
 
 export const ModelCatalogStore = (home: HomeManager) =>
   new Store<ModelCatalog>(home.getModelCatalogPath(), "json", ModelCatalogSchema);
