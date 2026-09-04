@@ -16,7 +16,8 @@ export {
   HistoryStore,
   AgentsStore,
 } from "./store/store.js";
-export { Bootstrap, createBootstrap, loadEnv } from "./bootstrap.js";
+export { Bootstrap, createBootstrap } from "./bootstrap.js";
+export { AuthStore } from "./store/auth.store.js";
 
 // Export Model Manager
 export { ModelManager, type ProviderCatalogItem } from "./model-manager.js";
@@ -28,5 +29,6 @@ export * from "./schemas/config.schema.js";
 export * from "./schemas/workspace.schema.js";
 export * from "./schemas/model-catalog.schema.js";
 export * from "./schemas/history.schema.js";
+export * from "./schemas/auth.schema.js";
 export { providers as snapshotProviders } from "@opencode-ai/models/snapshot";
 export * from "./constants.js";
