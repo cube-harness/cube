@@ -3,4 +3,9 @@ export { createModelsDevDelegate, type ModelsDevDelegate } from "./models-dev.de
 export { buildGatewayCatalog, type GatewayAvailability } from "./catalog.js";
 export { OllamaGateway, normalizeOllamaBaseUrl, type LocalGatewayOptions } from "./ollama.gateway.js";
 export { LMStudioGateway, normalizeLMStudioBaseUrl } from "./lmstudio.gateway.js";
+export {
+  OpenAISubscriptionGateway,
+  OPENAI_CODEX_BASE_URL,
+  selectOpenAISubscriptionModels,
+} from "./openai-subscription.gateway.js";
 export * from "./types.js";
