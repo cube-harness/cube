@@ -1,7 +1,7 @@
 import { Mastra } from "@mastra/core";
 import { LibSQLStore } from "@mastra/libsql";
 import { MastraStorageExporter, Observability } from "@mastra/observability";
-import type { CubeConfig, Home, WorkspaceManager } from "@cube/workspace";
+import type { CubeConfig, HomeManager, WorkspaceManager } from "@cube/workspace";
 import { createCubeAgent } from "./agents/main.agent.js";
 import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
@@ -16,13 +16,13 @@ export interface CubeMastraComposition {
 }
 
 export const createCubeMastra = async (
-  home: Home,
+  home: HomeManager,
   workspace: WorkspaceManager,
   config: CubeConfig,
 ): Promise<CubeMastraComposition> => {
   const logging = await createCubeLogger(home);
   const agent = await createCubeAgent(home, workspace, config, logging.logger);
-  const controller = await createCubeController(agent, workspace);
+  const controller = await createCubeController(home, workspace, config, agent);
   const mcpServer = createMcpServer();
 
   const mastra = new Mastra({

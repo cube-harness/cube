@@ -17,6 +17,28 @@ test("maps OpenRouter reasoning effort into the provider request", () => {
   });
 });
 
+test("enables OpenRouter reasoning when the catalog selects its default mode", () => {
+  const config = buildModelConfig(
+    "openrouter/poolside/laguna-s-2.1:free",
+    "default",
+  );
+
+  assert.deepEqual(config.providerOptions, {
+    openrouter: { reasoning: { enabled: true, exclude: false } },
+  });
+});
+
+test("explicitly disables OpenRouter reasoning when none is selected", () => {
+  const config = buildModelConfig(
+    "openrouter/poolside/laguna-s-2.1:free",
+    "none",
+  );
+
+  assert.deepEqual(config.providerOptions, {
+    openrouter: { reasoning: { effort: "none", exclude: false } },
+  });
+});
+
 test("maps Gemini 3 reasoning effort to thinkingLevel", () => {
   const config = buildModelConfig("google/gemini-3.7-flash", "high");
 

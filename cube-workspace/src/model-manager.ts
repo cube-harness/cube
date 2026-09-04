@@ -1,4 +1,4 @@
-import type { Home } from "./home.js";
+import type { HomeManager } from "./home-manager.js";
 import { ModelCatalogStore, ConfigStore } from "./store/store.js";
 import type { ModelCatalog, CatalogModel } from "./schemas/model-catalog.schema.js";
 import {
@@ -38,7 +38,7 @@ const isValidApiKey = (val?: string): boolean => {
 };
 
 export class ModelManager {
-  constructor(private readonly home: Home) {}
+  constructor(private readonly home: HomeManager) {}
 
   /**
    * Helper to check if a provider has active credentials in process.env.
@@ -243,7 +243,11 @@ export class ModelManager {
       const providerModels: CatalogModel[] = [];
       for (const [modelId, model] of Object.entries<any>(provider.models || {})) {
         let reasoningEfforts: string[] | undefined;
-        if (model.reasoning_options && Array.isArray(model.reasoning_options) && model.reasoning_options.length > 0) {
+        if (
+          model.reasoning_options &&
+          Array.isArray(model.reasoning_options) &&
+          model.reasoning_options.length > 0
+        ) {
           const effortOption = model.reasoning_options.find(
             (opt: any) => opt && opt.type === "effort" && Array.isArray(opt.values),
           );

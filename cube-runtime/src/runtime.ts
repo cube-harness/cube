@@ -66,7 +66,8 @@ export class CubeRuntime {
     if (
       !this.dependencies.session.run.isRunning() &&
       !this.dependencies.session.suspensions.hasPending()
-    ) return false;
+    )
+      return false;
     this.dependencies.session.abort();
     return true;
   }

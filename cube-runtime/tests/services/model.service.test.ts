@@ -109,7 +109,7 @@ test("ModelService delegates catalog reads, persists a valid selection, and appl
   }
 });
 
-test("ModelService removes persisted reasoning effort when none is selected", async () => {
+test("ModelService persists an explicit reasoning disable when none is selected", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-model-service-"));
   const home = new Home({ cubeHome: directory });
   await createBootstrap(home).run();
@@ -128,10 +128,13 @@ test("ModelService removes persisted reasoning effort when none is selected", as
   try {
     assert.deepEqual(
       await service.set({ modelId: reasoningModelId, reasoningEffort: "none" }),
-      { modelId: reasoningModelId },
+      { modelId: reasoningModelId, reasoningEffort: "none" },
     );
-    assert.equal((await ConfigStore(home).read()).model_config.reasoning_effort, undefined);
-    assert.deepEqual(service.current(), { modelId: reasoningModelId });
+    assert.equal((await ConfigStore(home).read()).model_config.reasoning_effort, "none");
+    assert.deepEqual(service.current(), {
+      modelId: reasoningModelId,
+      reasoningEffort: "none",
+    });
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

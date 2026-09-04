@@ -495,9 +495,7 @@ export class MessageList implements Component {
       const background = appTheme.surface.background;
       const userPrefix = appTheme.ui.primary.bgHex(background)("  ❯ ");
       const userIndent = appTheme.ui.text.bgHex(background)("    ");
-      const verticalPadding = appTheme.ui.text.bgHex(background)(
-        " ".repeat(availableWidth),
-      );
+      const verticalPadding = appTheme.ui.text.bgHex(background)(" ".repeat(availableWidth));
       const contentLines = msg.content.split(/\r?\n/);
 
       lines.push(verticalPadding);

@@ -1,10 +1,10 @@
 // Export Home & Paths
-export { Home, CubeHome, resolveCubeHome } from "./home.js";
-export type { HomeOptions, CubeWorkspacePaths } from "./home.js";
+export { HomeManager, CubeHome } from "./home-manager.js";
+export type { HomeOptions, CubeRoot } from "./home-manager.js";
 
 // Export Workspace Manager
-export { WorkspaceManager, Workspace } from "./workspace.js";
-export type { WorkspacePaths } from "./workspace.js";
+export { WorkspaceManager, CubeWorkspace, ContextFile } from "./workspace-manager.js";
+export type { CubeProject } from "./workspace-manager.js";
 
 // Export Stores & Bootstrap
 export {
@@ -14,6 +14,7 @@ export {
   WorkspaceRegistryStore,
   SoulStore,
   HistoryStore,
+  AgentsStore,
 } from "./store/store.js";
 export { Bootstrap, createBootstrap, loadEnv } from "./bootstrap.js";
 

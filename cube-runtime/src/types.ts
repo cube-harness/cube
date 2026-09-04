@@ -1,15 +1,9 @@
-import type {
-  AgentControllerDisplayState,
-  AgentControllerEvent,
-  Session,
-} from "@cube/agent";
+import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
 import type { ModelCatalog, ReasoningEffort } from "@cube/workspace";
 
 export type RuntimeEvent = AgentControllerEvent;
 export type RuntimeDisplayState = Readonly<AgentControllerDisplayState>;
-export type RuntimeMessage = Awaited<
-  ReturnType<Session["thread"]["listMessages"]>
->[number];
+export type RuntimeMessage = Awaited<ReturnType<Session["thread"]["listMessages"]>>[number];
 
 export type RuntimeNotice = {
   level: "info" | "error";

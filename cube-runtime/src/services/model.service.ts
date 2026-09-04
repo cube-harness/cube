@@ -1,15 +1,6 @@
 import type { Session } from "@cube/agent";
-import {
-  ConfigStore,
-  ModelManager,
-  type Home,
-  type ModelCatalog,
-} from "@cube/workspace";
-import type {
-  ModelSelection,
-  ModelState,
-  UsageMetrics,
-} from "../types.js";
+import { ConfigStore, ModelManager, type HomeManager, type ModelCatalog } from "@cube/workspace";
+import type { ModelSelection, ModelState, UsageMetrics } from "../types.js";
 
 type CatalogReader = Pick<ModelManager, "getCatalog">;
 
@@ -30,7 +21,7 @@ const copyState = (state: ModelState): ModelState => ({ ...state });
 
 export class ModelService {
   constructor(
-    private readonly home: Home,
+    private readonly home: HomeManager,
     private readonly session: Session,
     private state: ModelState,
     private readonly applyLiveModel: (selection: ModelSelection) => void,
@@ -63,15 +54,13 @@ export class ModelService {
         throw new Error(`Model ${selection.modelId} does not support reasoning`);
       }
       if (model.reasoning_efforts && !model.reasoning_efforts.includes(effort)) {
-        throw new Error(
-          `Model ${selection.modelId} does not support reasoning effort: ${effort}`,
-        );
+        throw new Error(`Model ${selection.modelId} does not support reasoning effort: ${effort}`);
       }
     }
 
     await ConfigStore(this.home).update((config) => {
       const modelConfig = { ...config.model_config };
-      if (effort && effort !== "none") {
+      if (effort) {
         modelConfig.reasoning_effort = effort;
       } else {
         delete modelConfig.reasoning_effort;
@@ -86,7 +75,7 @@ export class ModelService {
     this.applyLiveModel(copyState(selection));
     this.state = {
       modelId: selection.modelId,
-      ...(effort && effort !== "none" ? { reasoningEffort: effort } : {}),
+      ...(effort ? { reasoningEffort: effort } : {}),
     };
     return this.current();
   }
@@ -134,9 +123,7 @@ export class ModelService {
       contextLimit: model?.limit.context ?? 128_000,
       maxOutput: model?.limit.output,
       activeTurnTokens:
-        effectiveUsage?.raw?.inputTokens?.total ??
-        effectiveUsage?.raw?.raw?.promptTokenCount ??
-        0,
+        effectiveUsage?.raw?.inputTokens?.total ?? effectiveUsage?.raw?.raw?.promptTokenCount ?? 0,
       promptTokens: effectiveUsage?.promptTokens ?? 0,
       completionTokens: effectiveUsage?.completionTokens ?? 0,
       reasoningTokens: effectiveUsage?.reasoningTokens ?? 0,

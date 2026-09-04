@@ -39,7 +39,7 @@ export const cubeAskUserTool = createTool({
         await suspend({
           question,
           options,
-          multiple: options?.length ? multiple ?? false : false,
+          multiple: options?.length ? (multiple ?? false) : false,
         });
         return;
       }
@@ -47,10 +47,14 @@ export const cubeAskUserTool = createTool({
       return {
         content: [
           `[Question for user]: ${question}`,
-          options?.length ? `Suggested options: ${options.map((option) => option.label).join(", ")}` : "",
+          options?.length
+            ? `Suggested options: ${options.map((option) => option.label).join(", ")}`
+            : "",
           "The user may enter a custom answer.",
           options?.length && multiple ? "Multiple answers are allowed." : "",
-        ].filter(Boolean).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
         isError: false,
       };
     } catch (error) {

@@ -8,7 +8,7 @@ export interface HomeOptions {
   userHome?: string;
 }
 
-export interface CubeWorkspacePaths {
+export interface CubeRoot {
   root: string;
   memoryDir: string;
   logDir: string;
@@ -23,13 +23,13 @@ export interface CubeWorkspacePaths {
   workspaceFile: string;
 }
 
-export class Home {
+export class HomeManager {
   private readonly userHome: string;
   private readonly root: string;
 
   constructor(options: HomeOptions = {}) {
     this.userHome = options.userHome?.trim() || os.homedir();
-    const raw = options.cubeHome?.trim() || path.join(this.userHome, HOME_PATHS.home);
+    const raw = options.cubeHome?.trim() || path.join(this.userHome, HOME_PATHS.ROOT);
     this.root = path.resolve(raw);
   }
 
@@ -42,58 +42,62 @@ export class Home {
   }
 
   getMemoryDir(): string {
-    return path.join(this.root, HOME_PATHS.memories);
+    return path.join(this.root, HOME_PATHS.MEMORIES);
   }
 
   getLogDir(): string {
-    return path.join(this.root, HOME_PATHS.logs);
+    return path.join(this.root, HOME_PATHS.LOGS);
   }
 
   getSkillDir(): string {
-    return path.join(this.root, HOME_PATHS.skills);
+    return path.join(this.root, HOME_PATHS.SKILLS);
+  }
+
+  getAgentsPath(): string {
+    return path.join(this.root, HOME_FILES.AGENTS);
   }
 
   getMemoryDbPath(): string {
-    return path.join(this.getMemoryDir(), HOME_FILES.memoryDb);
+    return path.join(this.getMemoryDir(), HOME_FILES.MEMORY_DB);
   }
 
   getSoulPath(): string {
-    return path.join(this.root, HOME_FILES.soul);
+    return path.join(this.root, HOME_FILES.SOUL);
   }
 
   getAuthPath(): string {
-    return path.join(this.root, HOME_FILES.auth);
+    return path.join(this.root, HOME_FILES.AUTH);
   }
 
   getConfigPath(): string {
-    return path.join(this.root, HOME_FILES.config);
+    return path.join(this.root, HOME_FILES.CONFIG);
   }
 
   getHistoryPath(): string {
-    return path.join(this.root, HOME_FILES.history);
+    return path.join(this.root, HOME_FILES.HISTORY);
   }
 
   getMcpPath(): string {
-    return path.join(this.root, HOME_FILES.mcp);
+    return path.join(this.root, HOME_FILES.MCP);
   }
 
   getModelCatalogPath(): string {
-    return path.join(this.root, HOME_FILES.modelCatalog);
+    return path.join(this.root, HOME_FILES.MODEL_CATALOG);
   }
 
   getWorkspacePath(): string {
-    return path.join(this.root, HOME_FILES.workspace);
+    return path.join(this.root, HOME_FILES.WORKSPACE);
   }
 
   getSoulMaxCharacters(): number {
-    return HOME_LIMITS.soulMaxCharacters;
+    return HOME_LIMITS.SOUL_MAX_CHARACTERS;
   }
 
   getModelCatalogTtlMs(): number {
-    return HOME_LIMITS.modelCatalogTtlMs;
+    return HOME_LIMITS.MODEL_CATALOG_TTL_MS;
   }
 
-  getPaths(): CubeWorkspacePaths {
+  getPaths(): CubeRoot {
     return {
       root: this.getRoot(),
       memoryDir: this.getMemoryDir(),
@@ -110,7 +114,7 @@ export class Home {
     };
   }
 
-  async ensure(): Promise<CubeWorkspacePaths> {
+  async ensure(): Promise<CubeRoot> {
     await mkdir(this.getRoot(), { recursive: true });
     await mkdir(this.getMemoryDir(), { recursive: true });
     await mkdir(this.getLogDir(), { recursive: true });
@@ -128,10 +132,7 @@ export class Home {
   }
 }
 
-export function CubeHome(options?: HomeOptions): Home {
-  return new Home(options);
+export function CubeHome(options?: HomeOptions): HomeManager {
+  return new HomeManager(options);
 }
 
-export function resolveCubeHome(options?: HomeOptions): string {
-  return new Home(options).getRoot();
-}

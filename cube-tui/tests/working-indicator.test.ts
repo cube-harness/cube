@@ -15,7 +15,7 @@ const state = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-test("indicator distinguishes approval, tools, memory, reasoning, and text streaming", () => {
+test("indicator distinguishes approval, tools, memory, and reasoning", () => {
   assert.deepEqual(
     deriveWorkingIndicatorState(
       state({
@@ -62,7 +62,9 @@ test("indicator distinguishes approval, tools, memory, reasoning, and text strea
     ),
     { visible: true, spinning: true, phase: "thinking", message: "Thinking" },
   );
+});
 
+test("indicator hides once assistant text is visibly streaming", () => {
   assert.deepEqual(
     deriveWorkingIndicatorState(
       state({
@@ -73,7 +75,7 @@ test("indicator distinguishes approval, tools, memory, reasoning, and text strea
       }) as never,
       false,
     ),
-    { visible: true, spinning: true, phase: "streaming", message: "Responding" },
+    { visible: false, spinning: false, phase: "streaming", message: "Responding" },
   );
 });
 

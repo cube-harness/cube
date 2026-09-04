@@ -1,10 +1,6 @@
 import crypto from "node:crypto";
 import type { Session } from "@cube/agent";
-import type {
-  RuntimeMessage,
-  ThreadSnapshot,
-  ThreadSummary,
-} from "../types.js";
+import type { RuntimeMessage, ThreadSnapshot, ThreadSummary } from "../types.js";
 
 const activeRunError = (operation: string): Error =>
   new Error(`Cannot ${operation} while an agent turn is active`);
@@ -29,17 +25,16 @@ const extractAssistantText = (messages: RuntimeMessage[]): string | null => {
         ? message.content.parts
         : [];
     const text = parts
-      .filter(
-        (part): part is { type: "text"; text: string } =>
-          Boolean(
-            part &&
-              typeof part === "object" &&
-              "type" in part &&
-              part.type === "text" &&
-              "text" in part &&
-              typeof part.text === "string" &&
-              part.text.trim(),
-          ),
+      .filter((part): part is { type: "text"; text: string } =>
+        Boolean(
+          part &&
+          typeof part === "object" &&
+          "type" in part &&
+          part.type === "text" &&
+          "text" in part &&
+          typeof part.text === "string" &&
+          part.text.trim(),
+        ),
       )
       .map((part) => part.text.trim())
       .join("\n\n");
