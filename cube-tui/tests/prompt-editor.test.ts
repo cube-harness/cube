@@ -117,3 +117,42 @@ test("PromptEditor cancels queued prompts newest first while draining stays FIFO
   assert.equal(editor.popQueuedPrompt(), "third");
   assert.deepEqual(editor.dequeueQueuedPrompts(2), ["first", "second"]);
 });
+
+test("PromptEditor stops cursor blink renders while blinking is disabled", () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let tick: (() => void) | undefined;
+  const timer = { unref() {} } as NodeJS.Timeout;
+  globalThis.setInterval = ((callback: () => void) => {
+    tick = callback;
+    return timer;
+  }) as typeof globalThis.setInterval;
+  globalThis.clearInterval = (() => undefined) as typeof globalThis.clearInterval;
+
+  let renders = 0;
+  const editor = new PromptEditor({
+    tui: { requestRender: () => { renders += 1; } } as any,
+    onSubmit: () => undefined,
+  });
+
+  try {
+    editor.focused = true;
+    const rendersBeforeTick = renders;
+    tick?.();
+    assert.equal(renders, rendersBeforeTick + 1);
+
+    editor.setCursorBlinking(false);
+    const rendersAfterDisable = renders;
+    tick?.();
+    assert.equal(renders, rendersAfterDisable);
+
+    editor.setCursorBlinking(true);
+    const rendersBeforeEnabledTick = renders;
+    tick?.();
+    assert.equal(renders, rendersBeforeEnabledTick + 1);
+  } finally {
+    editor.focused = false;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});

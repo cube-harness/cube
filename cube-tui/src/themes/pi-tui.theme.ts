@@ -60,7 +60,7 @@ export const createMarkdownTheme = (
       : ((options as { syntaxTheme?: SyntaxTheme })?.syntaxTheme ?? getSyntaxTheme());
 
   return {
-    heading: (s) => resolvedAppTheme.markdown.heading(s),
+    heading: (s) => resolvedAppTheme.markdown.heading(stripForegroundColors(s)),
     link: (s) => resolvedAppTheme.markdown.link(stripForegroundColors(s)),
     linkUrl: (s) => resolvedAppTheme.markdown.linkUrl(s),
     code: (s) =>
@@ -71,7 +71,7 @@ export const createMarkdownTheme = (
     quoteBorder: (s) => resolvedAppTheme.markdown.quoteBorder(s),
     hr: (s) => resolvedAppTheme.ui.border(s),
     listBullet: (s) => resolvedAppTheme.markdown.listBullet(s),
-    bold: (s) => chalk.bold(s),
+    bold: (s) => resolvedAppTheme.markdown.bold(stripForegroundColors(s)),
     italic: (s) => chalk.italic(s),
     strikethrough: (s) => resolvedAppTheme.markdown.strikethrough(s),
     underline: (s) => chalk.underline(s),

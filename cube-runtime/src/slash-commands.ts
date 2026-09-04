@@ -58,7 +58,7 @@ const definitions: SlashCommandDefinition[] = [
   {
     name: "/resume",
     aliases: ["/threads"],
-    description: "Switch to a previous conversation thread",
+    description: "Switch to a previous conversation",
     execute: async (argument, context) => {
       if (argument) {
         return {
@@ -75,7 +75,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/new",
-    description: "Start a new conversation thread",
+    description: "Start a new conversation",
     execute: async (_argument, context) => {
       await context.thread.create();
       return { kind: "thread-reset" };
@@ -104,7 +104,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/model",
-    description: "View and select models",
+    description: "Choose what model and reasoning effort to use",
     execute: async (argument, context) => {
       if (!argument) {
         const catalog = await context.model.list();
@@ -126,7 +126,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/rename",
-    description: "Rename current thread (/rename <title>)",
+    description: "Rename current conversation /rename <title>",
     execute: async (argument, context) => {
       const result = await context.thread.rename(argument);
       return {
@@ -137,7 +137,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/delete",
-    description: "Delete a conversation thread",
+    description: "Delete a conversation",
     execute: async (argument, context) => {
       if (!argument) {
         return {
@@ -156,7 +156,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/fork",
-    description: "Clone current thread into a new branch",
+    description: "Fork current conversation into a new branch",
     execute: async (argument, context) => ({
       kind: "thread",
       snapshot: await context.thread.fork(argument || undefined),
@@ -173,7 +173,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/theme",
-    description: "Change color scheme (/theme [name])",
+    description: "Choose a syntax highlighting theme /theme [name]",
     execute: async (argument, context) => {
       if (argument) {
         return {
@@ -203,7 +203,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/title",
-    description: "Configure terminal title",
+    description: "Configure which items appear in the terminal title",
     execute: async (argument, context) => {
       const fields = parseFields(argument);
       if (fields.length > 0) {
@@ -220,7 +220,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/statusline",
-    description: "Configure footer status line",
+    description: "Configure which items appear in the status line",
     execute: async (argument, context) => {
       const fields = parseFields(argument);
       if (fields.length > 0) {

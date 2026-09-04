@@ -93,7 +93,7 @@ const DISPLAY_NAMES: Record<string, string> = {
 export const formatBinding = (binding: Keybinding): string =>
   getKeybindings()
     .getKeys(binding)
-    .map((key) => DISPLAY_NAMES[key] ?? key.replace(/^ctrl\+(.+)$/i, (_, value: string) => `Ctrl+${value.toUpperCase()}`))
+    .map((key) => DISPLAY_NAMES[key] ?? key.replace(/^ctrl\+(.+)$/i, (_, value: string) => `ctrl+${value.toLowerCase()}`))
     .join("/");
 
 // Package bootstrap: every exported Cube component observes the same registry,

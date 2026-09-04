@@ -29,6 +29,7 @@ export class PromptEditor implements Component, Focusable {
   private historyIndex: number = -1;
   private currentDraft: string = "";
   private isBright: boolean = true;
+  private cursorBlinkingEnabled: boolean = true;
   private blinkTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
 
@@ -79,8 +80,9 @@ export class PromptEditor implements Component, Focusable {
   private startBlinking(): void {
     this.stopBlinking();
     this.isBright = true;
+    if (!this.cursorBlinkingEnabled) return;
     this.blinkTimer = setInterval(() => {
-      if (!this.focused) return;
+      if (!this.focused || !this.cursorBlinkingEnabled) return;
       this.isBright = !this.isBright;
       this.tui.requestRender();
     }, 530);
@@ -107,8 +109,9 @@ export class PromptEditor implements Component, Focusable {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
     }
+    if (!this.cursorBlinkingEnabled) return;
     this.idleTimer = setTimeout(() => {
-      if (this.focused) {
+      if (this.focused && this.cursorBlinkingEnabled) {
         this.startBlinking();
       }
     }, 500);
@@ -125,6 +128,21 @@ export class PromptEditor implements Component, Focusable {
       this.startBlinking();
     } else {
       this.stopBlinking();
+    }
+  }
+
+  setCursorBlinking(enabled: boolean): void {
+    if (this.cursorBlinkingEnabled === enabled) return;
+    this.cursorBlinkingEnabled = enabled;
+    if (enabled && this.focused) {
+      this.startBlinking();
+      return;
+    }
+
+    this.stopBlinking();
+    if (!this.isBright) {
+      this.isBright = true;
+      this.tui.requestRender();
     }
   }
 

@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth} from "@earendil-works/pi-tui";
 import chalk, { type ChalkInstance } from "chalk";
 import { appTheme } from "../themes/app.theme.js";
 
@@ -180,6 +180,7 @@ export class InfoBox implements Component {
     }
 
     renderedLines.push(bottomLine);
+    renderedLines.push("");
     return renderedLines;
   };
 }

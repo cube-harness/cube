@@ -132,7 +132,7 @@ export const createCubeAgent = async (
   const effort = config.model_config?.reasoning_effort;
   const ollamaUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
   const modelConfig = buildModelConfig(config.model, effort, ollamaUrl);
-  const mastraWorkspace = await createMastraWorkspace(home, workspace);
+  const mastraWorkspace = await createMastraWorkspace(workspace);
 
   const agent = createCodingAgent({
     id: "cube-agent",
@@ -140,6 +140,7 @@ export const createCubeAgent = async (
     model: [modelConfig as any],
     instructions: soul,
     workspace: mastraWorkspace,
+    skills: [home.getSkillDir()],
     basePath: paths.root,
     tools: {
       // search: webSearchTool,

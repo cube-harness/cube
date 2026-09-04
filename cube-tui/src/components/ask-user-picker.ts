@@ -19,7 +19,6 @@ export type AskUserPayload = {
   question: string;
   options?: AskUserOption[];
   multiple?: boolean;
-  /** Compatibility with suspensions created by Mastra's former built-in tool. */
   selectionMode?: "single_select" | "multi_select";
 };
 
@@ -32,28 +31,28 @@ export type AskUserPickerOptions = {
 };
 
 const normalizePayload = (value: unknown): AskUserPayload => {
-  const record = typeof value === "object" && value !== null
-    ? value as Record<string, unknown>
-    : {};
+  const record =
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const options = Array.isArray(record.options)
     ? record.options.flatMap((option) => {
         if (typeof option !== "object" || option === null) return [];
         const item = option as Record<string, unknown>;
         if (typeof item.label !== "string" || !item.label.trim()) return [];
-        return [{
-          label: item.label,
-          ...(typeof item.description === "string"
-            ? { description: item.description }
-            : {}),
-        }];
+        return [
+          {
+            label: item.label,
+            ...(typeof item.description === "string" ? { description: item.description } : {}),
+          },
+        ];
       })
     : undefined;
   const multiple = record.multiple === true || record.selectionMode === "multi_select";
 
   return {
-    question: typeof record.question === "string" && record.question.trim()
-      ? record.question
-      : "The agent is waiting for your input.",
+    question:
+      typeof record.question === "string" && record.question.trim()
+        ? record.question
+        : "The agent is waiting for your input.",
     ...(options?.length ? { options } : {}),
     ...(options?.length ? { multiple } : {}),
   };
@@ -110,9 +109,7 @@ export class AskUserPicker implements Component, Focusable {
     }
 
     if (matchesBinding(data, "tui.select.up")) {
-      this.selectedIndex = this.selectedIndex === 0
-        ? options.length - 1
-        : this.selectedIndex - 1;
+      this.selectedIndex = this.selectedIndex === 0 ? options.length - 1 : this.selectedIndex - 1;
     } else if (matchesBinding(data, "tui.select.down")) {
       if (this.selectedIndex === options.length - 1) {
         this.focusInput();
@@ -142,8 +139,9 @@ export class AskUserPicker implements Component, Focusable {
     const contentWidth = Math.max(1, width - 4);
     const lines: string[] = [""];
     lines.push(
-      ...wrapTextWithAnsi(appTheme.ui.text.bold(this.payload.question), contentWidth)
-        .map((line) => truncateToWidth(line, contentWidth)),
+      ...wrapTextWithAnsi(appTheme.ui.text.bold(this.payload.question), contentWidth).map((line) =>
+        truncateToWidth(line, contentWidth),
+      ),
       "",
     );
 
@@ -152,22 +150,37 @@ export class AskUserPicker implements Component, Focusable {
       const option = options[index]!;
       const active = this.focus === "options" && index === this.selectedIndex;
       const cursor = active ? "❯" : " ";
-      const checked = this.payload.multiple
-        ? `${this.selected.has(index) ? "[x]" : "[ ]"} `
-        : "";
-      lines.push(...this.renderChoice(
-        `${cursor} ${checked}${option.label}`,
-        option.description,
-        active,
-        contentWidth,
-      ));
+      const checked = this.payload.multiple ? `${this.selected.has(index) ? "[x]" : "[ ]"} ` : "";
+      lines.push(
+        ...this.renderChoice(
+          `${cursor} ${checked}${option.label}`,
+          option.description,
+          active,
+          contentWidth,
+        ),
+      );
     }
 
     lines.push("");
-    lines.push(appTheme.ui.muted("Write your answer..."));
     this.input.focused = this.focused && this.focus === "input";
-    lines.push(...this.input.render(contentWidth));
+
+    const isInputFocused = this.focus === "input";
+    const prefix = isInputFocused ? appTheme.ui.primary.bold("❯ ") : "  ";
+
+    if (this.input.getValue().length === 0) {
+      const placeholderText = isInputFocused
+        ? appTheme.ui.text("Write your answer...")
+        : appTheme.ui.muted("Write your answer...");
+      lines.push(`${prefix}${placeholderText}`);
+    } else {
+      lines.push(
+        ...this.input
+          .render(contentWidth)
+          .map((line) => (line.startsWith("> ") ? `${prefix}${line.slice(2)}` : line)),
+      );
+    }
     lines.push("");
+
     const controls = this.payload.multiple
       ? `${formatBinding("cube.askUser.toggle")}: Toggle • ${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}: Navigate • ${formatBinding("tui.select.confirm")}: Submit • ${formatBinding("tui.select.cancel")}: Cancel`
       : `${formatBinding("tui.select.up")}/${formatBinding("tui.select.down")}: Navigate • ${formatBinding("tui.select.confirm")}: Select/Submit • ${formatBinding("tui.select.cancel")}: Cancel`;
@@ -200,9 +213,7 @@ export class AskUserPicker implements Component, Focusable {
   private submitSelected(customAnswer?: string): void {
     const options = this.payload.options ?? [];
     const answers = [
-      ...options
-        .filter((_, index) => this.selected.has(index))
-        .map((option) => option.label),
+      ...options.filter((_, index) => this.selected.has(index)).map((option) => option.label),
       ...(customAnswer ? [customAnswer] : []),
     ];
     if (answers.length > 0) this.options.onAnswer(answers);
@@ -221,10 +232,7 @@ export class AskUserPicker implements Component, Focusable {
     const gap = "  ";
     const labelWidth = visibleWidth(styledLabel);
     const descriptionWidth = Math.max(1, width - labelWidth - gap.length);
-    const descriptionLines = wrapTextWithAnsi(
-      appTheme.ui.muted(description),
-      descriptionWidth,
-    );
+    const descriptionLines = wrapTextWithAnsi(appTheme.ui.muted(description), descriptionWidth);
     const first = `${styledLabel}${gap}${descriptionLines[0] ?? ""}`;
     const indent = " ".repeat(labelWidth + gap.length);
     return [
