@@ -1,6 +1,6 @@
 import { access, copyFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { Home } from "./home.js";
+import { HomeManager } from "./home-manager.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { HOME_FILES } from "./constants.js";
@@ -40,17 +40,17 @@ export const loadEnv = (searchDirs?: string[]): void => {
 };
 
 export class Bootstrap {
-  constructor(private readonly home: Home) {}
+  constructor(private readonly home: HomeManager) {}
 
   async run(): Promise<void> {
     await this.home.ensure();
     loadEnv([this.home.getRoot(), process.env.INIT_CWD || process.cwd(), process.cwd()]);
-    await this.seedFromTemplate(HOME_FILES.config, this.home.getConfigPath());
-    await this.seedFromTemplate(HOME_FILES.auth, this.home.getAuthPath());
-    await this.seedFromTemplate(HOME_FILES.mcp, this.home.getMcpPath());
-    await this.seedFromTemplate(HOME_FILES.workspace, this.home.getWorkspacePath());
-    await this.seedFromTemplate(HOME_FILES.soul, this.home.getSoulPath());
-    await this.seedFromTemplate(HOME_FILES.history, this.home.getHistoryPath());
+    await this.seedFromTemplate(HOME_FILES.CONFIG, this.home.getConfigPath());
+    await this.seedFromTemplate(HOME_FILES.AUTH, this.home.getAuthPath());
+    await this.seedFromTemplate(HOME_FILES.MCP, this.home.getMcpPath());
+    await this.seedFromTemplate(HOME_FILES.WORKSPACE, this.home.getWorkspacePath());
+    await this.seedFromTemplate(HOME_FILES.SOUL, this.home.getSoulPath());
+    await this.seedFromTemplate(HOME_FILES.HISTORY, this.home.getHistoryPath());
   }
 
   private async fileExists(p: string): Promise<boolean> {
@@ -73,6 +73,6 @@ export class Bootstrap {
   }
 }
 
-export function createBootstrap(home: Home): Bootstrap {
+export function createBootstrap(home: HomeManager): Bootstrap {
   return new Bootstrap(home);
 }

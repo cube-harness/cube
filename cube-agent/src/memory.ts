@@ -1,7 +1,7 @@
 import { ModelRouterEmbeddingModel } from "@mastra/core/llm";
 import { LibSQLVector } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import type { CubeConfig, Home } from "@cube/workspace";
+import type { CubeConfig, HomeManager } from "@cube/workspace";
 
 type MastraMemoryOptions = NonNullable<
   NonNullable<ConstructorParameters<typeof Memory>[0]>["options"]
@@ -69,10 +69,7 @@ export const finalizeCubeAgentMemory = async (
     };
   }
 
-  const { activated, observed, reflected } = (await finalize.call(
-    engine,
-    input,
-  )) as {
+  const { activated, observed, reflected } = (await finalize.call(engine, input)) as {
     activated: boolean;
     observed: boolean;
     reflected: boolean;
@@ -80,7 +77,7 @@ export const finalizeCubeAgentMemory = async (
   return { enabled: true, activated, observed, reflected };
 };
 
-export const createMemory = (config: CubeConfig, home: Home): Memory => {
+export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
   const memoryConfig = config.memory;
   const wm = memoryConfig.working_memory;
   const om = memoryConfig.observational_memory;

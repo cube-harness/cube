@@ -3,10 +3,9 @@ import type { IMastraLogger } from "@mastra/core/logger";
 import {
   SoulStore,
   type CubeConfig,
-  type Home,
+  type HomeManager,
   type WorkspaceManager,
 } from "@cube/workspace";
-import { createMemory } from "../memory.js";
 import { createOllama } from "ollama-ai-provider-v2";
 import { createMastraWorkspace } from "../workspace.js";
 import { webFetchTool, webSearchTool } from "@mastra/core/tools";
@@ -85,7 +84,9 @@ export const buildModelConfig = (
       providerOptions.openai = { reasoningEffort: effort, reasoningSummary: "auto" };
     }
   } else if (modelId.startsWith("openrouter/")) {
-    if (effort && effort !== "default") {
+    if (effort === "default") {
+      providerOptions.openrouter = { reasoning: { enabled: true, exclude: false } };
+    } else if (effort) {
       providerOptions.openrouter = { reasoning: { effort, exclude: false } };
     }
   }
@@ -114,14 +115,14 @@ export const updateCubeAgentSoul = (agent: any, soul: string): void => {
   agent.instructions = soul;
 };
 
-export const reloadCubeAgentSoul = async (agent: any, home: Home): Promise<string> => {
+export const reloadCubeAgentSoul = async (agent: any, home: HomeManager): Promise<string> => {
   const soul = await SoulStore(home).read();
   updateCubeAgentSoul(agent, soul);
   return soul;
 };
 
 export const createCubeAgent = async (
-  home: Home,
+  home: HomeManager,
   workspace: WorkspaceManager,
   config: CubeConfig,
   logger?: IMastraLogger,
@@ -131,14 +132,13 @@ export const createCubeAgent = async (
   const effort = config.model_config?.reasoning_effort;
   const ollamaUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
   const modelConfig = buildModelConfig(config.model, effort, ollamaUrl);
-  const mastraWorkspace = await createMastraWorkspace(workspace);
+  const mastraWorkspace = await createMastraWorkspace(home, workspace);
 
   const agent = createCodingAgent({
     id: "cube-agent",
     name: "Cube Agent",
     model: [modelConfig as any],
     instructions: soul,
-    memory: createMemory(config, home),
     workspace: mastraWorkspace,
     basePath: paths.root,
     tools: {

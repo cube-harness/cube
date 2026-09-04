@@ -11,16 +11,13 @@ import {
 import {
   ConfigStore,
   CubeHome,
+  CubeWorkspace,
   HistoryStore,
-  Workspace,
   createBootstrap,
-  type Home,
+  type HomeManager,
 } from "@cube/workspace";
 import { CubeRuntime } from "./runtime.js";
-import {
-  slashCommandSuggestions,
-  type SlashCommandContext,
-} from "./slash-commands.js";
+import { slashCommandSuggestions, type SlashCommandContext } from "./slash-commands.js";
 import { MemoryService } from "./services/memory.service.js";
 import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
@@ -29,7 +26,7 @@ import { ThreadService } from "./services/thread.service.js";
 
 export type CreateCubeRuntimeOptions = {
   workspacePath?: string;
-  home?: Home;
+  home?: HomeManager;
 };
 
 const normalizeStartupSession = async (session: Session): Promise<void> => {
@@ -48,14 +45,13 @@ export const createCubeRuntime = async (
   options: CreateCubeRuntimeOptions = {},
 ): Promise<CubeRuntime> => {
   const home = options.home ?? CubeHome();
-  const workspacePath =
-    options.workspacePath || process.env.INIT_CWD || process.cwd();
+  const workspacePath = options.workspacePath || process.env.INIT_CWD || process.cwd();
   let composition: CubeMastraComposition | undefined;
 
   try {
     await home.ensure();
     await createBootstrap(home).run();
-    const workspace = Workspace(home, workspacePath);
+    const workspace = CubeWorkspace(home, workspacePath);
     const workspacePaths = await workspace.getPaths();
     const config = await ConfigStore(home).read();
     composition = await createCubeMastra(home, workspace, config);
@@ -77,11 +73,7 @@ export const createCubeRuntime = async (
         reasoningEffort: config.model_config.reasoning_effort,
       },
       (selection) =>
-        updateCubeAgentModel(
-          composition!.agent,
-          selection.modelId,
-          selection.reasoningEffort,
-        ),
+        updateCubeAgentModel(composition!.agent, selection.modelId, selection.reasoningEffort),
     );
     const preference = new PreferenceService(home, {
       theme: config.theme,
@@ -97,16 +89,10 @@ export const createCubeRuntime = async (
       preference,
       memory,
     };
-    const prompt = new PromptService(
-      home,
-      session,
-      thread,
-      commands,
-      (callback) => {
-        const threadId = session.thread.getId();
-        return runWithCubeLogContext(threadId ? { threadId } : {}, callback);
-      },
-    );
+    const prompt = new PromptService(home, session, thread, commands, (callback) => {
+      const threadId = session.thread.getId();
+      return runWithCubeLogContext(threadId ? { threadId } : {}, callback);
+    });
 
     return new CubeRuntime({
       session,
@@ -117,8 +103,7 @@ export const createCubeRuntime = async (
       memory,
       suggestions: slashCommandSuggestions,
       workspaceRoot: workspacePaths.root,
-      readHistory: async () =>
-        (await HistoryStore(home).read()).map((entry) => entry.text),
+      readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
       shutdownResources: () => composition!.shutdown(),
     });
   } catch (error) {

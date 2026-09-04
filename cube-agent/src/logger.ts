@@ -4,7 +4,7 @@ import path from "node:path";
 import type { TransformCallback } from "node:stream";
 import { LoggerTransport } from "@mastra/core/logger";
 import { PinoLogger } from "@mastra/loggers";
-import type { Home } from "@cube/workspace";
+import type { HomeManager } from "@cube/workspace";
 
 export interface CubeLogContext {
   threadId?: string;
@@ -67,7 +67,7 @@ class CubeFileTransport extends LoggerTransport {
   }
 }
 
-export const createCubeLogger = async (home: Home): Promise<CubeLogging> => {
+export const createCubeLogger = async (home: HomeManager): Promise<CubeLogging> => {
   const logDir = home.getLogDir();
   const threadLogDir = path.join(logDir, "threads");
   const globalLogFile = path.join(logDir, "cube.log");

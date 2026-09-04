@@ -1,4 +1,4 @@
-import { ConfigStore, type Home } from "@cube/workspace";
+import { ConfigStore, type HomeManager } from "@cube/workspace";
 import type { PreferenceState } from "../types.js";
 
 const copyState = (state: PreferenceState): PreferenceState => ({
@@ -11,7 +11,7 @@ export class PreferenceService {
   private state: PreferenceState;
 
   constructor(
-    private readonly home: Home,
+    private readonly home: HomeManager,
     state: PreferenceState,
   ) {
     this.state = copyState(state);

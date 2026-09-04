@@ -121,7 +121,7 @@ export const deriveWorkingIndicatorState = (
     (part) => isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.length > 0,
   );
   if (hasText) {
-    return { visible: true, spinning: true, phase: "streaming", message: "Responding" };
+    return { visible: false, spinning: false, phase: "streaming", message: "Responding" };
   }
   const hasReasoning = parts.some(
     (part) => isRecord(part) && part.type === "reasoning",

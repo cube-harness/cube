@@ -2,7 +2,7 @@ import { readFile, appendFile } from "node:fs/promises";
 import YAML from "yaml";
 import { ZodType } from "zod";
 import { atomicWriteFile } from "./atomic-write.js";
-import { Home } from "../home.js";
+import { HomeManager } from "../home-manager.js";
 import { ConfigSchema, CubeConfig } from "../schemas/config.schema.js";
 import { ModelCatalog, ModelCatalogSchema } from "../schemas/model-catalog.schema.js";
 import { WorkspaceRegistry, WorkspaceRegistrySchema } from "../schemas/workspace.schema.js";
@@ -45,24 +45,25 @@ export class Store<T> {
   }
 }
 
-export const ConfigStore = (home: Home) =>
+export const ConfigStore = (home: HomeManager) =>
   new Store<CubeConfig>(home.getConfigPath(), "yaml", ConfigSchema);
 
-export const ModelCatalogStore = (home: Home) =>
+export const ModelCatalogStore = (home: HomeManager) =>
   new Store<ModelCatalog>(home.getModelCatalogPath(), "json", ModelCatalogSchema);
 
-export const WorkspaceRegistryStore = (home: Home) =>
+export const WorkspaceRegistryStore = (home: HomeManager) =>
   new Store<WorkspaceRegistry>(home.getWorkspacePath(), "json", WorkspaceRegistrySchema);
 
-export const SoulStore = (home: Home) => {
+export const AgentsStore = (home: HomeManager) =>
+  new Store<string>(home.getAgentsPath(), "text");
+
+export const SoulStore = (home: HomeManager) => {
   const store = new Store<string>(home.getSoulPath(), "text");
   const maxCharacters = home.getSoulMaxCharacters();
 
   const validateCharacters = (content: string): void => {
     if (content.length > maxCharacters) {
-      throw new Error(
-        `SOUL.md exceeds max length (${content.length}/${maxCharacters} characters)`,
-      );
+      throw new Error(`SOUL.md exceeds max length (${content.length}/${maxCharacters} characters)`);
     }
   };
 
@@ -80,7 +81,7 @@ export const SoulStore = (home: Home) => {
   };
 };
 
-export const HistoryStore = (home: Home) => {
+export const HistoryStore = (home: HomeManager) => {
   const store = new Store<string>(home.getHistoryPath(), "text");
 
   return {

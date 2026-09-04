@@ -1,5 +1,5 @@
 import type { Session } from "@cube/agent";
-import { HistoryStore, type Home } from "@cube/workspace";
+import { HistoryStore, type HomeManager } from "@cube/workspace";
 import {
   executeSlashCommand,
   parseSlashCommand,
@@ -8,13 +8,11 @@ import {
 import type { PromptResult } from "../types.js";
 import type { ThreadService } from "./thread.service.js";
 
-type QueuedFollowUp = NonNullable<
-  ReturnType<Session["followUps"]["dequeue"]>
->;
+type QueuedFollowUp = NonNullable<ReturnType<Session["followUps"]["dequeue"]>>;
 
 export class PromptService {
   constructor(
-    private readonly home: Home,
+    private readonly home: HomeManager,
     private readonly session: Session,
     private readonly thread: ThreadService,
     private readonly commands: SlashCommandContext,
@@ -40,9 +38,7 @@ export class PromptService {
 
     const threadId = await this.thread.ensureForPrompt(trimmed);
     await this.appendHistory(trimmed, threadId);
-    await this.runWithThreadLogContext(() =>
-      this.session.followUp({ content: trimmed }),
-    );
+    await this.runWithThreadLogContext(() => this.session.followUp({ content: trimmed }));
     return { kind: "submitted" };
   }
 
