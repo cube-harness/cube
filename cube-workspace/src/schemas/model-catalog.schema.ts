@@ -39,6 +39,7 @@ export const ProviderCatalogGroupSchema = z.object({
 }).strict();
 
 export const ModelCatalogSchema = z.object({
+  version: z.literal(2),
   updatedAt: z.string(),
   providers: z.record(z.string(), ProviderCatalogGroupSchema),
 }).strict();

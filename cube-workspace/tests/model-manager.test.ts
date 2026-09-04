@@ -1,110 +1,129 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { Home } from "../src/home.js";
-import { ModelManager } from "../src/model-manager.js";
+import test from "node:test";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { HomeManager } from "../src/home-manager.js";
+import { ModelManager } from "../src/model-manager.js";
+import { ModelCatalogStore } from "../src/store/store.js";
+
+const cleanup = (tmp: string) =>
+  rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
+const providerFixtures = {
+  google: {
+    name: "Google",
+    models: {
+      "gemini-test": {
+        name: "Gemini Test",
+        reasoning: true,
+        tool_call: true,
+        structured_output: true,
+        attachment: true,
+        open_weights: false,
+        limit: { context: 1_000_000, output: 8_192 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+      },
+    },
+  },
+  openrouter: {
+    name: "OpenRouter",
+    models: {
+      "vendor/model-test": {
+        name: "Router Test",
+        reasoning: false,
+        tool_call: true,
+        structured_output: true,
+        attachment: false,
+        open_weights: false,
+        limit: { context: 128_000, output: 4_096 },
+        modalities: { input: ["text"], output: ["text"] },
+      },
+    },
+  },
+};
 
 const createTestHome = async () => {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-model-mgr-test-"));
-  const home = new Home({ cubeHome: tmp });
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-model-manager-test-"));
+  const home = new HomeManager({ cubeHome: tmp });
   await home.ensure();
   return { home, tmp };
 };
 
-test("ModelManager detects active providers from process.env and OLLAMA_BASE_URL", async () => {
+test("ModelManager builds a credential-agnostic canonical provider catalog", async () => {
   const { home, tmp } = await createTestHome();
-  const originalKey = process.env.GOOGLE_API_KEY;
-  const originalOllama = process.env.OLLAMA_BASE_URL;
+  const previousGoogle = process.env.GOOGLE_API_KEY;
+  const previousOpenRouter = process.env.OPENROUTER_API_KEY;
+  delete process.env.GOOGLE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   try {
-    process.env.GOOGLE_API_KEY = "test-google-key";
-    process.env.OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-    const mgr = new ModelManager(home);
-    const active = await mgr.getActiveProviderIds();
-    assert.ok(active.includes("google"));
-    assert.ok(active.includes("ollama"));
+    const manager = new ModelManager(home, async () => providerFixtures);
+    const catalog = await manager.refreshCatalog();
+
+    assert.equal(catalog.version, 2);
+    assert.deepEqual(Object.keys(catalog.providers).sort(), ["google", "openrouter"]);
+    assert.equal(catalog.providers.google?.models[0]?.modelId, "google/gemini-test");
+    assert.equal(
+      catalog.providers.openrouter?.models[0]?.modelId,
+      "openrouter/vendor/model-test",
+    );
   } finally {
-    if (originalKey) {
-      process.env.GOOGLE_API_KEY = originalKey;
-    } else {
-      delete process.env.GOOGLE_API_KEY;
-    }
-    if (originalOllama) {
-      process.env.OLLAMA_BASE_URL = originalOllama;
-    } else {
-      delete process.env.OLLAMA_BASE_URL;
-    }
-    await rm(tmp, { recursive: true, force: true });
+    if (previousGoogle === undefined) delete process.env.GOOGLE_API_KEY;
+    else process.env.GOOGLE_API_KEY = previousGoogle;
+    if (previousOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousOpenRouter;
+    await cleanup(tmp);
   }
 });
 
-test("ModelManager builds catalog and groups by provider", async () => {
+test("ModelManager returns a fresh version-2 cache without consulting the source", async () => {
   const { home, tmp } = await createTestHome();
-  const originalKey = process.env.ANTHROPIC_API_KEY;
   try {
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
-    const mgr = new ModelManager(home);
-    const catalog = await mgr.getCatalog();
-    assert.ok(catalog.providers);
-    assert.ok(catalog.providers.anthropic);
-    assert.ok(catalog.providers.anthropic.models.length > 0);
-
-    const providers = await mgr.getProvidersWithModels();
-    assert.ok(providers.length > 0);
-    const anthropicProvider = providers.find((p) => p.id === "anthropic");
-    assert.ok(anthropicProvider);
-    assert.ok(anthropicProvider.models.length > 0);
-  } finally {
-    if (originalKey) {
-      process.env.ANTHROPIC_API_KEY = originalKey;
-    } else {
-      delete process.env.ANTHROPIC_API_KEY;
-    }
-    await rm(tmp, { recursive: true, force: true });
-  }
-});
-
-test("ModelManager invalidates expired cache (> 24h)", async () => {
-  const { home, tmp } = await createTestHome();
-  const originalKey = process.env.ANTHROPIC_API_KEY;
-  try {
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
-    const mgr = new ModelManager(home);
-    const store = (await import("../src/store/store.js")).ModelCatalogStore(home);
-
-    // Write an expired catalog (25 hours ago)
-    const expiredDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
-    await store.write({
-      updatedAt: expiredDate,
-      providers: {
-        anthropic: {
-          name: "Anthropic",
-          models: [
-            {
-              modelId: "anthropic/old-model",
-              name: "Old Model",
-              reasoning: false,
-              tool_call: true,
-              structured_output: true,
-              attachment: false,
-              open_weights: false,
-              limit: { context: 100000, output: 4096 },
-              modalities: { input: ["text"], output: ["text"] },
-            },
-          ],
-        },
-      },
+    const cached = {
+      version: 2 as const,
+      updatedAt: new Date().toISOString(),
+      providers: {},
+    };
+    await ModelCatalogStore(home).write(cached);
+    let sourceCalls = 0;
+    const manager = new ModelManager(home, async () => {
+      sourceCalls += 1;
+      return providerFixtures;
     });
 
-    const catalog = await mgr.getCatalog();
-    assert.notEqual(catalog.updatedAt, expiredDate);
+    assert.deepEqual(await manager.getCatalog(), cached);
+    assert.equal(sourceCalls, 0);
   } finally {
-    if (originalKey) {
-      process.env.ANTHROPIC_API_KEY = originalKey;
-    } else {
-      delete process.env.ANTHROPIC_API_KEY;
-    }
-    await rm(tmp, { recursive: true, force: true });
+    await cleanup(tmp);
+  }
+});
+
+test("ModelManager rebuilds stale or schema-incompatible cache files", async () => {
+  const { home, tmp } = await createTestHome();
+  try {
+    await writeFile(
+      home.getModelCatalogPath(),
+      JSON.stringify({ updatedAt: new Date().toISOString(), providers: {} }),
+      "utf8",
+    );
+    let sourceCalls = 0;
+    const manager = new ModelManager(home, async () => {
+      sourceCalls += 1;
+      return providerFixtures;
+    });
+
+    const rebuilt = await manager.getCatalog();
+    assert.equal(rebuilt.version, 2);
+    assert.equal(sourceCalls, 1);
+
+    await ModelCatalogStore(home).write({
+      version: 2,
+      updatedAt: new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString(),
+      providers: {},
+    });
+    await manager.getCatalog();
+    assert.equal(sourceCalls, 2);
+  } finally {
+    await cleanup(tmp);
   }
 });
