@@ -68,6 +68,16 @@ export const toCanonicalModelId = (
   return routerModelId.slice(prefix.length);
 };
 
+export const getCanonicalModelId = (routerOrCanonicalModelId: string): string => {
+  for (const descriptor of Object.values(gatewayDescriptors)) {
+    const prefix = `${descriptor.internalId}/`;
+    if (routerOrCanonicalModelId.startsWith(prefix)) {
+      return routerOrCanonicalModelId.slice(prefix.length);
+    }
+  }
+  return routerOrCanonicalModelId;
+};
+
 export interface OpenAISubscriptionCredentialProvider {
   getValidCredential(): Promise<OpenAISubscriptionCredential>;
 }

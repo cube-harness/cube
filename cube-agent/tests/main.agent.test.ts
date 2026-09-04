@@ -3,7 +3,13 @@ import test from "node:test";
 import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { ConfigStore, CubeHome, CubeWorkspace, createBootstrap } from "@cube/workspace";
+import {
+  ConfigStore,
+  CubeHome,
+  CubeWorkspace,
+  RunnableConfigSchema,
+  createBootstrap,
+} from "@cube/workspace";
 import { buildModelConfig, createCubeAgent } from "../src/agents/main.agent.js";
 
 test("maps OpenRouter reasoning effort into the provider request", () => {
@@ -79,7 +85,11 @@ test("createCubeAgent installs the Cube logger before the agent is registered wi
   const workspace = CubeWorkspace(home, root);
   const childLogger = { marker: "cube-file-logger" };
   const logger = { child: () => childLogger };
-  const config = await ConfigStore(home).read();
+  const config = RunnableConfigSchema.parse({
+    ...await ConfigStore(home).read(),
+    gateway: "api_key/google",
+    model: "google/gemini-3.7-flash",
+  });
 
   try {
     const agent = await createCubeAgent(home, workspace, config, logger as any);
@@ -92,6 +102,26 @@ test("createCubeAgent installs the Cube logger before the agent is registered wi
       retryDelay: 100,
     });
   }
+});
+
+test("keeps local models as Mastra router IDs instead of constructing Ollama directly", () => {
+  const routerId = "cube-local-ollama/ollama/qwen2.5:7b";
+  const config = buildModelConfig(routerId, "none");
+
+  assert.equal(config.model, routerId);
+  assert.equal(typeof config.model, "string");
+});
+
+test("derives provider options from canonical IDs behind a Cube gateway prefix", () => {
+  const config = buildModelConfig(
+    "cube-api-google/google/gemini-3.7-flash",
+    "high",
+  );
+
+  assert.equal(config.model, "cube-api-google/google/gemini-3.7-flash");
+  assert.deepEqual(config.providerOptions, {
+    google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } },
+  });
 });
 
 test("loads global skills outside the project without crossing the workspace filesystem boundary", async () => {
@@ -120,7 +150,11 @@ test("loads global skills outside the project without crossing the workspace fil
     );
 
     const workspace = CubeWorkspace(home, projectRoot);
-    const config = await ConfigStore(home).read();
+    const config = RunnableConfigSchema.parse({
+      ...await ConfigStore(home).read(),
+      gateway: "api_key/google",
+      model: "google/gemini-3.7-flash",
+    });
     console.warn = (...args: unknown[]) => warnings.push(args);
 
     const agent = await createCubeAgent(home, workspace, config);

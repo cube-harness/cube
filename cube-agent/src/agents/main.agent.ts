@@ -6,40 +6,19 @@ import {
   type HomeManager,
   type WorkspaceManager,
 } from "@cube/workspace";
-import { createOllama } from "ollama-ai-provider-v2";
 import { createMastraWorkspace } from "../workspace.js";
 import { webFetchTool, webSearchTool } from "@mastra/core/tools";
+import { getCanonicalModelId } from "../gateways/types.js";
 
 export const buildModelConfig = (
   modelId: string,
   effort?: string,
-  ollamaBaseUrl?: string,
 ): Record<string, any> => {
-  if (modelId.startsWith("ollama/")) {
-    const rawModel = modelId.replace(/^ollama\//, "");
-    const rawUrl =
-      ollamaBaseUrl ||
-      process.env.OLLAMA_BASE_URL ||
-      process.env.OLLAMA_HOST ||
-      "http://127.0.0.1:11434/api";
-    const cleanUrl = rawUrl.endsWith("/api") ? rawUrl : `${rawUrl.replace(/\/+$/, "")}/api`;
-
-    const ollamaClient = createOllama({ baseURL: cleanUrl });
-    const modelInstance = ollamaClient(rawModel);
-
-    return {
-      id: "cube-model",
-      model: modelInstance,
-      maxRetries: 2,
-      enabled: true,
-      modelSettings: { temperature: 0.3 },
-    };
-  }
-
+  const canonicalModelId = getCanonicalModelId(modelId);
   const providerOptions: Record<string, any> = {};
 
   if (
-    modelId.startsWith("google/gemini-3") &&
+    canonicalModelId.startsWith("google/gemini-3") &&
     effort &&
     effort !== "none" &&
     effort !== "default"
@@ -47,7 +26,7 @@ export const buildModelConfig = (
     providerOptions.google = {
       thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
     };
-  } else if (modelId.startsWith("google/")) {
+  } else if (canonicalModelId.startsWith("google/")) {
     if (effort === "max" || effort === "xhigh") {
       providerOptions.google = {
         thinkingConfig: { thinkingBudget: 32768, includeThoughts: true },
@@ -67,7 +46,7 @@ export const buildModelConfig = (
     } else if (effort === "none") {
       providerOptions.google = { thinkingConfig: { thinkingBudget: 0 } };
     }
-  } else if (modelId.startsWith("anthropic/")) {
+  } else if (canonicalModelId.startsWith("anthropic/")) {
     if (effort && effort !== "none" && effort !== "default") {
       const budget =
         effort === "max" || effort === "xhigh"
@@ -79,11 +58,11 @@ export const buildModelConfig = (
               : 2048;
       providerOptions.anthropic = { thinking: { type: "enabled", budgetTokens: budget } };
     }
-  } else if (modelId.startsWith("openai/")) {
+  } else if (canonicalModelId.startsWith("openai/")) {
     if (effort && effort !== "none" && effort !== "default") {
       providerOptions.openai = { reasoningEffort: effort, reasoningSummary: "auto" };
     }
-  } else if (modelId.startsWith("openrouter/")) {
+  } else if (canonicalModelId.startsWith("openrouter/")) {
     if (effort === "default") {
       providerOptions.openrouter = { reasoning: { enabled: true, exclude: false } };
     } else if (effort) {
@@ -105,9 +84,8 @@ export const updateCubeAgentModel = (
   agent: any,
   modelId: string,
   effort?: string,
-  ollamaBaseUrl?: string,
 ): void => {
-  const modelConfig = buildModelConfig(modelId, effort, ollamaBaseUrl);
+  const modelConfig = buildModelConfig(modelId, effort);
   agent.model = [modelConfig];
 };
 
@@ -130,8 +108,7 @@ export const createCubeAgent = async (
   const soul = await SoulStore(home).read();
   const paths = await workspace.getPaths();
   const effort = config.model_config?.reasoning_effort;
-  const ollamaUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST;
-  const modelConfig = buildModelConfig(config.model, effort, ollamaUrl);
+  const modelConfig = buildModelConfig(config.model, effort);
   const mastraWorkspace = await createMastraWorkspace(workspace);
 
   const agent = createCodingAgent({
