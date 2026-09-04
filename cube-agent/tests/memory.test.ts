@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import {
-  ConfigSchema,
+  RunnableConfigSchema,
   CubeHome,
   type CubeConfig,
   type Home,
@@ -14,7 +14,7 @@ import {
   finalizeCubeAgentMemory,
 } from "../src/memory.js";
 
-const createConfig = (): CubeConfig => ConfigSchema.parse({
+const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
   version: 2,
   gateway: "api_key/google",
   model: "google/gemini-3.7-flash",

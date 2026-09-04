@@ -25,3 +25,4 @@ export {
 export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
 export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
+export * from "./gateways/index.js";

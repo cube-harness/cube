@@ -6,7 +6,7 @@ import {
 import {
   ConfigSchema,
   LegacyConfigSchema,
-  type CubeConfig,
+  type CubeConfigDocument,
 } from "./schemas/config.schema.js";
 
 export type ConfigMigrationContext = {
@@ -19,7 +19,7 @@ export type ConfigMigrationContext = {
 };
 
 export type ConfigMigrationResult = {
-  config: CubeConfig;
+  config: CubeConfigDocument;
   inferredGateway: GatewayId | null;
 };
 

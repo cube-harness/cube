@@ -258,6 +258,7 @@ export const RunnableConfigSchema = z.object({
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
-export type CubeConfig = z.infer<typeof ConfigSchema>;
+export type CubeConfigDocument = z.infer<typeof ConfigSchema>;
 export type RunnableCubeConfig = z.infer<typeof RunnableConfigSchema>;
+export type CubeConfig = RunnableCubeConfig;
 export type LegacyCubeConfig = z.infer<typeof LegacyConfigSchema>;
