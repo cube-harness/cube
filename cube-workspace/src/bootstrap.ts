@@ -1,50 +1,14 @@
 import { access, copyFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
 import { HomeManager } from "./home-manager.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { HOME_FILES } from "./constants.js";
-
-export const loadEnv = (searchDirs?: string[]): void => {
-  const dirs = searchDirs || [process.env.INIT_CWD || process.cwd(), process.cwd()];
-
-  for (const dir of dirs) {
-    if (!dir) continue;
-    const envPath = path.join(dir, ".env");
-    if (existsSync(envPath)) {
-      try {
-        const content = readFileSync(envPath, "utf-8");
-        for (const line of content.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith("#")) continue;
-          const eqIdx = trimmed.indexOf("=");
-          if (eqIdx > 0) {
-            const key = trimmed.slice(0, eqIdx).trim();
-            const val = trimmed
-              .slice(eqIdx + 1)
-              .trim()
-              .replace(/^["']+|["']+$/g, "")
-              .trim();
-            if (val) {
-              process.env[key] = val;
-            } else {
-              delete process.env[key];
-            }
-          }
-        }
-      } catch {
-        // Silently ignore if load fails
-      }
-    }
-  }
-};
 
 export class Bootstrap {
   constructor(private readonly home: HomeManager) {}
 
   async run(): Promise<void> {
     await this.home.ensure();
-    loadEnv([this.home.getRoot(), process.env.INIT_CWD || process.cwd(), process.cwd()]);
     await this.seedFromTemplate(HOME_FILES.CONFIG, this.home.getConfigPath());
     await this.seedFromTemplate(HOME_FILES.AUTH, this.home.getAuthPath());
     await this.seedFromTemplate(HOME_FILES.MCP, this.home.getMcpPath());
