@@ -382,11 +382,19 @@ export class GatewayService {
   ): Promise<unknown> {
     const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    let status: number | undefined;
     try {
       const response = await this.fetchImpl(url, { ...init, signal: requestSignal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      status = response.status;
+      if (!response.ok) throw new Error("request rejected");
       return await response.json();
     } catch {
+      if (status === 401 || status === 403) {
+        throw new Error(`${label} credential was rejected.`);
+      }
+      if (status === 429) {
+        throw new Error(`${label} quota or rate limit reached.`);
+      }
       throw new Error(`${label} gateway is unavailable or rejected the credential.`);
     }
   }
