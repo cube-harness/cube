@@ -5,12 +5,14 @@ import type {
   MastraModelGatewayInterface,
   ProviderConfig,
 } from "@mastra/core/llm";
+import { ModelsDevGateway } from "@mastra/core/llm";
 import type { AuthStore } from "@cube/workspace";
 import { gatewayDescriptors, toCanonicalModelId, type ApiKeyGatewayId } from "./types.js";
-import {
-  createModelsDevDelegate,
-  type ModelsDevDelegate,
-} from "./models-dev.delegate.js";
+
+type ModelsDevDelegate = Pick<
+  ModelsDevGateway,
+  "fetchProviders" | "buildUrl" | "resolveLanguageModel"
+>;
 
 type ApiKeyReader = Pick<AuthStore, "getApiKey">;
 
@@ -22,7 +24,7 @@ export class CubeApiKeyGateway implements MastraModelGatewayInterface {
   constructor(
     readonly gatewayId: ApiKeyGatewayId,
     private readonly auth: ApiKeyReader,
-    private readonly delegate: ModelsDevDelegate = createModelsDevDelegate(),
+    private readonly delegate: ModelsDevDelegate = new ModelsDevGateway(),
   ) {
     const descriptor = gatewayDescriptors[gatewayId];
     this.id = descriptor.internalId;

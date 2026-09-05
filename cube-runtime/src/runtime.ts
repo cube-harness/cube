@@ -4,6 +4,7 @@ import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { ThreadService } from "./services/thread.service.js";
+import type { GatewayService } from "./services/gateway.service.js";
 import type {
   RuntimeDisplayState,
   RuntimeEventListener,
@@ -19,6 +20,7 @@ type CubeRuntimeDependencies = {
   model: ModelService;
   preference: PreferenceService;
   memory: MemoryService;
+  gateway: GatewayService;
   suggestions: SlashCommandSuggestion[];
   workspaceRoot: string;
   readHistory: () => Promise<string[]>;
@@ -31,6 +33,7 @@ export class CubeRuntime {
   readonly model: ModelService;
   readonly preference: PreferenceService;
   readonly memory: MemoryService;
+  readonly gateway: GatewayService;
 
   private shutdownPromise?: Promise<void>;
 
@@ -40,6 +43,7 @@ export class CubeRuntime {
     this.model = dependencies.model;
     this.preference = dependencies.preference;
     this.memory = dependencies.memory;
+    this.gateway = dependencies.gateway;
   }
 
   get suggestions(): SlashCommandSuggestion[] {

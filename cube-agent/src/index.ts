@@ -25,4 +25,26 @@ export {
 export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
 export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
-export * from "./gateways/index.js";
+export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";
+export { buildGatewayCatalog } from "./gateways/gateway-catalog.js";
+export {
+  createCubeGateways,
+  type CreateCubeGatewaysOptions,
+  type CubeGatewayAdapter,
+  type CubeGatewayComposition,
+} from "./gateways/factory.js";
+export {
+  OllamaGateway,
+  normalizeOllamaBaseUrl,
+  type LocalGatewayOptions,
+} from "./gateways/ollama.gateway.js";
+export {
+  LMStudioGateway,
+  normalizeLMStudioBaseUrl,
+} from "./gateways/lmstudio.gateway.js";
+export {
+  OpenAISubscriptionGateway,
+  OPENAI_CODEX_BASE_URL,
+  selectOpenAISubscriptionModels,
+} from "./gateways/openai-subscription.gateway.js";
+export * from "./gateways/types.js";

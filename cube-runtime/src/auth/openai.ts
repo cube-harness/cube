@@ -244,7 +244,7 @@ export const createOpenAICallback = async (
     || (callbackUrl.hostname !== "localhost" && callbackUrl.hostname !== "127.0.0.1")) {
     throw new Error("OpenAI sign-in requires a localhost HTTP callback.");
   }
-  const port = Number(callbackUrl.port || (callbackUrl.protocol === "https:" ? 443 : 80));
+  const port = Number(callbackUrl.port || 80);
   const bindHost = callbackUrl.hostname === "localhost" ? "127.0.0.1" : callbackUrl.hostname;
   let server: Server;
   let rejectCompletion: (error: Error) => void = () => undefined;

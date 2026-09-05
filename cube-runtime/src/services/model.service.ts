@@ -1,8 +1,10 @@
 import type { Session } from "@cube/agent";
-import { ConfigStore, ModelManager, type HomeManager, type ModelCatalog } from "@cube/workspace";
+import { ConfigStore, type HomeManager, type ModelCatalog } from "@cube/workspace";
 import type { ModelSelection, ModelState, UsageMetrics } from "../types.js";
 
-type CatalogReader = Pick<ModelManager, "getCatalog">;
+type GatewayCatalogReader = {
+  listModels(): Promise<ModelCatalog>;
+};
 
 type TokenUsage = {
   promptTokens: number;
@@ -24,14 +26,14 @@ export class ModelService {
     private readonly home: HomeManager,
     private readonly session: Session,
     private state: ModelState,
-    private readonly applyLiveModel: (selection: ModelSelection) => void,
-    private readonly catalog: CatalogReader = new ModelManager(home),
+    private readonly applyLiveModel: (selection: ModelSelection) => void | Promise<void>,
+    private readonly gateway: GatewayCatalogReader,
   ) {
     this.state = copyState(state);
   }
 
   list(): Promise<ModelCatalog> {
-    return this.catalog.getCatalog();
+    return this.gateway.listModels();
   }
 
   current(): ModelState {
@@ -58,7 +60,9 @@ export class ModelService {
       }
     }
 
-    await ConfigStore(this.home).update((config) => {
+    const configStore = ConfigStore(this.home);
+    const previousConfig = await configStore.read();
+    await configStore.update((config) => {
       const modelConfig = { ...config.model_config };
       if (effort) {
         modelConfig.reasoning_effort = effort;
@@ -72,7 +76,12 @@ export class ModelService {
       };
     });
 
-    this.applyLiveModel(copyState(selection));
+    try {
+      await this.applyLiveModel(copyState(selection));
+    } catch {
+      await configStore.update(() => previousConfig).catch(() => undefined);
+      throw new Error("Model switch failed; the previous model is still active.");
+    }
     this.state = {
       modelId: selection.modelId,
       ...(effort ? { reasoningEffort: effort } : {}),
