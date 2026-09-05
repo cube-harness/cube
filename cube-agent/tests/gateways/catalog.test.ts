@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelCatalog } from "@cube/workspace";
-import { buildGatewayCatalog } from "../../src/gateways/catalog.js";
+import { buildGatewayCatalog } from "../../src/gateways/gateway-catalog.js";
 
 const canonical: ModelCatalog = {
   version: 2,
@@ -42,24 +42,23 @@ const canonical: ModelCatalog = {
 };
 
 test("API-key and subscription OpenAI routes reuse one canonical capability record", () => {
-  const api = buildGatewayCatalog(canonical, {
-    gatewayId: "api_key/openai",
-    canonicalModelIds: ["openai/gpt-test"],
-  });
-  const subscription = buildGatewayCatalog(canonical, {
-    gatewayId: "subscription/openai",
-    canonicalModelIds: ["openai/gpt-test"],
-  });
+  const api = buildGatewayCatalog(canonical, "api_key/openai", ["openai/gpt-test"]);
+  const subscription = buildGatewayCatalog(
+    canonical,
+    "subscription/openai",
+    ["openai/gpt-test"],
+  );
 
   assert.deepEqual(api.providers.openai, canonical.providers.openai);
   assert.deepEqual(subscription.providers.openai, canonical.providers.openai);
 });
 
 test("gateway catalog contains only models available through that gateway", () => {
-  const catalog = buildGatewayCatalog(canonical, {
-    gatewayId: "api_key/google",
-    canonicalModelIds: ["google/gemini-test"],
-  });
+  const catalog = buildGatewayCatalog(
+    canonical,
+    "api_key/google",
+    ["google/gemini-test"],
+  );
 
   assert.deepEqual(Object.keys(catalog.providers), ["google"]);
   assert.deepEqual(
@@ -69,10 +68,11 @@ test("gateway catalog contains only models available through that gateway", () =
 });
 
 test("unknown local models receive conservative capability metadata", () => {
-  const catalog = buildGatewayCatalog(canonical, {
-    gatewayId: "local/ollama",
-    canonicalModelIds: ["ollama/private-model:latest"],
-  });
+  const catalog = buildGatewayCatalog(
+    canonical,
+    "local/ollama",
+    ["ollama/private-model:latest"],
+  );
   const model = catalog.providers.ollama?.models[0];
 
   assert.deepEqual(model, {

@@ -1,6 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import { CubeConfig, HomeManager, WorkspaceManager } from "@cube/workspace";
 import { AgentController } from "@mastra/core/agent-controller";
+import type { MastraModelGatewayInterface } from "@mastra/core/llm";
 import { createMastraWorkspace } from "../workspace.js";
 import { resolveCubeToolCategory } from "../permission.js";
 import { cubeAskUserTool } from "../tools/ask-user.tool.js";
@@ -11,6 +12,7 @@ export const createCubeController = async (
   workspace: WorkspaceManager,
   config: CubeConfig,
   agent: Agent,
+  gateways: MastraModelGatewayInterface[] = [],
 ) => {
   const mastraWorkspace = await createMastraWorkspace(workspace);
 
@@ -30,5 +32,6 @@ export const createCubeController = async (
     ],
     workspace: mastraWorkspace,
     toolCategoryResolver: resolveCubeToolCategory,
+    gateways,
   });
 };

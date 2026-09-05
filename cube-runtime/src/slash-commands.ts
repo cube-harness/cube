@@ -3,6 +3,7 @@ import type { MemoryService } from "./services/memory.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
+import type { GatewayService } from "./services/gateway.service.js";
 import type { PromptResult, SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -15,6 +16,7 @@ export type SlashCommandContext = {
   model: ModelService;
   preference: PreferenceService;
   memory: MemoryService;
+  gateway: GatewayService;
 };
 
 type SlashCommandDefinition = SlashCommandSuggestion & {

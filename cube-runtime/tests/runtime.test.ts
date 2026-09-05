@@ -45,6 +45,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
   const model = { marker: "model" };
   const preference = { marker: "preference" };
   const memory = { marker: "memory" };
+  const gateway = { marker: "gateway" };
   const runtime = new CubeRuntime({
     session,
     prompt,
@@ -52,6 +53,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
     model,
     preference,
     memory,
+    gateway,
     suggestions: [{ name: "/help", description: "Help" }],
     workspaceRoot: "D:\\cube",
     readHistory: async () => ["one", "two"],
@@ -65,6 +67,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
   assert.equal(runtime.model, model);
   assert.equal(runtime.preference, preference);
   assert.equal(runtime.memory, memory);
+  assert.equal(runtime.gateway, gateway);
   assert.equal("session" in runtime, false);
   assert.deepEqual(runtime.getDisplayState(), displayState);
   assert.equal(runtime.isApprovalPending(), true);

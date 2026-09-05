@@ -1,5 +1,5 @@
 import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
-import type { ModelCatalog, ReasoningEffort } from "@cube/workspace";
+import type { GatewayId, ModelCatalog, ReasoningEffort } from "@cube/workspace";
 
 export type RuntimeEvent = AgentControllerEvent;
 export type RuntimeDisplayState = Readonly<AgentControllerDisplayState>;
@@ -28,6 +28,34 @@ export type ModelSelection = {
 };
 
 export type ModelState = ModelSelection;
+
+export type GatewayChoice = {
+  gatewayId: GatewayId;
+  group: "api_key" | "subscription" | "local";
+  provider: string;
+  configured: boolean;
+};
+
+export type GatewayDraft = {
+  draftId: string;
+  gatewayId: GatewayId;
+  catalog: ModelCatalog;
+  currentModelId?: string;
+};
+
+export type GatewaySelection = {
+  draftId: string;
+  model: ModelSelection;
+};
+
+export type GatewayState = {
+  gatewayId: GatewayId;
+  model: ModelState;
+};
+
+export type GatewayReadiness =
+  | { ready: true; gatewayId: GatewayId; model: ModelState }
+  | { ready: false; reason: string; configuredGateway?: GatewayId };
 
 export type ThreadSummary = {
   id: string;
