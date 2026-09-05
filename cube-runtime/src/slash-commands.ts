@@ -105,12 +105,57 @@ const definitions: SlashCommandDefinition[] = [
     },
   },
   {
+    name: "/gateway",
+    description: "Choose or configure an API, subscription, or local gateway",
+    execute: async (_argument, context) => {
+      const [choices, readiness] = await Promise.all([
+        context.gateway.listChoices(),
+        context.gateway.readiness(),
+      ]);
+      return {
+        kind: "gateways",
+        request: {
+          choices,
+          ...(readiness.ready
+            ? {
+                current: {
+                  gatewayId: readiness.gatewayId,
+                  model: readiness.model,
+                },
+              }
+            : {}),
+        },
+      };
+    },
+  },
+  {
     name: "/model",
     description: "Choose what model and reasoning effort to use",
     execute: async (argument, context) => {
       if (!argument) {
         const catalog = await context.model.list();
-        return { kind: "models", catalog, current: context.model.current() };
+        if (Object.values(catalog.providers).every((provider) => provider.models.length === 0)) {
+          return {
+            kind: "notice",
+            notice: {
+              level: "info",
+              message: "No models are available for this gateway. Run /gateway to choose another gateway.",
+            },
+          };
+        }
+        const readiness = await context.gateway.readiness();
+        if (!readiness.ready) {
+          return {
+            kind: "notice",
+            notice: { level: "error", message: readiness.reason },
+          };
+        }
+        return {
+          kind: "models",
+          gatewayId: readiness.gatewayId,
+          catalog,
+          current: context.model.current(),
+        };
       }
       return {
         kind: "model",

@@ -7,6 +7,27 @@ import {
   type SlashCommandContext,
 } from "../src/slash-commands.js";
 
+const catalog = {
+  version: 2 as const,
+  updatedAt: "2026-09-05T00:00:00.000Z",
+  providers: {
+    google: {
+      name: "Google",
+      models: [{
+        modelId: "google/gemini-3.7-flash",
+        name: "Gemini 3.7 Flash",
+        reasoning: true,
+        tool_call: true,
+        structured_output: true,
+        attachment: true,
+        open_weights: false,
+        limit: { context: 128_000, output: 8_192 },
+        modalities: { input: ["text"], output: ["text"] },
+      }],
+    },
+  },
+};
+
 const createContext = () => {
   const calls: unknown[][] = [];
   const state = {
@@ -55,7 +76,7 @@ const createContext = () => {
     model: {
       list: async () => {
         calls.push(["model.list"]);
-        return { updatedAt: "1970-01-01T00:00:00.000Z", providers: {} };
+        return catalog;
       },
       current: () => {
         calls.push(["model.current"]);
@@ -63,6 +84,9 @@ const createContext = () => {
       },
       set: async (selection: unknown) => {
         calls.push(["model.set", selection]);
+        if (!(selection as { modelId: string }).modelId.startsWith("google/")) {
+          throw new Error("Model is not available through api_key/google.");
+        }
         return selection;
       },
       getUsage: async () => {
@@ -104,6 +128,25 @@ const createContext = () => {
         return { activated: true, observed: true, reflected: false };
       },
     },
+    gateway: {
+      readiness: async () => {
+        calls.push(["gateway.readiness"]);
+        return {
+          ready: true,
+          gatewayId: "api_key/google",
+          model: { modelId: "google/gemini-3.7-flash" },
+        };
+      },
+      listChoices: async () => {
+        calls.push(["gateway.listChoices"]);
+        return [{
+          gatewayId: "api_key/google",
+          group: "api_key",
+          provider: "google",
+          configured: true,
+        }];
+      },
+    },
   } as unknown as SlashCommandContext;
   return { calls, context };
 };
@@ -122,6 +165,9 @@ test("slash command parser preserves the command argument", () => {
     slashCommandSuggestions.some((item) => item.name === "/threads"),
     true,
   );
+  assert.equal(slashCommandSuggestions.some((item) => item.name === "/gateway"), true);
+  assert.equal(slashCommandSuggestions.some((item) => item.name === "/login"), false);
+  assert.equal(slashCommandSuggestions.some((item) => item.name === "/logout"), false);
 });
 
 test("slash command router delegates thread and model use cases", async () => {
@@ -162,17 +208,22 @@ test("slash command router delegates thread and model use cases", async () => {
     (await executeSlashCommand("/delete", "thread-2", context)).kind,
     "notice",
   );
-  assert.equal((await executeSlashCommand("/model", "", context)).kind, "models");
+  assert.deepEqual(await executeSlashCommand("/model", "", context), {
+    kind: "models",
+    gatewayId: "api_key/google",
+    catalog,
+    current: { modelId: "google/gemini-3.7-flash" },
+  });
   assert.deepEqual(
     await executeSlashCommand(
       "/model",
-      "openrouter/poolside/laguna-xs-2.1:free --effort high",
+      "google/gemini-3.7-flash --effort high",
       context,
     ),
     {
       kind: "model",
       model: {
-        modelId: "openrouter/poolside/laguna-xs-2.1:free",
+        modelId: "google/gemini-3.7-flash",
         reasoningEffort: "high",
       },
     },
@@ -186,16 +237,64 @@ test("slash command router delegates thread and model use cases", async () => {
     ["thread.list"],
     ["thread.delete", "thread-2"],
     ["model.list"],
+    ["gateway.readiness"],
     ["model.current"],
     [
       "model.set",
       {
-        modelId: "openrouter/poolside/laguna-xs-2.1:free",
+        modelId: "google/gemini-3.7-flash",
         reasoningEffort: "high",
       },
     ],
     ["model.getUsage"],
   ]);
+});
+
+test("model command cannot select a model from another gateway", async () => {
+  const { context } = createContext();
+
+  assert.deepEqual(await executeSlashCommand("/model", "openrouter/other", context), {
+    kind: "notice",
+    notice: {
+      level: "error",
+      message: "Model is not available through api_key/google.",
+    },
+  });
+});
+
+test("gateway command returns serializable choices and current selection", async () => {
+  const { calls, context } = createContext();
+  const result = await executeSlashCommand("/gateway", "", context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    kind: "gateways",
+    request: {
+      choices: [{
+        gatewayId: "api_key/google",
+        group: "api_key",
+        provider: "google",
+        configured: true,
+      }],
+      current: {
+        gatewayId: "api_key/google",
+        model: { modelId: "google/gemini-3.7-flash" },
+      },
+    },
+  });
+  assert.deepEqual(calls, [["gateway.listChoices"], ["gateway.readiness"]]);
+});
+
+test("model command directs an empty active gateway to gateway selection", async () => {
+  const { context } = createContext();
+  context.model.list = async () => ({ ...catalog, providers: {} });
+
+  assert.deepEqual(await executeSlashCommand("/model", "", context), {
+    kind: "notice",
+    notice: {
+      level: "info",
+      message: "No models are available for this gateway. Run /gateway to choose another gateway.",
+    },
+  });
 });
 
 test("slash command router returns domain results for client-owned effects", async () => {

@@ -53,6 +53,15 @@ export type GatewayState = {
   model: ModelState;
 };
 
+export type GatewaySetupRequest = {
+  choices: GatewayChoice[];
+  current?: GatewayState;
+};
+
+export type GatewayPromptResult =
+  | { kind: "gateways"; request: GatewaySetupRequest }
+  | { kind: "models"; gatewayId: GatewayId; catalog: ModelCatalog; current: ModelState };
+
 export type GatewayReadiness =
   | { ready: true; gatewayId: GatewayId; model: ModelState }
   | { ready: false; reason: string; configuredGateway?: GatewayId };
@@ -109,7 +118,7 @@ export type PromptResult =
   | { kind: "ignored" }
   | { kind: "submitted" }
   | { kind: "notice"; notice: RuntimeNotice }
-  | { kind: "models"; catalog: ModelCatalog; current: ModelState }
+  | GatewayPromptResult
   | { kind: "model"; model: ModelState }
   | {
       kind: "threads";
