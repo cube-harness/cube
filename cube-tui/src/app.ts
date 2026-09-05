@@ -1,11 +1,12 @@
-import type {
-  CubeRuntime,
-  CubePreflight,
-  ModelState,
-  PreferenceState,
-  PromptResult,
-  RuntimeDisplayState,
-  RuntimeEvent,
+import {
+  toRuntimeNotice,
+  type CubeRuntime,
+  type CubePreflight,
+  type ModelState,
+  type PreferenceState,
+  type PromptResult,
+  type RuntimeDisplayState,
+  type RuntimeEvent,
 } from "@cube/runtime";
 import { copyToClipboard } from "./clipboard.js";
 import { matchesBinding } from "./keybindings.js";
@@ -116,10 +117,8 @@ export class CubeApp {
     try {
       await this.handlePromptResult(await this.runtime.prompt.submit(trimmed));
     } catch (error: unknown) {
-      this.screen.showNotice({
-        level: "error",
-        message: `Error: ${error instanceof Error ? error.message : String(error)}`,
-      });
+      this.screen.workingIndicator.stop();
+      this.screen.showNotice(toRuntimeNotice(error));
     }
   }
 
@@ -129,6 +128,7 @@ export class CubeApp {
       case "submitted":
         return;
       case "notice":
+        if (result.notice.level === "error") this.screen.workingIndicator.stop();
         this.screen.showNotice(result.notice);
         return;
       case "models": {
@@ -292,10 +292,8 @@ export class CubeApp {
               resumeData: resolution.resumeData,
             });
           } catch (error: unknown) {
-            this.screen.showNotice({
-              level: "error",
-              message: `Error: ${error instanceof Error ? error.message : String(error)}`,
-            });
+            this.screen.workingIndicator.stop();
+            this.screen.showNotice(toRuntimeNotice(error));
           } finally {
             this.activeSuspensionIds.delete(event.toolCallId);
             this.cancelledSuspensionIds.delete(event.toolCallId);
@@ -332,10 +330,8 @@ export class CubeApp {
         this.updateTerminalTitle();
         return;
       case "error":
-        this.screen.showNotice({
-          level: "error",
-          message: `Error: ${event.error.message}`,
-        });
+        this.screen.workingIndicator.stop();
+        this.screen.showNotice(toRuntimeNotice(event.error));
         return;
       case "workspace_status_changed":
         if (String(event.status) !== "ready") {
@@ -347,10 +343,7 @@ export class CubeApp {
         return;
       case "workspace_error":
         this.screen.workingIndicator.stop();
-        this.screen.showNotice({
-          level: "error",
-          message: `Workspace error: ${event.error.message}`,
-        });
+        this.screen.showNotice(toRuntimeNotice(event.error));
     }
   }
 
@@ -439,18 +432,27 @@ export const startPreparedCube = async (
 ): Promise<PreparedCube | null> => {
   screen.mount({ onSubmit: () => undefined });
   screen.startTerminal();
-  if (!preflight.readiness.ready) {
-    const selection = await screen.pickGateway(preflight.gateway, {
-      choices: await preflight.gateway.listChoices(),
-    });
-    if (!selection) {
-      screen.stopTerminal();
-      return null;
+  let needsSetup = !preflight.readiness.ready;
+  while (true) {
+    try {
+      if (needsSetup) {
+        const selection = await screen.pickGateway(preflight.gateway, {
+          choices: await preflight.gateway.listChoices(),
+        });
+        if (!selection) {
+          screen.stopTerminal();
+          return null;
+        }
+        await preflight.gateway.commitInitial(selection);
+      }
+      const runtime = await preflight.start();
+      const app = new CubeApp(runtime, screen, options);
+      await app.start({ screenAlreadyMounted: true });
+      return { app, runtime };
+    } catch (error) {
+      screen.workingIndicator.stop();
+      screen.showNotice(toRuntimeNotice(error));
+      needsSetup = true;
     }
-    await preflight.gateway.commitInitial(selection);
   }
-  const runtime = await preflight.start();
-  const app = new CubeApp(runtime, screen, options);
-  await app.start({ screenAlreadyMounted: true });
-  return { app, runtime };
 };

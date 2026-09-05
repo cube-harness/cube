@@ -92,3 +92,63 @@ test("PromptService cancels native follow-ups newest first without changing FIFO
     { type: "follow_up_queued", count: 0 },
   ]);
 });
+
+test("PromptService converts provider failures into one safe system notice", async () => {
+  const session = {
+    followUp: async () => {
+      throw new Error("HTTP 429 request leaked-secret");
+    },
+    followUps: { dequeue: () => undefined, count: () => 0 },
+  } as unknown as Session;
+  const service = new PromptService(
+    {} as Home,
+    session,
+    {
+      current: () => "thread-1",
+      ensureForPrompt: async () => "thread-1",
+    } as unknown as ThreadService,
+    {} as SlashCommandContext,
+    (callback) => callback(),
+    async () => undefined,
+  );
+
+  assert.deepEqual(await service.submit("hello"), {
+    kind: "notice",
+    notice: {
+      level: "error",
+      message: "Quota or token limit reached. Run /gateway or /model to continue.",
+    },
+  });
+});
+
+test("PromptService keeps third-party warnings out of the terminal console", async () => {
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args); };
+  const session = {
+    followUp: async () => {
+      console.warn("raw provider warning");
+    },
+    followUps: { dequeue: () => undefined, count: () => 0 },
+  } as unknown as Session;
+  const service = new PromptService(
+    {} as Home,
+    session,
+    {
+      current: () => "thread-1",
+      ensureForPrompt: async () => "thread-1",
+    } as unknown as ThreadService,
+    {} as SlashCommandContext,
+    (callback) => callback(),
+    async () => undefined,
+  );
+
+  try {
+    assert.deepEqual(await service.submit("hello"), { kind: "submitted" });
+    assert.deepEqual(warnings, []);
+    console.warn("after");
+    assert.deepEqual(warnings, [["after"]]);
+  } finally {
+    console.warn = originalWarn;
+  }
+});

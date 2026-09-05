@@ -4,7 +4,11 @@ import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
-import type { PromptResult, SlashCommandSuggestion } from "./types.js";
+import {
+  toRuntimeNotice,
+  type PromptResult,
+  type SlashCommandSuggestion,
+} from "./types.js";
 
 export type ParsedSlashCommand = {
   name: `/${string}`;
@@ -333,10 +337,7 @@ export const executeSlashCommand = async (
   } catch (error: unknown) {
     return {
       kind: "notice",
-      notice: {
-        level: "error",
-        message: error instanceof Error ? error.message : String(error),
-      },
+      notice: toRuntimeNotice(error),
     };
   }
 };

@@ -49,6 +49,16 @@ test("routes global and thread logs to separate JSONL files", async () => {
       logging.logger.error("provider failed", {
         runId: "run-456",
         apiKey: "must-not-be-written",
+        api_key: "snake-secret",
+        access_token: "access-secret",
+        refresh_token: "refresh-secret",
+        headers: { authorization: "Bearer header-secret" },
+        error: {
+          config: {
+            headers: { authorization: "Bearer nested-secret" },
+            data: { access_token: "nested-access" },
+          },
+        },
       });
     });
     await logging.close();
@@ -70,6 +80,12 @@ test("routes global and thread logs to separate JSONL files", async () => {
     assert.equal(threadRecord.threadId, "thread-123");
     assert.equal(threadRecord.runId, "run-456");
     assert.equal(threadRecord.apiKey, "[Redacted]");
+    assert.equal(threadRecord.api_key, "[Redacted]");
+    assert.equal(threadRecord.access_token, "[Redacted]");
+    assert.equal(threadRecord.refresh_token, "[Redacted]");
+    assert.equal(JSON.stringify(threadRecord).includes("header-secret"), false);
+    assert.equal(JSON.stringify(threadRecord).includes("nested-secret"), false);
+    assert.equal(JSON.stringify(threadRecord).includes("nested-access"), false);
     assert.equal(threadLog.includes("runtime started"), false);
   } finally {
     await rm(root, { recursive: true, force: true });

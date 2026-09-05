@@ -309,3 +309,21 @@ test("local endpoint replacement remains staged and updates the registered adapt
     "http://127.0.0.1:2244",
   );
 });
+
+test("gateway validation preserves safe quota and authentication categories", async () => {
+  const quota = createHarness({
+    fetch: async () => new Response("limited", { status: 429 }),
+  });
+  await assert.rejects(
+    () => quota.service.createApiKeyDraft("api_key/google", "candidate"),
+    /Google quota or rate limit reached/,
+  );
+
+  const auth = createHarness({
+    fetch: async () => new Response("unauthorized", { status: 401 }),
+  });
+  await assert.rejects(
+    () => auth.service.createApiKeyDraft("api_key/google", "candidate"),
+    /Google credential was rejected/,
+  );
+});

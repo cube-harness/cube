@@ -16,6 +16,44 @@ export type RuntimeNotice = {
   message: string;
 };
 
+export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\b429\b|quota|rate.?limit|token limit|insufficient_quota/i.test(message)) {
+    return {
+      level: "error",
+      message: "Quota or token limit reached. Run /gateway or /model to continue.",
+    };
+  }
+  if (/\b40[13]\b|unauthor|forbidden|credential|api key|authentication|authorization|oauth|sign.?in/i.test(message)) {
+    return {
+      level: "error",
+      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
+    };
+  }
+  if (/unknown model|invalid model|model .*not available|catalog/i.test(message)) {
+    return {
+      level: "error",
+      message: "Model unavailable. Run /model or /gateway to choose another model.",
+    };
+  }
+  if (/config|failed to save|failed to write|gateway switch failed/i.test(message)) {
+    return {
+      level: "error",
+      message: "Could not save Cube configuration. The previous configuration is still active.",
+    };
+  }
+  if (/timeout|timed out|network|unavailable|offline|econn|fetch failed/i.test(message)) {
+    return {
+      level: "error",
+      message: "Gateway unavailable. Check the connection or run /gateway.",
+    };
+  }
+  return {
+    level: "error",
+    message: "Something went wrong. Check Cube logs for details.",
+  };
+};
+
 export type ToolApprovalResponse = {
   toolCallId: string;
   toolName: string;

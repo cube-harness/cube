@@ -42,7 +42,10 @@ const createScreen = () => {
       toggleTranscript: () => true,
       addMessage: (message: unknown) => calls.push(["message", message]),
     },
-    workingIndicator: { isActive: () => false },
+    workingIndicator: {
+      isActive: () => false,
+      stop: () => calls.push(["workingIndicator.stop"]),
+    },
     mount: (handlers: unknown) => calls.push(["mount", handlers]),
     startTerminal: () => calls.push(["startTerminal"]),
     stopTerminal: () => calls.push(["stopTerminal"]),
@@ -371,6 +374,34 @@ test("prepared startup bypasses onboarding when persisted readiness is complete"
   await launched.app.stop();
 });
 
+test("prepared startup renders setup failures after mount and allows cancellation", async () => {
+  const { screen, calls } = createScreen();
+  let attempts = 0;
+  screen.pickGateway = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("HTTP 401 leaked-secret");
+    return null;
+  };
+  const preflight = {
+    readiness: { ready: false, reason: "setup" },
+    gateway: { listChoices: async () => [] },
+  };
+
+  const launched = await startPreparedCube(preflight as never, screen, {
+    onExitRequested: () => undefined,
+  });
+
+  assert.equal(launched, null);
+  assert.equal(attempts, 2);
+  assert.deepEqual(calls.filter((call) => call[0] === "showNotice"), [[
+    "showNotice",
+    {
+      level: "error",
+      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
+    },
+  ]]);
+});
+
 test("CubeApp renders submitted user input before runtime submission settles", async () => {
   let resolveSubmit: ((result: PromptResult) => void) | undefined;
   const idle = { ...displayState("idle"), isRunning: false } as RuntimeDisplayState;
@@ -386,6 +417,41 @@ test("CubeApp renders submitted user input before runtime submission settles", a
   assert.deepEqual(calls[0], ["addUserMessage", "hello"]);
   resolveSubmit?.({ kind: "submitted" });
   await pending;
+});
+
+test("CubeApp stops working state and hides raw provider errors", async () => {
+  const { runtime } = createRuntime();
+  runtime.prompt.submit = async () => {
+    throw new Error("HTTP 401 Bearer leaked-secret");
+  };
+  const { screen, calls } = createScreen();
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+
+  await app.submitPrompt("hello");
+
+  assert.equal(calls.filter((call) => call[0] === "workingIndicator.stop").length, 1);
+  assert.deepEqual(calls.filter((call) => call[0] === "showNotice"), [[
+    "showNotice",
+    {
+      level: "error",
+      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
+    },
+  ]]);
+  assert.equal(JSON.stringify(calls).includes("leaked-secret"), false);
+});
+
+test("CubeApp stops working state for error notices returned by runtime", async () => {
+  const { runtime } = createRuntime();
+  runtime.prompt.submit = async () => ({
+    kind: "notice",
+    notice: { level: "error", message: "Gateway unavailable." },
+  });
+  const { screen, calls } = createScreen();
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+
+  await app.submitPrompt("hello");
+
+  assert.equal(calls.filter((call) => call[0] === "workingIndicator.stop").length, 1);
 });
 
 test("CubeApp does not render slash commands as conversation user messages", async () => {
@@ -639,7 +705,7 @@ test("CubeApp renders an upstream runtime error as one readable system notice", 
       "showNotice",
       {
         level: "error",
-        message: "Error: Provider is temporarily rate-limited",
+        message: "Quota or token limit reached. Run /gateway or /model to continue.",
       },
     ]],
   );

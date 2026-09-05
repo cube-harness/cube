@@ -5,7 +5,7 @@ import {
   parseSlashCommand,
   type SlashCommandContext,
 } from "../slash-commands.js";
-import type { PromptResult } from "../types.js";
+import { toRuntimeNotice, type PromptResult } from "../types.js";
 import type { ThreadService } from "./thread.service.js";
 
 type QueuedFollowUp = NonNullable<ReturnType<Session["followUps"]["dequeue"]>>;
@@ -30,16 +30,27 @@ export class PromptService {
     const trimmed = content.trim();
     if (!trimmed) return { kind: "ignored" };
 
-    const command = parseSlashCommand(trimmed);
-    if (command) {
-      await this.appendHistory(trimmed, this.thread.current() ?? "new thread");
-      return executeSlashCommand(command.name, command.argument, this.commands);
-    }
+    try {
+      const command = parseSlashCommand(trimmed);
+      if (command) {
+        await this.appendHistory(trimmed, this.thread.current() ?? "new thread");
+        return executeSlashCommand(command.name, command.argument, this.commands);
+      }
 
-    const threadId = await this.thread.ensureForPrompt(trimmed);
-    await this.appendHistory(trimmed, threadId);
-    await this.runWithThreadLogContext(() => this.session.followUp({ content: trimmed }));
-    return { kind: "submitted" };
+      const threadId = await this.thread.ensureForPrompt(trimmed);
+      await this.appendHistory(trimmed, threadId);
+      const warn = console.warn;
+      // ponytail: process-global during one queued turn; add a logger bridge if runtimes become concurrent.
+      console.warn = () => undefined;
+      try {
+        await this.runWithThreadLogContext(() => this.session.followUp({ content: trimmed }));
+      } finally {
+        console.warn = warn;
+      }
+      return { kind: "submitted" };
+    } catch (error) {
+      return { kind: "notice", notice: toRuntimeNotice(error) };
+    }
   }
 
   cancelLatestQueued(): string | null {

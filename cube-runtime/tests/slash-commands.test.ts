@@ -257,7 +257,7 @@ test("model command cannot select a model from another gateway", async () => {
     kind: "notice",
     notice: {
       level: "error",
-      message: "Model is not available through api_key/google.",
+      message: "Model unavailable. Run /model or /gateway to choose another model.",
     },
   });
 });
