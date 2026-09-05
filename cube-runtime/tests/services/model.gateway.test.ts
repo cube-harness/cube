@@ -95,3 +95,25 @@ test("ModelService restores config when live model apply fails", async () => {
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
+
+test("ModelService adopts the model committed by a gateway transaction", async () => {
+  const { directory, home } = await setup();
+  try {
+    const service = new ModelService(
+      home,
+      session,
+      { modelId: "google/gemini-old" },
+      () => undefined,
+      { listModels: async () => catalog },
+    );
+
+    service.adopt({ modelId: "google/gemini-next", reasoningEffort: "high" });
+
+    assert.deepEqual(service.current(), {
+      modelId: "google/gemini-next",
+      reasoningEffort: "high",
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});

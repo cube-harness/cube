@@ -1,5 +1,11 @@
 import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
-import type { GatewayId, ModelCatalog, ReasoningEffort } from "@cube/workspace";
+import type {
+  ApiKeyGatewayId,
+  GatewayId,
+  LocalGatewayId,
+  ModelCatalog,
+  ReasoningEffort,
+} from "@cube/workspace";
 
 export type RuntimeEvent = AgentControllerEvent;
 export type RuntimeDisplayState = Readonly<AgentControllerDisplayState>;
@@ -135,4 +141,10 @@ export type PromptResult =
   | { kind: "exit-requested" };
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
-export type { ModelCatalog, ReasoningEffort };
+export type {
+  ApiKeyGatewayId,
+  GatewayId,
+  LocalGatewayId,
+  ModelCatalog,
+  ReasoningEffort,
+};

@@ -1,46 +1,47 @@
 #!/usr/bin/env node
-import { createCubeRuntime } from "@cube/runtime";
+import { prepareCubeRuntime } from "@cube/runtime";
 import { ProcessTerminal, TuiMainScreen } from "@earendil-works/pi-tui";
-import { CubeApp } from "./app.js";
+import { startPreparedCube, type PreparedCube } from "./app.js";
 import { ChatScreen } from "./screens/chat.screen.js";
 
 export const startTui = async (): Promise<void> => {
-  const runtime = await createCubeRuntime();
-  const preference = runtime.preference.get();
-  const model = runtime.model.current();
+  const preflight = await prepareCubeRuntime();
+  const model = preflight.readiness.ready ? preflight.readiness.model : undefined;
   const screen = new ChatScreen({
     tui: new TuiMainScreen(new ProcessTerminal()),
-    basePath: runtime.workspaceRoot,
-    initialHistory: await runtime.getHistory(),
-    slashCommands: runtime.suggestions,
-    statusLine: preference.statusLine,
+    basePath: preflight.workspaceRoot,
+    initialHistory: preflight.history,
+    slashCommands: preflight.suggestions,
+    statusLine: preflight.preference.statusLine,
     initialInfo: {
-      model: `${model.modelId}${
-        model.reasoningEffort && model.reasoningEffort !== "none"
-          ? ` (${model.reasoningEffort})`
-          : ""
-      }`,
-      workspace: runtime.workspaceRoot,
+      model: model
+        ? `${model.modelId}${
+            model.reasoningEffort && model.reasoningEffort !== "none"
+              ? ` (${model.reasoningEffort})`
+              : ""
+          }`
+        : "Not configured",
+      workspace: preflight.workspaceRoot,
       agentMd: "AGENT.md (active)",
-      threadId: runtime.thread.current() ?? "new thread",
+      threadId: "new thread",
     },
   });
 
-  let app: CubeApp;
+  let launched: PreparedCube | null = null;
   let exitPromise: Promise<void> | undefined;
   const exit = (): Promise<void> => {
     exitPromise ??= (async () => {
-      await app.stop();
-      await runtime.shutdown();
+      await launched?.app.stop();
+      await launched?.runtime.shutdown();
       process.exit(0);
     })();
     return exitPromise;
   };
 
-  app = new CubeApp(runtime, screen, { onExitRequested: exit });
+  launched = await startPreparedCube(preflight, screen, { onExitRequested: exit });
+  if (!launched) return;
   process.once("SIGTERM", () => void exit());
-  process.on("SIGINT", () => void app.handleExit());
-  await app.start();
+  process.on("SIGINT", () => void launched?.app.handleExit());
 };
 
 startTui().catch((error: unknown) => {

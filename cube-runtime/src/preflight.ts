@@ -14,7 +14,12 @@ import { OpenAIAuthManager } from "./auth/auth-manager.js";
 import { createCubeRuntime, type CreateCubeRuntimeOptions } from "./bootstrap.js";
 import type { CubeRuntime } from "./runtime.js";
 import { GatewayService } from "./services/gateway.service.js";
-import type { GatewayReadiness, PreferenceState } from "./types.js";
+import { slashCommandSuggestions } from "./slash-commands.js";
+import type {
+  GatewayReadiness,
+  PreferenceState,
+  SlashCommandSuggestion,
+} from "./types.js";
 
 export type PrepareCubeRuntimeOptions = CreateCubeRuntimeOptions & {
   fetch?: typeof globalThis.fetch;
@@ -25,6 +30,7 @@ export type CubePreflight = {
   workspaceRoot: string;
   history: string[];
   preference: PreferenceState;
+  suggestions: SlashCommandSuggestion[];
   readiness: GatewayReadiness;
   gateway: Pick<
     GatewayService,
@@ -92,6 +98,7 @@ export const prepareCubeRuntime = async (
       appTitle: [...config.app_title],
       statusLine: [...config.status_line],
     },
+    suggestions: slashCommandSuggestions,
     readiness: await gateway.readiness(),
     gateway,
     start: async () => {

@@ -1,5 +1,6 @@
 import type {
   CubeRuntime,
+  CubePreflight,
   ModelState,
   PreferenceState,
   PromptResult,
@@ -15,6 +16,15 @@ import { setSyntaxTheme } from "./themes/syntax.theme.js";
 export type CubeAppOptions = {
   copyToClipboard?: (content: string) => Promise<boolean>;
   onExitRequested: () => void | Promise<void>;
+};
+
+export type CubeAppStartOptions = {
+  screenAlreadyMounted?: boolean;
+};
+
+export type PreparedCube = {
+  app: CubeApp;
+  runtime: CubeRuntime;
 };
 
 export class CubeApp {
@@ -41,10 +51,14 @@ export class CubeApp {
     this.preferences = runtime.preference.get();
   }
 
-  async start(): Promise<void> {
+  async start(options: CubeAppStartOptions = {}): Promise<void> {
     if (this.started) return;
     this.started = true;
-    this.screen.mount({ onSubmit: (content) => this.submitPrompt(content) });
+    if (options.screenAlreadyMounted) {
+      this.screen.setSubmitHandler((content) => this.submitPrompt(content));
+    } else {
+      this.screen.mount({ onSubmit: (content) => this.submitPrompt(content) });
+    }
     this.unsubscribeRuntime = this.runtime.subscribe((event) => this.handleRuntimeEvent(event));
     this.unsubscribeInput = this.screen.addInputListener((data) => {
       if (matchesBinding(data, "cube.transcript.toggle")) {
@@ -65,8 +79,13 @@ export class CubeApp {
       this.runtime.getDisplayState(),
       this.runtime.isApprovalPending(),
     );
+    this.screen.setInfo({
+      model: this.formatModel(this.currentModel),
+      workspace: this.runtime.workspaceRoot,
+      threadId: this.runtime.thread.current() ?? "new thread",
+    });
     this.applyPreferences(this.preferences);
-    this.screen.startTerminal();
+    if (!options.screenAlreadyMounted) this.screen.startTerminal();
   }
 
   async stop(): Promise<void> {
@@ -113,13 +132,24 @@ export class CubeApp {
         this.screen.showNotice(result.notice);
         return;
       case "models": {
-        const selection = await this.screen.pickModel(result.catalog, result.current);
+        const selection = await this.screen.pickModel(
+          result.gatewayId,
+          result.catalog,
+          result.current,
+        );
         if (selection) {
           await this.handlePromptResult({
             kind: "model",
             model: await this.runtime.model.set(selection),
           });
         }
+        return;
+      }
+      case "gateways": {
+        const selection = await this.screen.pickGateway(this.runtime.gateway, result.request);
+        if (!selection) return;
+        const state = await this.runtime.gateway.set(selection);
+        await this.handlePromptResult({ kind: "model", model: state.model });
         return;
       }
       case "model":
@@ -401,3 +431,26 @@ export class CubeApp {
     }`;
   }
 }
+
+export const startPreparedCube = async (
+  preflight: CubePreflight,
+  screen: ChatScreen,
+  options: CubeAppOptions,
+): Promise<PreparedCube | null> => {
+  screen.mount({ onSubmit: () => undefined });
+  screen.startTerminal();
+  if (!preflight.readiness.ready) {
+    const selection = await screen.pickGateway(preflight.gateway, {
+      choices: await preflight.gateway.listChoices(),
+    });
+    if (!selection) {
+      screen.stopTerminal();
+      return null;
+    }
+    await preflight.gateway.commitInitial(selection);
+  }
+  const runtime = await preflight.start();
+  const app = new CubeApp(runtime, screen, options);
+  await app.start({ screenAlreadyMounted: true });
+  return { app, runtime };
+};

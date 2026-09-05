@@ -40,6 +40,10 @@ export class ModelService {
     return copyState(this.state);
   }
 
+  adopt(selection: ModelSelection): void {
+    this.state = copyState(selection);
+  }
+
   async set(selection: ModelSelection): Promise<ModelState> {
     const catalog = await this.list();
     const model = Object.values(catalog.providers)
