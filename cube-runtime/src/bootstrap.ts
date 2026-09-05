@@ -84,20 +84,23 @@ export const createCubeRuntime = async (
     const thread = new ThreadService(session, async () => {
       await reloadCubeAgentSoul(composition!.agent, home);
     });
+    let model!: ModelService;
     const gateway = new GatewayService({
       config: configStore,
       auth: authStore,
       adapters: gateways.byGatewayId,
       catalog: modelManager,
       openAIAuth,
-      applyLiveSelection: (gatewayId, selection) =>
+      applyLiveSelection: (gatewayId, selection) => {
         updateCubeAgentModel(
           composition!.agent,
           toMastraRouterId(gatewayId, selection.modelId),
           selection.reasoningEffort,
-        ),
+        );
+        model.adopt(selection);
+      },
     });
-    const model = new ModelService(
+    model = new ModelService(
       home,
       session,
       {

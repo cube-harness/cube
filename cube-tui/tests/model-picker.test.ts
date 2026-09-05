@@ -1,184 +1,121 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import type { ModelCatalog } from "@cube/runtime";
 import {
   ModelPickerComponent,
-  type ProviderGroup,
   type ModelSelectionResult,
 } from "../src/components/model-picker.js";
 
-const sampleProviders: ProviderGroup[] = [
-  {
-    id: "google",
-    name: "Google",
-    models: [
-      {
-        modelId: "google/gemini-2.5-flash",
-        name: "Gemini 2.5 Flash",
+const catalog: ModelCatalog = {
+  version: 2,
+  updatedAt: "2026-09-05T00:00:00.000Z",
+  providers: {
+    google: {
+      name: "Google",
+      models: [{
+        modelId: "google/gemini-test",
+        name: "Gemini Test",
         reasoning: true,
-        reasoning_efforts: ["none", "low", "medium", "high"],
+        reasoning_efforts: ["none", "high"],
         tool_call: true,
-        attachment: true,
-        limit: { context: 1048576, output: 8192 },
-      },
-      {
-        modelId: "google/gemini-2.5-pro",
-        name: "Gemini 2.5 Pro",
-        reasoning: true,
-        reasoning_efforts: ["none", "low", "medium", "high"],
-        tool_call: true,
-        attachment: true,
-        limit: { context: 2097152, output: 8192 },
-      },
-    ],
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    models: [
-      {
-        modelId: "anthropic/claude-3-5-sonnet-latest",
-        name: "Claude 3.5 Sonnet",
+        structured_output: true,
+        attachment: false,
+        open_weights: false,
+        limit: { context: 128_000, output: 8_192 },
+        modalities: { input: ["text"], output: ["text"] },
+      }],
+    },
+    openrouter: {
+      name: "OpenRouter",
+      models: [{
+        modelId: "openrouter/other",
+        name: "Other",
         reasoning: false,
         tool_call: true,
-        attachment: true,
-        limit: { context: 200000, output: 8192 },
-      },
-    ],
+        structured_output: true,
+        attachment: false,
+        open_weights: false,
+        limit: { context: 128_000, output: 8_192 },
+        modalities: { input: ["text"], output: ["text"] },
+      }],
+    },
   },
-];
+};
 
-test("ModelPickerComponent renders within width limit", () => {
+test("model picker shows only the candidate gateway and stays within width", () => {
   const picker = new ModelPickerComponent({
-    providers: sampleProviders,
-    currentModelId: "google/gemini-2.5-flash",
-    onSelect: () => {},
-    onCancel: () => {},
+    gatewayId: "api_key/google",
+    catalog,
+    currentModelId: "google/gemini-test",
+    onSelect: () => undefined,
+    onCancel: () => undefined,
   });
 
-  const lines = picker.render(80);
-  assert.equal(lines.length > 0, true);
-  for (const line of lines) {
-    assert.equal(line.length <= 150, true);
-  }
+  const lines = picker.render(40);
+  assert.match(lines.join("\n"), /google\/gemini-test/);
+  assert.doesNotMatch(lines.join("\n"), /openrouter\/other/);
+  assert.equal(lines.every((line) => visibleWidth(line) <= 40), true);
 });
 
-test("ModelPickerComponent supports 3-step navigation for models with reasoning", () => {
+test("model picker selects model then reasoning effort without a provider step", () => {
   let result: ModelSelectionResult | undefined;
   const picker = new ModelPickerComponent({
-    providers: sampleProviders,
-    currentModelId: "google/gemini-2.5-flash",
-    onSelect: (r) => {
-      result = r;
-    },
-    onCancel: () => {},
+    gatewayId: "api_key/google",
+    catalog,
+    currentModelId: "google/gemini-test",
+    currentReasoningEffort: "high",
+    onSelect: (value) => { result = value; },
+    onCancel: () => undefined,
   });
 
-  // Step 1: Press Enter on Google
+  picker.handleInput("\r");
+  assert.match(picker.render(80).join("\n"), /Select Reasoning Effort/);
+  picker.handleInput("\x1b[B");
   picker.handleInput("\r");
 
-  // Step 2: Press Enter on Gemini 2.5 Flash (has reasoning: true) -> goes to step 3
-  picker.handleInput("\r");
-
-  // Step 3: Press Enter on reasoning effort (e.g. none / low / medium / high)
-  picker.handleInput("\r");
-
-  assert.ok(result);
-  assert.equal(result.modelId, "google/gemini-2.5-flash");
-  assert.ok(result.reasoningEffort);
+  assert.deepEqual(result, { modelId: "google/gemini-test", reasoningEffort: "high" });
 });
 
-test("ModelPickerComponent directly selects models without reasoning", () => {
-  let result: ModelSelectionResult | undefined;
-  const picker = new ModelPickerComponent({
-    providers: sampleProviders,
-    onSelect: (r) => {
-      result = r;
-    },
-    onCancel: () => {},
-  });
-
-  // Step 1: Type 'anthropic' to search
-  picker.handleInput("a");
-  picker.handleInput("n");
-  picker.handleInput("t");
-  picker.handleInput("\r");
-
-  // Step 2: Select Claude 3.5 Sonnet (reasoning: false) -> selected directly!
-  picker.handleInput("\r");
-
-  assert.ok(result);
-  assert.equal(result.modelId, "anthropic/claude-3-5-sonnet-latest");
-});
-
-test("ModelPickerComponent supports Esc to go back and clear search", () => {
+test("model picker Escape returns from reasoning then cancels", () => {
   let cancelled = false;
   const picker = new ModelPickerComponent({
-    providers: sampleProviders,
-    currentModelId: "google/gemini-2.5-flash",
-    onSelect: () => {},
-    onCancel: () => {
-      cancelled = true;
-    },
+    gatewayId: "api_key/google",
+    catalog,
+    onSelect: () => undefined,
+    onCancel: () => { cancelled = true; },
   });
 
-  // Type search in Step 1
-  picker.handleInput("g");
-  picker.handleInput("o");
-
-  // Esc clears search query first
+  picker.handleInput("\r");
   picker.handleInput("\x1b");
   assert.equal(cancelled, false);
-
-  // Esc now cancels
   picker.handleInput("\x1b");
   assert.equal(cancelled, true);
 });
 
-test("ModelPickerComponent renders custom reasoning_efforts for models supporting xhigh and max", () => {
+test("model picker keeps the current candidate model selected by default", () => {
   let result: ModelSelectionResult | undefined;
-  const customProviders: ProviderGroup[] = [
-    {
-      id: "openrouter",
-      name: "OpenRouter",
-      models: [
-        {
-          modelId: "openrouter/custom-reasoner",
-          name: "Custom Reasoner",
-          reasoning: true,
-          reasoning_efforts: ["none", "low", "high", "xhigh", "max"],
-          limit: { context: 128000, output: 8192 },
-        },
-      ],
+  const currentSecond: ModelCatalog = {
+    ...catalog,
+    providers: {
+      google: {
+        ...catalog.providers.google!,
+        models: [
+          { ...catalog.providers.google!.models[0]!, modelId: "google/first", reasoning_efforts: undefined },
+          { ...catalog.providers.google!.models[0]!, modelId: "google/current", reasoning_efforts: undefined },
+        ],
+      },
     },
-  ];
-
+  };
   const picker = new ModelPickerComponent({
-    providers: customProviders,
-    onSelect: (r) => {
-      result = r;
-    },
-    onCancel: () => {},
+    gatewayId: "api_key/google",
+    catalog: currentSecond,
+    currentModelId: "google/current",
+    onSelect: (value) => { result = value; },
+    onCancel: () => undefined,
   });
 
-  // Step 1: Open OpenRouter
-  picker.handleInput("\r");
-  // Step 2: Open Custom Reasoner
   picker.handleInput("\r");
 
-  // Step 3: Render reasoning step
-  const lines = picker.render(80);
-  const text = lines.join("\n");
-  assert.match(text, /xhigh/);
-  assert.match(text, /max/);
-
-  // Navigate down to 'max' and select
-  picker.handleInput("\x1b[B"); // low
-  picker.handleInput("\x1b[B"); // high
-  picker.handleInput("\x1b[B"); // xhigh
-  picker.handleInput("\x1b[B"); // max
-  picker.handleInput("\r");
-
-  assert.ok(result);
-  assert.equal(result.modelId, "openrouter/custom-reasoner");
-  assert.equal(result.reasoningEffort, "max");
+  assert.deepEqual(result, { modelId: "google/current" });
 });

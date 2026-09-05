@@ -8,7 +8,7 @@ import type {
   RuntimeEventListener,
   ToolApprovalResponse,
 } from "@cube/runtime";
-import { CubeApp } from "../src/app.js";
+import { CubeApp, startPreparedCube } from "../src/app.js";
 import type { ChatScreen } from "../src/screens/chat.screen.js";
 
 const displayState = (text: string, queuedFollowUps = 0) => ({
@@ -58,8 +58,10 @@ const createScreen = () => {
     clearConversation: () => calls.push(["clearConversation"]),
     setInfo: (info: unknown) => calls.push(["setInfo", info]),
     setStatusLine: (fields: string[]) => calls.push(["setStatusLine", fields]),
+    setSubmitHandler: (handler: unknown) => calls.push(["setSubmitHandler", handler]),
     pickModel: async () =>
       ({ modelId: "openrouter/test", reasoningEffort: "high" }) as ModelSelection,
+    pickGateway: async () => ({ draftId: "draft-1", model: { modelId: "google/new" } }),
     pickThread: async () => "thread-2",
     pickTheme: async () => "dracula",
     pickTitle: async () => ["model", "threadId"],
@@ -103,6 +105,12 @@ const createRuntime = (initial = displayState("initial")) => {
       set: async (selection: ModelSelection) => {
         calls.push(["model.set", selection]);
         return selection;
+      },
+    },
+    gateway: {
+      set: async (selection: unknown) => {
+        calls.push(["gateway.set", selection]);
+        return { gatewayId: "api_key/google", model: { modelId: "google/new" } };
       },
     },
     preference: {
@@ -205,6 +213,7 @@ test("CubeApp maps domain results to client interactions without raw Session acc
 
   await app.handlePromptResult({
     kind: "models",
+    gatewayId: "api_key/google",
     catalog,
     current: { modelId: "google/gemini-3.7-flash" },
   });
@@ -252,6 +261,116 @@ test("CubeApp maps domain results to client interactions without raw Session acc
   assert.equal("session" in runtime, false);
 });
 
+test("CubeApp routes gateway changes through the shared picker and runtime transaction", async () => {
+  const { runtime, calls: runtimeCalls } = createRuntime();
+  const { screen } = createScreen();
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+
+  await app.handlePromptResult({
+    kind: "gateways",
+    request: {
+      choices: [{
+        gatewayId: "api_key/google",
+        group: "api_key",
+        provider: "google",
+        configured: false,
+      }],
+    },
+  });
+
+  assert.deepEqual(runtimeCalls, [[
+    "gateway.set",
+    { draftId: "draft-1", model: { modelId: "google/new" } },
+  ]]);
+});
+
+test("CubeApp attaches to an already mounted screen without mounting it twice", async () => {
+  const { runtime } = createRuntime();
+  const { screen, calls } = createScreen();
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+
+  await app.start({ screenAlreadyMounted: true });
+
+  assert.equal(calls.some((call) => call[0] === "mount"), false);
+  assert.equal(calls.some((call) => call[0] === "startTerminal"), false);
+  assert.equal(calls.filter((call) => call[0] === "setSubmitHandler").length, 1);
+  await app.stop();
+});
+
+test("prepared startup mounts before onboarding and commits before runtime construction", async () => {
+  const { runtime } = createRuntime();
+  const { screen } = createScreen();
+  const order: string[] = [];
+  screen.mount = () => { order.push("mount"); };
+  screen.startTerminal = () => { order.push("terminal"); };
+  screen.pickGateway = async () => {
+    order.push("picker");
+    return { draftId: "draft-1", model: { modelId: "google/new" } };
+  };
+  screen.setSubmitHandler = () => { order.push("attach"); };
+  const preflight = {
+    readiness: { ready: false, reason: "Choose a gateway and model to continue." },
+    gateway: {
+      listChoices: async () => [{
+        gatewayId: "api_key/google",
+        group: "api_key",
+        provider: "google",
+        configured: false,
+      }],
+      commitInitial: async () => {
+        order.push("commit");
+        return { gatewayId: "api_key/google", model: { modelId: "google/new" } };
+      },
+    },
+    start: async () => {
+      order.push("runtime");
+      return runtime;
+    },
+  };
+
+  const launched = await startPreparedCube(preflight as never, screen, {
+    onExitRequested: () => undefined,
+  });
+
+  assert.deepEqual(order.slice(0, 6), [
+    "mount",
+    "terminal",
+    "picker",
+    "commit",
+    "runtime",
+    "attach",
+  ]);
+  assert.ok(launched);
+  await launched.app.stop();
+});
+
+test("prepared startup bypasses onboarding when persisted readiness is complete", async () => {
+  const { runtime } = createRuntime();
+  const { screen } = createScreen();
+  let picked = false;
+  screen.pickGateway = async () => {
+    picked = true;
+    return null;
+  };
+  const preflight = {
+    readiness: {
+      ready: true,
+      gatewayId: "api_key/google",
+      model: { modelId: "google/gemini-3.7-flash" },
+    },
+    gateway: { listChoices: async () => [] },
+    start: async () => runtime,
+  };
+
+  const launched = await startPreparedCube(preflight as never, screen, {
+    onExitRequested: () => undefined,
+  });
+
+  assert.equal(picked, false);
+  assert.ok(launched);
+  await launched.app.stop();
+});
+
 test("CubeApp renders submitted user input before runtime submission settles", async () => {
   let resolveSubmit: ((result: PromptResult) => void) | undefined;
   const idle = { ...displayState("idle"), isRunning: false } as RuntimeDisplayState;
@@ -274,6 +393,7 @@ test("CubeApp does not render slash commands as conversation user messages", asy
   const { runtime } = createRuntime(idle);
   runtime.prompt.submit = async () => ({
     kind: "models",
+    gatewayId: "api_key/google",
     catalog: { updatedAt: "1970-01-01T00:00:00.000Z", providers: {} },
     current: { modelId: "google/gemini-3.7-flash" },
   });

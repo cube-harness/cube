@@ -139,6 +139,63 @@ test("ChatScreen routes only the native message to the list and lifecycle to the
   screen.unmount();
 });
 
+test("ChatScreen reuses one gateway flow for stored configuration and model selection", async () => {
+  const fake = createTui();
+  const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });
+  screen.mount({ onSubmit: async () => undefined });
+  const gateway = {
+    createStoredDraft: async () => ({
+      draftId: "draft-1",
+      gatewayId: "api_key/google",
+      catalog: {
+        version: 2,
+        updatedAt: "2026-09-05T00:00:00.000Z",
+        providers: {
+          google: {
+            name: "Google",
+            models: [{
+              modelId: "google/gemini-test",
+              name: "Gemini Test",
+              reasoning: false,
+              tool_call: true,
+              structured_output: true,
+              attachment: false,
+              open_weights: false,
+              limit: { context: 128_000, output: 8_192 },
+              modalities: { input: ["text"], output: ["text"] },
+            }],
+          },
+        },
+      },
+      currentModelId: "google/gemini-test",
+    }),
+  };
+
+  const pending = screen.pickGateway(gateway as never, {
+    choices: [{
+      gatewayId: "api_key/google",
+      group: "api_key",
+      provider: "google",
+      configured: true,
+    }],
+  });
+  let picker = fake.getFocused() as Component & { handleInput(data: string): void };
+  picker.handleInput("\r");
+  picker.handleInput("\r");
+  picker.handleInput("\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  picker = fake.getFocused() as Component & { handleInput(data: string): void };
+  picker.handleInput("\r");
+
+  assert.deepEqual(await pending, {
+    draftId: "draft-1",
+    model: { modelId: "google/gemini-test" },
+  });
+  assert.equal(fake.getFocused(), screen.promptEditor);
+  screen.unmount();
+});
+
 test("ChatScreen pauses prompt cursor blinking while the working indicator spins", () => {
   const fake = createTui();
   const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });
