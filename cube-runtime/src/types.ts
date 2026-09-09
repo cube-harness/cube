@@ -17,41 +17,33 @@ export type RuntimeNotice = {
 };
 
 export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/\b429\b|quota|rate.?limit|token limit|insufficient_quota/i.test(message)) {
-    return {
-      level: "error",
-      message: "Quota or token limit reached. Run /gateway or /model to continue.",
-    };
+  let details = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  let message = typeof error === "string" ? error
+    : typeof details.message === "string" ? details.message : "";
+  // Mastra can put a serialized error object in Error.message.
+  if (message.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        details = { ...details, ...parsed };
+        message = typeof parsed.message === "string" ? parsed.message : "";
+      }
+    } catch { /* Not JSON: preserve the original message. */ }
   }
-  if (/\b40[13]\b|unauthor|forbidden|credential|api key|authentication|authorization|oauth|sign.?in/i.test(message)) {
-    return {
-      level: "error",
-      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
-    };
+  const status = details.statusCode ?? details.code;
+  if (typeof status === "number" && status >= 100 && status <= 599) {
+    if (!message.includes(String(status))) message = `HTTP ${status}${message ? `: ${message}` : ""}`;
+  } else if (!message && typeof status === "string") {
+    message = status;
   }
-  if (/unknown model|invalid model|model .*not available|catalog/i.test(message)) {
-    return {
-      level: "error",
-      message: "Model unavailable. Run /model or /gateway to choose another model.",
-    };
-  }
-  if (/config|failed to save|failed to write|gateway switch failed/i.test(message)) {
-    return {
-      level: "error",
-      message: "Could not save Cube configuration. The previous configuration is still active.",
-    };
-  }
-  if (/timeout|timed out|network|unavailable|offline|econn|fetch failed/i.test(message)) {
-    return {
-      level: "error",
-      message: "Gateway unavailable. Check the connection or run /gateway.",
-    };
-  }
-  return {
-    level: "error",
-    message: "Something went wrong. Check Cube logs for details.",
-  };
+
+  // Only display the message, never serialize request bodies, headers or the stack.
+  // Redact credentials echoed in provider messages without replacing the error itself.
+  message = message
+    .replace(/\b(Bearer|Basic)\s+[^\s"',;]+/gi, "$1 [Redacted]")
+    .replace(/(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s&,;}]+)/gi, "$1[Redacted]")
+    .replace(/\b(?:sk-[\w-]+|AIza[\w-]+)\b/g, "[Redacted]");
+  return { level: "error", message: message.trim() || "Unknown error. Check Cube logs for details." };
 };
 
 export type ToolApprovalResponse = {
@@ -75,7 +67,7 @@ export type ModelState = ModelSelection;
 
 export type GatewayChoice = {
   gatewayId: GatewayId;
-  group: "api_key" | "subscription" | "local";
+  group: "api_key" | "oauth" | "local";
   provider: string;
   configured: boolean;
 };
@@ -96,6 +88,9 @@ export type GatewayState = {
   gatewayId: GatewayId;
   model: ModelState;
 };
+
+export type CredentialGatewayId = Exclude<GatewayId, LocalGatewayId>;
+export type GatewayRemovalResult = { gatewayId: CredentialGatewayId; active: boolean; cacheCleared: boolean };
 
 export type GatewaySetupRequest = {
   choices: GatewayChoice[];
@@ -135,7 +130,8 @@ export type UsageMetrics = {
   capabilities: string[];
   directory?: string;
   sessionId?: string;
-  contextLimit: number;
+  capabilitiesComplete?: boolean;
+  contextLimit?: number;
   maxOutput?: number;
   activeTurnTokens?: number;
   promptTokens: number;

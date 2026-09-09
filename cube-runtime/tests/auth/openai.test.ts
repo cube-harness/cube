@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { OpenAISubscriptionCredential } from "@cube/workspace";
+import net from "node:net";
+import type { OpenAIOAuthCredential } from "@cube/workspace";
 import {
   buildOpenAIAuthorizationUrl,
   createOpenAIPkce,
   exchangeOpenAIAuthorizationCode,
   beginOpenAILogin,
+  createOpenAICallback,
   parseOpenAICallback,
   tokenResponseToCredential,
 } from "../../src/auth/openai.js";
@@ -105,7 +107,7 @@ test("exchanges an authorization code without exposing it in an error", async ()
     refresh_token: "refresh",
     expires_at: 3_601_000,
     account_id: "account-1",
-  } satisfies OpenAISubscriptionCredential);
+  } satisfies OpenAIOAuthCredential);
 
   await assert.rejects(
     () => exchangeOpenAIAuthorizationCode(
@@ -129,4 +131,47 @@ test("validates token claims before producing a stored credential", () => {
     }, 0),
     /OpenAI account information is missing/,
   );
+});
+
+test("browser preconnect does not hold the successful callback before token exchange", async () => {
+  const reservation = net.createServer();
+  await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+  const port = (reservation.address() as net.AddressInfo).port;
+  await new Promise<void>((resolve) => reservation.close(() => resolve()));
+  const redirectUri = `http://127.0.0.1:${port}/auth/callback`;
+  const callback = await createOpenAICallback("expected", redirectUri);
+  const preconnect = net.connect(port, "127.0.0.1");
+  await new Promise<void>((resolve) => preconnect.once("connect", resolve));
+  try {
+    const response = await fetch(`${redirectUri}?code=accepted&state=expected`);
+    assert.equal(response.status, 200);
+    await response.text();
+    const result = await Promise.race([
+      callback.completion,
+      new Promise<string>((resolve) => setTimeout(() => resolve("callback-stalled"), 500)),
+    ]);
+    assert.equal(result, "accepted");
+  } finally {
+    preconnect.destroy();
+    await callback.close();
+  }
+});
+
+test("cancel stops token exchange even after the callback has completed", async () => {
+  let started!: () => void;
+  const exchanging = new Promise<void>((resolve) => { started = resolve; });
+  let aborted = false;
+  const login = await beginOpenAILogin({
+    createCallback: async () => ({ completion: Promise.resolve("code"), close: async () => undefined }),
+    openExternalUrl: async () => undefined,
+    fetch: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => { aborted = true; reject(new Error("cancelled")); });
+      started();
+    }),
+  });
+  const completion = assert.rejects(login.completion, /sign-in could not be completed/);
+  await exchanging;
+  await login.cancel();
+  assert.equal(aborted, true);
+  await completion;
 });

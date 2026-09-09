@@ -6,6 +6,39 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { Bootstrap } from "../src/bootstrap.js";
 import { HomeManager } from "../src/home-manager.js";
 import { AuthStore } from "../src/store/auth.store.js";
+import type { CubeAuth } from "../src/schemas/auth.schema.js";
+
+test("auth updates for the same home cannot let a delayed refresh overwrite a newer account", async context => {
+  const home = new HomeManager({ cubeHome: path.join(os.tmpdir(), "cube-auth-write-order") });
+  let document: CubeAuth = { api_keys: {}, oauth: {} };
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void;
+  const writing = new Promise<void>(resolve => { started = resolve; });
+  const refreshStore = new AuthStore(home, async (_path, content) => {
+    started();
+    await barrier;
+    document = JSON.parse(content);
+  });
+  const loginStore = new AuthStore(home, async (_path, content) => { document = JSON.parse(content); });
+  // Keep the real read/mutate/write coordinator; only storage I/O is controlled.
+  context.mock.method(refreshStore, "read", async () => structuredClone(document));
+  context.mock.method(loginStore, "read", async () => structuredClone(document));
+  const refresh = refreshStore.update(auth => ({ ...auth, oauth: { xai: {
+    access_token: "refreshed-old", refresh_token: "old-refresh", expires_at: 3600000,
+  } } }));
+  await writing;
+  const replacement = loginStore.update(auth => ({ ...auth, oauth: { xai: {
+    access_token: "new-account", refresh_token: "new-refresh", expires_at: 3600000,
+  } } }));
+  await new Promise(resolve => setImmediate(resolve));
+  release();
+  await Promise.all([refresh, replacement]);
+  assert.equal(document.oauth.xai?.access_token, "new-account");
+  await assert.rejects(() => loginStore.update(() => { throw new Error("failed update"); }));
+  await loginStore.replaceApiKey("google", "after-failure");
+  assert.equal(document.api_keys.google?.api_key, "after-failure");
+});
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-auth-store-test-"));
@@ -13,7 +46,7 @@ const createTestHome = async () => {
   await home.ensure();
   await writeFile(
     home.getAuthPath(),
-    JSON.stringify({ version: 1, api_keys: {}, subscriptions: {} }),
+    JSON.stringify({ api_keys: {}, oauth: {} }),
     "utf8",
   );
   return { home, tmp };
@@ -21,6 +54,23 @@ const createTestHome = async () => {
 
 const cleanup = (tmp: string) =>
   rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
+test("AuthStore keeps all requested provider keys separate, including Coding Plans", async () => {
+  const { home, tmp } = await createTestHome();
+  const providers = ["google", "openrouter", "openai", "anthropic", "groq", "xai", "mistral",
+    "deepseek", "moonshotai", "nvidia", "poolside", "zai", "zai-coding-plan",
+    "alibaba", "alibaba-coding-plan", "huggingface"] as const;
+  try {
+    const auth = new AuthStore(home);
+    for (const provider of providers) await auth.replaceApiKey(provider, `test-${provider}`);
+    await auth.replaceApiKey("zai-coding-plan", "replacement-coding-key");
+    const reloaded = new AuthStore(home);
+    for (const provider of providers) {
+      assert.equal(await reloaded.getApiKey(provider), provider === "zai-coding-plan"
+        ? "replacement-coding-key" : `test-${provider}`);
+    }
+  } finally { await cleanup(tmp); }
+});
 
 test("AuthStore preserves API keys for other providers when one key is replaced", async () => {
   const { home, tmp } = await createTestHome();
@@ -38,18 +88,18 @@ test("AuthStore preserves API keys for other providers when one key is replaced"
   }
 });
 
-test("AuthStore preserves API keys while replacing the OpenAI subscription", async () => {
+test("AuthStore preserves API keys while replacing the OpenAI OAuth", async () => {
   const { home, tmp } = await createTestHome();
   try {
     const auth = new AuthStore(home);
     await auth.replaceApiKey("google", "google-secret");
-    await auth.replaceOpenAISubscription({
+    await auth.replaceOpenAIOAuth({
       access_token: "access-one",
       refresh_token: "refresh-one",
       expires_at: 100,
       account_id: "account-one",
     });
-    await auth.replaceOpenAISubscription({
+    await auth.replaceOpenAIOAuth({
       access_token: "access-two",
       refresh_token: "refresh-two",
       expires_at: 200,
@@ -57,7 +107,7 @@ test("AuthStore preserves API keys while replacing the OpenAI subscription", asy
     });
 
     assert.equal(await auth.getApiKey("google"), "google-secret");
-    assert.deepEqual(await auth.getOpenAISubscription(), {
+    assert.deepEqual(await auth.getOpenAIOAuth(), {
       access_token: "access-two",
       refresh_token: "refresh-two",
       expires_at: 200,
@@ -148,9 +198,8 @@ test("Bootstrap seeds a valid empty auth store and does not load Cube-home .env"
     await new Bootstrap(home).run();
 
     assert.deepEqual(await new AuthStore(home).read(), {
-      version: 1,
       api_keys: {},
-      subscriptions: {},
+      oauth: {},
     });
     assert.equal(process.env[variable], undefined);
   } finally {

@@ -1,5 +1,20 @@
 import { z } from "zod";
-import { GatewayIdSchema } from "../gateway.js";
+import { ApiKeyProviderSchema } from "./auth.schema.js";
+
+export const GATEWAY_IDS = [
+  ...ApiKeyProviderSchema.options.map((provider) => `api_key/${provider}` as const),
+  "oauth/openai",
+  "oauth/xai",
+  "oauth/anthropic",
+  "local/ollama",
+  "local/lmstudio",
+] as const;
+
+export const GatewayIdSchema = z.enum(GATEWAY_IDS);
+
+export type GatewayId = z.infer<typeof GatewayIdSchema>;
+export type ApiKeyGatewayId = Extract<GatewayId, `api_key/${string}`>;
+export type LocalGatewayId = Extract<GatewayId, `local/${string}`>;
 
 const ratio = z.number().gt(0).lte(1);
 const positiveInteger = z.number().int().positive();
@@ -233,32 +248,20 @@ const gatewayOptions = z.object({
   }).strict().optional(),
 }).strict().default({});
 
-export const LegacyConfigSchema = z.object({
-  version: z.literal(1),
-  model: modelReference,
-  fallback_model: modelReference.nullable(),
-  ...configSettingsShape,
-}).strict();
-
 export const ConfigSchema = z.object({
-  version: z.literal(2),
   gateway: GatewayIdSchema.optional(),
   model: modelReference.optional(),
   gateway_options: gatewayOptions,
   ...configSettingsShape,
 }).strict();
 
-export const RunnableConfigSchema = z.object({
-  version: z.literal(2),
+export const RunnableConfigSchema = ConfigSchema.extend({
   gateway: GatewayIdSchema,
   model: modelReference,
-  gateway_options: gatewayOptions,
-  ...configSettingsShape,
-}).strict();
+});
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type CubeConfigDocument = z.infer<typeof ConfigSchema>;
 export type RunnableCubeConfig = z.infer<typeof RunnableConfigSchema>;
 export type CubeConfig = RunnableCubeConfig;
-export type LegacyCubeConfig = z.infer<typeof LegacyConfigSchema>;

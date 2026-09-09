@@ -3,29 +3,33 @@ import { prepareCubeRuntime } from "@cube/runtime";
 import { ProcessTerminal, TuiMainScreen } from "@earendil-works/pi-tui";
 import { startPreparedCube, type PreparedCube } from "./app.js";
 import { ChatScreen } from "./screens/chat.screen.js";
+import { OnBoardScreen } from "./screens/on-board.screen.js";
 
 export const startTui = async (): Promise<void> => {
-  const preflight = await prepareCubeRuntime();
-  const model = preflight.readiness.ready ? preflight.readiness.model : undefined;
-  const screen = new ChatScreen({
-    tui: new TuiMainScreen(new ProcessTerminal()),
-    basePath: preflight.workspaceRoot,
-    initialHistory: preflight.history,
-    slashCommands: preflight.suggestions,
-    statusLine: preflight.preference.statusLine,
-    initialInfo: {
-      model: model
-        ? `${model.modelId}${
-            model.reasoningEffort && model.reasoningEffort !== "none"
-              ? ` (${model.reasoningEffort})`
-              : ""
-          }`
-        : "Not configured",
-      workspace: preflight.workspaceRoot,
-      agentMd: "AGENT.md (active)",
-      threadId: "new thread",
-    },
-  });
+  const tui = new TuiMainScreen(new ProcessTerminal());
+  const onboarding = new OnBoardScreen(tui);
+  const createScreen = (bootstrap: Awaited<ReturnType<typeof prepareCubeRuntime>>) => {
+    const model = bootstrap.readiness.ready ? bootstrap.readiness.model : undefined;
+    return new ChatScreen({
+      tui,
+      basePath: bootstrap.workspaceRoot,
+      initialHistory: bootstrap.history,
+      slashCommands: bootstrap.suggestions,
+      statusLine: bootstrap.preference.statusLine,
+      initialInfo: {
+        model: model
+          ? `${model.modelId}${
+              model.reasoningEffort && model.reasoningEffort !== "none"
+                ? ` (${model.reasoningEffort})`
+                : ""
+            }`
+          : "Not configured",
+        workspace: bootstrap.workspaceRoot,
+        agentMd: "AGENT.md (active)",
+        threadId: "new thread",
+      },
+    });
+  };
 
   let launched: PreparedCube | null = null;
   let exitPromise: Promise<void> | undefined;
@@ -38,7 +42,7 @@ export const startTui = async (): Promise<void> => {
     return exitPromise;
   };
 
-  launched = await startPreparedCube(preflight, screen, { onExitRequested: exit });
+  launched = await startPreparedCube(prepareCubeRuntime, createScreen, { onExitRequested: exit }, onboarding);
   if (!launched) return;
   process.once("SIGTERM", () => void exit());
   process.on("SIGINT", () => void launched?.app.handleExit());

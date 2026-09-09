@@ -1,12 +1,8 @@
-import { CancellableLoader, type Component, type TUI } from "@earendil-works/pi-tui";
+import { type Component, type TUI } from "@earendil-works/pi-tui";
 import type {
-  CubeRuntime,
-  ApiKeyGatewayId,
-  GatewayDraft,
   GatewayId,
   GatewaySelection,
   GatewaySetupRequest,
-  LocalGatewayId,
   ModelCatalog,
   ModelSelection,
   ModelState,
@@ -28,29 +24,15 @@ import { Footer } from "../components/footer.js";
 import { InfoBox, type InfoBoxContent } from "../components/info-box.js";
 import { MessageList } from "../components/message-list.js";
 import { ModelPickerComponent } from "../components/model-picker.js";
-import {
-  GatewayPickerComponent,
-  type GatewayPickerSelection,
-} from "../components/gateway-picker.js";
-import { OAuthLoginComponent } from "../components/oauth-login.js";
-import { SecretInput } from "../components/secret-input.js";
+import { GatewaySetupComponent, type GatewaySetupOptions } from "../components/gateway-picker.js";
 import { PromptEditor } from "../components/prompt-editor.js";
+import { Card } from "../components/card.js";
 import { StatusLinePickerComponent } from "../components/statusline-picker.js";
 import { ThemePickerOverlay } from "../components/theme-picker.js";
 import { ThreadPickerOverlay } from "../components/thread-picker.js";
 import { TitlePickerComponent } from "../components/title-picker.js";
 import { renderUsageBoxToString } from "../components/usage-box.js";
 import { WorkingIndicator } from "../components/working-indicator.js";
-import { appTheme } from "../themes/app.theme.js";
-
-type GatewayFlow = Pick<
-  CubeRuntime["gateway"],
-  | "createStoredDraft"
-  | "createApiKeyDraft"
-  | "createLocalDraft"
-  | "beginOpenAILogin"
-  | "discardDraft"
->;
 
 export type ChatScreenOptions = {
   tui: TUI;
@@ -285,116 +267,21 @@ export class ChatScreen {
     );
   }
 
-  async pickGateway(
-    gateway: GatewayFlow,
+  pickGateway(
+    gateway: GatewaySetupOptions["gateway"],
     request: GatewaySetupRequest,
   ): Promise<GatewaySelection | null> {
-    const selected = await this.showOverlay<GatewayPickerSelection | null>(
-      (finish) => new GatewayPickerComponent({
-        choices: request.choices,
+    return this.showOverlay<GatewaySelection | null | Error>((finish) =>
+      new GatewaySetupComponent({
+      onNotice: (notice) => this.showNotice(notice),
+        tui: this.options.tui,
+        gateway,
+        request,
         onSelect: finish,
         onCancel: () => finish(null),
+        onError: (error) => finish(error instanceof Error ? error : new Error(String(error))),
       }),
-    );
-    if (!selected) return null;
-
-    let draft: GatewayDraft | null;
-    if (!selected.replace) {
-      draft = await this.loadDraft((signal) =>
-        gateway.createStoredDraft(selected.gatewayId, signal)
-      );
-    } else if (selected.gatewayId.startsWith("api_key/")) {
-      const key = await this.askValue(
-        (selected.gatewayId.split("/")[1] ?? "") + " API key",
-      );
-      if (!key) return null;
-      draft = await this.loadDraft((signal) =>
-        gateway.createApiKeyDraft(selected.gatewayId as ApiKeyGatewayId, key, signal)
-      );
-    } else if (selected.gatewayId.startsWith("local/")) {
-      const endpoint = await this.askValue(
-        selected.gatewayId.endsWith("ollama") ? "Ollama endpoint" : "LM Studio endpoint",
-        false,
-        selected.gatewayId.endsWith("ollama")
-          ? "http://127.0.0.1:11434"
-          : "http://127.0.0.1:1234/v1",
-      );
-      if (!endpoint) return null;
-      draft = await this.loadDraft((signal) =>
-        gateway.createLocalDraft(selected.gatewayId as LocalGatewayId, endpoint, signal)
-      );
-    } else {
-      const login = await gateway.beginOpenAILogin();
-      const result = await this.showOverlay<GatewayDraft | null | Error>(
-        (finish) => new OAuthLoginComponent<GatewayDraft>({
-          tui: this.options.tui,
-          ...login,
-          onComplete: finish,
-          onCancel: () => finish(null),
-          onError: (error) =>
-            finish(error instanceof Error ? error : new Error(String(error))),
-        }),
-      );
-      if (result instanceof Error) throw result;
-      draft = result;
-    }
-    if (!draft) return null;
-
-    const firstModel = Object.values(draft.catalog.providers)
-      .flatMap((provider) => provider.models)[0]?.modelId;
-    if (!firstModel) {
-      gateway.discardDraft(draft.draftId);
-      this.showNotice({
-        level: "error",
-        message: "No models are available for this gateway.",
-      });
-      return null;
-    }
-    const current = request.current?.gatewayId === draft.gatewayId
-      ? request.current.model
-      : { modelId: draft.currentModelId ?? firstModel };
-    const model = await this.pickModel(draft.gatewayId, draft.catalog, current);
-    if (!model) {
-      gateway.discardDraft(draft.draftId);
-      return null;
-    }
-    return { draftId: draft.draftId, model };
-  }
-
-  private askValue(
-    title: string,
-    masked = true,
-    initialValue?: string,
-  ): Promise<string | null> {
-    return this.showOverlay<string | null>(
-      (finish) => new SecretInput({
-        title,
-        masked,
-        initialValue,
-        onSubmit: finish,
-        onCancel: () => finish(null),
-      }),
-    );
-  }
-
-  private loadDraft(
-    load: (signal: AbortSignal) => Promise<GatewayDraft>,
-  ): Promise<GatewayDraft | null> {
-    return this.showOverlay<GatewayDraft | null | Error>((finish) => {
-      const loader = new CancellableLoader(
-        this.options.tui,
-        appTheme.ui.primary,
-        appTheme.ui.muted,
-        "Checking gateway…",
-      );
-      loader.onAbort = () => finish(null);
-      loader.start();
-      void load(loader.signal).then(
-        finish,
-        (error) => finish(error instanceof Error ? error : new Error(String(error))),
-      ).finally(() => loader.dispose());
-      return loader;
-    }).then((result) => {
+    ).then((result) => {
       if (result instanceof Error) throw result;
       return result;
     });
@@ -502,7 +389,7 @@ export class ChatScreen {
         resolve(value);
       };
 
-      overlay = create(finish);
+      overlay = new Card(create(finish));
       onOpen?.(finish);
       this.options.tui.removeChild(this.footer);
       this.options.tui.removeChild(this.promptEditor);

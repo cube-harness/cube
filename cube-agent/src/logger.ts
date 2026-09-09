@@ -82,6 +82,14 @@ export const createCubeLogger = async (home: HomeManager): Promise<CubeLogging> 
     prettyPrint: false,
     transports: { file: transport },
     mixin: () => logContext.getStore() ?? {},
+    formatters: {
+      log: (record) => {
+        const error = record.error;
+        return error instanceof Error
+          ? { ...record, error: { ...error, name: error.name, message: error.message, stack: error.stack } }
+          : record;
+      },
+    },
     redact: {
       paths: [
         "api_key",

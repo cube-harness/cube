@@ -8,7 +8,6 @@ import {
 } from "../src/slash-commands.js";
 
 const catalog = {
-  version: 2 as const,
   updatedAt: "2026-09-05T00:00:00.000Z",
   providers: {
     google: {
@@ -257,7 +256,7 @@ test("model command cannot select a model from another gateway", async () => {
     kind: "notice",
     notice: {
       level: "error",
-      message: "Model unavailable. Run /model or /gateway to choose another model.",
+      message: "Model is not available through api_key/google.",
     },
   });
 });

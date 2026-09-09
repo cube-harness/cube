@@ -17,6 +17,7 @@ declare module "@earendil-works/pi-tui" {
     "cube.approval.approvePrefix": true;
     "cube.approval.decline": true;
     "cube.askUser.toggle": true;
+    "cube.gateway.removeCredential": true;
     "cube.history.previous": true;
     "cube.history.next": true;
   }
@@ -46,6 +47,10 @@ export const CUBE_KEYBINDINGS = {
   "cube.approval.decline": {
     defaultKeys: ["n", "shift+n", "3"],
     description: "Decline the pending tool call",
+  },
+  "cube.gateway.removeCredential": {
+    defaultKeys: "ctrl+d",
+    description: "Log out or remove the selected provider credential",
   },
   "cube.askUser.toggle": {
     defaultKeys: "space",

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { Markdown, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { Chalk } from "chalk";
 import { MessageList } from "../src/components/message-list.js";
 import { appTheme } from "../src/themes/app.theme.js";
+import { createMarkdownTheme } from "../src/themes/pi-tui.theme.js";
 
 test("renders streaming assistant text literally and final Markdown once", () => {
   const list = new MessageList();
@@ -44,6 +45,15 @@ test("finished assistant code blocks hide fences and the language label", () => 
   const rendered = list.render(80).join("\n");
   assert.match(rendered, /const answer = 42;/);
   assert.doesNotMatch(rendered, /```|typescript/);
+
+  const source = `${fence}typescript\nconst first = 1;\n\nconst second = 2;\n${fence}`;
+  const render = (showFences: boolean) => new Markdown(source, 0, 0, {
+    ...createMarkdownTheme(),
+    ...(showFences ? { codeBlockBorder: (text: string) => text } : {}),
+  }).render(80).map(line => stripTerminalSequences(line).trimEnd());
+  const codeLines = ["  const first = 1;", "", "  const second = 2;"];
+  assert.deepEqual(render(false), codeLines);
+  assert.deepEqual(render(true), [`${fence}typescript`, ...codeLines, fence]);
 });
 
 test("setMessages restores a structured tool invocation", () => {

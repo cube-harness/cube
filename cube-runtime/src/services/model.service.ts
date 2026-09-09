@@ -56,9 +56,13 @@ export class ModelService {
 
     const effort = selection.reasoningEffort;
     if (effort && effort !== "none") {
-      if (!model.reasoning) {
+      if (model.reasoning === false) {
         throw new Error(`Model ${selection.modelId} does not support reasoning`);
       }
+      if (!model.reasoning_efforts)
+        throw new Error(
+          `Reasoning options for model ${selection.modelId} are unknown; use the provider default.`,
+        );
       if (model.reasoning_efforts && !model.reasoning_efforts.includes(effort)) {
         throw new Error(`Model ${selection.modelId} does not support reasoning effort: ${effort}`);
       }
@@ -82,9 +86,22 @@ export class ModelService {
 
     try {
       await this.applyLiveModel(copyState(selection));
-    } catch {
-      await configStore.update(() => previousConfig).catch(() => undefined);
-      throw new Error("Model switch failed; the previous model is still active.");
+    } catch (originalError) {
+      const restored = await Promise.allSettled([
+        configStore.update(() => previousConfig),
+        Promise.resolve().then(() => this.applyLiveModel(copyState(this.state))),
+      ]);
+      const failures = restored.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+      if (failures.length)
+        throw new AggregateError(
+          [originalError, ...failures],
+          "Model switch failed and rollback failed. Run /gateway to recover.",
+        );
+      throw new Error("Model switch failed; the previous model is still active.", {
+        cause: originalError,
+      });
     }
     this.state = {
       modelId: selection.modelId,
@@ -133,8 +150,12 @@ export class ModelService {
       capabilities,
       directory: this.session.identity?.getResourceId?.(),
       sessionId: this.session.identity?.getId?.(),
-      contextLimit: model?.limit.context ?? 128_000,
-      maxOutput: model?.limit.output,
+      capabilitiesComplete:
+        model?.tool_call !== undefined &&
+        model.reasoning !== undefined &&
+        model.attachment !== undefined,
+      contextLimit: model?.limit?.context,
+      maxOutput: model?.limit?.output,
       activeTurnTokens:
         effectiveUsage?.raw?.inputTokens?.total ?? effectiveUsage?.raw?.raw?.promptTokenCount ?? 0,
       promptTokens: effectiveUsage?.promptTokens ?? 0,

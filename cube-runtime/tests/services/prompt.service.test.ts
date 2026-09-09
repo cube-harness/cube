@@ -33,7 +33,7 @@ test("PromptService records input once and uses native followUp only for prompts
     {} as Home,
     session,
     thread,
-    {} as SlashCommandContext,
+    { gateway: { readiness: async () => ({ ready: true }) } } as unknown as SlashCommandContext,
     async (callback) => callback(),
     async (text, threadId) => {
       history.push({ text, threadId });
@@ -75,7 +75,7 @@ test("PromptService cancels native follow-ups newest first without changing FIFO
     {} as Home,
     session,
     { current: () => null } as unknown as ThreadService,
-    {} as SlashCommandContext,
+    { gateway: { readiness: async () => ({ ready: true }) } } as unknown as SlashCommandContext,
     (callback) => callback(),
     async () => undefined,
   );
@@ -96,7 +96,7 @@ test("PromptService cancels native follow-ups newest first without changing FIFO
 test("PromptService converts provider failures into one safe system notice", async () => {
   const session = {
     followUp: async () => {
-      throw new Error("HTTP 429 request leaked-secret");
+      throw new Error("HTTP 429 request rejected: Bearer leaked-secret");
     },
     followUps: { dequeue: () => undefined, count: () => 0 },
   } as unknown as Session;
@@ -107,7 +107,7 @@ test("PromptService converts provider failures into one safe system notice", asy
       current: () => "thread-1",
       ensureForPrompt: async () => "thread-1",
     } as unknown as ThreadService,
-    {} as SlashCommandContext,
+    { gateway: { readiness: async () => ({ ready: true }) } } as unknown as SlashCommandContext,
     (callback) => callback(),
     async () => undefined,
   );
@@ -116,7 +116,7 @@ test("PromptService converts provider failures into one safe system notice", asy
     kind: "notice",
     notice: {
       level: "error",
-      message: "Quota or token limit reached. Run /gateway or /model to continue.",
+      message: "HTTP 429 request rejected: Bearer [Redacted]",
     },
   });
 });
@@ -138,7 +138,7 @@ test("PromptService keeps third-party warnings out of the terminal console", asy
       current: () => "thread-1",
       ensureForPrompt: async () => "thread-1",
     } as unknown as ThreadService,
-    {} as SlashCommandContext,
+    { gateway: { readiness: async () => ({ ready: true }) } } as unknown as SlashCommandContext,
     (callback) => callback(),
     async () => undefined,
   );

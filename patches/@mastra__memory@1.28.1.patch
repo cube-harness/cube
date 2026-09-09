@@ -1,0 +1,64 @@
+diff --git a/dist/src-BNtoxIHL.js b/dist/src-BNtoxIHL.js
+index 0db57d681db5f1bd369a02f11909d733c36b3188..00ec3a81feda68585057061c928ca34e7dfa08d6 100644
+--- a/dist/src-BNtoxIHL.js
++++ b/dist/src-BNtoxIHL.js
+@@ -19393,12 +19393,12 @@ var ObserverRunner = class {
+ 	createAgent(model, isMultiThread = false, memory, extractors = this.observationConfig.extractors ?? []) {
+ 		const agent = new Agent({
+ 			id: isMultiThread ? "multi-thread-observer" : "observational-memory-observer",
++			mastra: this.mastra,
+ 			name: isMultiThread ? "multi-thread-observer" : "Observer",
+ 			instructions: buildObserverSystemPrompt(isMultiThread, this.observationConfig.instruction, this.observationConfig.threadTitle, extractors),
+ 			model,
+ 			...memory ? { memory } : {}
+ 		});
+-		if (this.mastra) agent.__registerMastra(this.mastra);
+ 		return agent;
+ 	}
+ 	/**
+@@ -25635,12 +25635,12 @@ var ReflectorRunner = class {
+ 	createAgent(model, memory, extractors = this.reflectionConfig.extractors) {
+ 		const agent = new Agent({
+ 			id: "observational-memory-reflector",
++			mastra: this.mastra,
+ 			name: "Reflector",
+ 			instructions: buildReflectorSystemPrompt(this.reflectionConfig.instruction, extractors),
+ 			model,
+ 			...memory ? { memory } : {}
+ 		});
+-		if (this.mastra) agent.__registerMastra(this.mastra);
+ 		return agent;
+ 	}
+ 	getObservationMarkerConfig(record) {
+diff --git a/dist/src-Br56ncef.cjs b/dist/src-Br56ncef.cjs
+index 4cb5a17133063ca9138cc3e51ae9e685b72967b3..cf9e41e3700a330a1f62d9c73a39dfff1d7d42cb 100644
+--- a/dist/src-Br56ncef.cjs
++++ b/dist/src-Br56ncef.cjs
+@@ -19414,12 +19414,12 @@ var ObserverRunner = class {
+ 	createAgent(model, isMultiThread = false, memory, extractors = this.observationConfig.extractors ?? []) {
+ 		const agent = new _mastra_core_agent.Agent({
+ 			id: isMultiThread ? "multi-thread-observer" : "observational-memory-observer",
++			mastra: this.mastra,
+ 			name: isMultiThread ? "multi-thread-observer" : "Observer",
+ 			instructions: buildObserverSystemPrompt(isMultiThread, this.observationConfig.instruction, this.observationConfig.threadTitle, extractors),
+ 			model,
+ 			...memory ? { memory } : {}
+ 		});
+-		if (this.mastra) agent.__registerMastra(this.mastra);
+ 		return agent;
+ 	}
+ 	/**
+@@ -25656,12 +25656,12 @@ var ReflectorRunner = class {
+ 	createAgent(model, memory, extractors = this.reflectionConfig.extractors) {
+ 		const agent = new _mastra_core_agent.Agent({
+ 			id: "observational-memory-reflector",
++			mastra: this.mastra,
+ 			name: "Reflector",
+ 			instructions: buildReflectorSystemPrompt(this.reflectionConfig.instruction, extractors),
+ 			model,
+ 			...memory ? { memory } : {}
+ 		});
+-		if (this.mastra) agent.__registerMastra(this.mastra);
+ 		return agent;
+ 	}
+ 	getObservationMarkerConfig(record) {

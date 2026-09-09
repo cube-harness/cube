@@ -1,6 +1,7 @@
 import {
   CombinedAutocompleteProvider,
   Editor,
+  truncateToWidth,
   wrapTextWithAnsi,
   type Component,
   type Focusable,
@@ -10,6 +11,7 @@ import { appTheme } from "../themes/app.theme.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
 import { KeyHint } from "./key-hint.js";
+import { Card } from "./card.js";
 import type { SlashCommandSuggestion } from "@cube/runtime";
 
 export interface PromptEditorOptions {
@@ -22,6 +24,7 @@ export interface PromptEditorOptions {
 
 export class PromptEditor implements Component, Focusable {
   private readonly editor: Editor;
+  private readonly card: Card;
   private readonly tui: TUI;
   private readonly autocompleteHint: KeyHint;
   private readonly queuedPrompts: string[] = [];
@@ -36,8 +39,11 @@ export class PromptEditor implements Component, Focusable {
   constructor(options: PromptEditorOptions) {
     this.tui = options.tui;
     const theme = createEditorTheme();
-    this.editor = new Editor(options.tui, theme);
-    this.editor.setPaddingX(3);
+    this.editor = new Editor(options.tui, { ...theme, borderColor: () => "" }, { paddingX: 0 });
+    this.card = new Card({
+      render: (width) => this.renderEditor(width),
+      invalidate: () => this.editor.invalidate(),
+    });
     this.autocompleteHint = new KeyHint([
       { key: "↑/↓", label: "Navigate" },
       { key: "Enter", label: "Select" },
@@ -146,9 +152,12 @@ export class PromptEditor implements Component, Focusable {
     }
   }
 
-  render(width: number): string[] {
-    const innerWidth = Math.max(10, width - 2);
-    let lines = this.editor.render(innerWidth);
+  private renderEditor(width: number): string[] {
+    // Native Editor always emits two border rows; the empty border theme removes only those.
+    let lines = this.editor.render(Math.max(1, width - 2)).filter((line) => line !== "");
+    if (!this.editor.getText() && lines[0]) {
+      lines[0] = lines[0].trimEnd() + appTheme.ui.muted("Ask Cube to do anything");
+    }
 
     if (!this.isBright && this.focused) {
       lines = lines.map((line) =>
@@ -156,62 +165,17 @@ export class PromptEditor implements Component, Focusable {
       );
     }
 
-    const prefix = appTheme.ui.primary(" ❯ ");
-    if (lines.length >= 3 && lines[1]) {
-      if (lines[1].startsWith("   ")) {
-        lines[1] = `${prefix}${lines[1].slice(3)}`;
-      } else if (lines[1].startsWith("  ")) {
-        lines[1] = `${prefix}${lines[1].slice(2)}`;
-      } else if (lines[1].startsWith(" ")) {
-        lines[1] = `${prefix}${lines[1].slice(1)}`;
-      }
-    }
-
-    // Find the bottom border line of the editor
-    let bottomBorderIndex = -1;
-    for (let i = lines.length - 1; i >= 1; i--) {
-      if (lines[i].includes("─") || lines[i].includes("↓")) {
-        bottomBorderIndex = i;
-        break;
-      }
-    }
-    if (bottomBorderIndex === -1) {
-      bottomBorderIndex = lines.length - 1;
-    }
-
-    const borderStyle = appTheme.ui.border;
-    const boxLines: string[] = [];
-
-    // 1. Top border with rounded corners: ╭────────────────╮
-    const topContent = lines[0] || "";
-    if (topContent.includes("↑")) {
-      boxLines.push(borderStyle("╭") + topContent.slice(1, -1) + borderStyle("╮"));
-    } else {
-      boxLines.push(borderStyle(`╭${"─".repeat(innerWidth)}╮`));
-    }
-
-    // 2. Middle content lines with side borders: │ ... │
-    for (let i = 1; i < bottomBorderIndex; i++) {
-      const content = lines[i] ?? "";
-      boxLines.push(`${borderStyle("│")}${content}${borderStyle("│")}`);
-    }
-
-    // 3. Bottom border with rounded corners: ╰────────────────╯
-    const bottomContent = lines[bottomBorderIndex] || "";
-    if (bottomContent.includes("↓")) {
-      boxLines.push(borderStyle("╰") + bottomContent.slice(1, -1) + borderStyle("╯"));
-    } else {
-      boxLines.push(borderStyle(`╰${"─".repeat(innerWidth)}╯`));
-    }
-
-    // 4. Autocomplete suggestion lines (if open)
+    lines = lines.map((line, index) =>
+      truncateToWidth(`${index === 0 ? appTheme.ui.primary("❯ ") : "  "}${line}`, width),
+    );
     if (this.editor.isShowingAutocomplete()) {
-      for (let i = bottomBorderIndex + 1; i < lines.length; i++) {
-        boxLines.push(lines[i]);
-      }
-      boxLines.push(...this.autocompleteHint.render(innerWidth));
+      lines.push(...this.autocompleteHint.render(width));
     }
+    return lines;
+  }
 
+  render(width: number): string[] {
+    const boxLines = this.card.render(width);
     if (this.queuedPrompts.length === 0) return boxLines;
 
     const queueLines = wrapTextWithAnsi(

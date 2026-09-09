@@ -5,9 +5,10 @@ import type {
   MastraModelGatewayInterface,
   ProviderConfig,
 } from "@mastra/core/llm";
+import { wrapLanguageModel } from "ai";
 import { ModelsDevGateway } from "@mastra/core/llm";
 import type { AuthStore } from "@cube/workspace";
-import { gatewayDescriptors, toCanonicalModelId, type ApiKeyGatewayId } from "./types.js";
+import { ApiKeyProviderSchema } from "@cube/workspace";
 
 type ModelsDevDelegate = Pick<
   ModelsDevGateway,
@@ -17,27 +18,25 @@ type ModelsDevDelegate = Pick<
 type ApiKeyReader = Pick<AuthStore, "getApiKey">;
 
 export class CubeApiKeyGateway implements MastraModelGatewayInterface {
-  readonly id: string;
-  readonly name: string;
-  private readonly providerId: "google" | "openrouter" | "openai";
+  readonly id = "cube-api";
+  readonly name = "Cube API key";
 
   constructor(
-    readonly gatewayId: ApiKeyGatewayId,
     private readonly auth: ApiKeyReader,
     private readonly delegate: ModelsDevDelegate = new ModelsDevGateway(),
-  ) {
-    const descriptor = gatewayDescriptors[gatewayId];
-    this.id = descriptor.internalId;
-    this.name = `Cube ${descriptor.providerId} API key`;
-    this.providerId = descriptor.providerId;
+  ) {}
+
+  handlesModel(modelId: string): boolean {
+    return ApiKeyProviderSchema.safeParse(modelId.split("/")[0]).success;
   }
 
   async fetchProviders(): Promise<Record<string, ProviderConfig>> {
     const providers = await this.delegate.fetchProviders();
-    const provider = providers[this.providerId];
-    return provider
-      ? { [this.providerId]: { ...provider, gateway: this.id } }
-      : {};
+    return Object.fromEntries(
+      ApiKeyProviderSchema.options.flatMap((id) =>
+        providers[id] ? [[id, { ...providers[id], gateway: this.id }]] : [],
+      ),
+    );
   }
 
   buildUrl(
@@ -45,31 +44,53 @@ export class CubeApiKeyGateway implements MastraModelGatewayInterface {
     envVars: Record<string, string>,
   ): string | undefined | Promise<string | undefined> {
     return this.delegate.buildUrl(
-      toCanonicalModelId(this.gatewayId, routerId),
+      routerId.startsWith(`${this.id}/`) ? routerId.slice(this.id.length + 1) : routerId,
       envVars,
     );
   }
 
-  async resolveAuth(_request: GatewayAuthRequest): Promise<GatewayAuthResult | undefined> {
-    const apiKey = await this.auth.getApiKey(this.providerId);
-    return apiKey ? { apiKey, source: "gateway" } : undefined;
+  async resolveAuth(request: GatewayAuthRequest): Promise<GatewayAuthResult> {
+    return {
+      apiKey: await this.getApiKey(`${request.providerId}/${request.modelId}`),
+      source: "gateway",
+    };
   }
 
-  async getApiKey(_modelId: string): Promise<string> {
-    const apiKey = await this.auth.getApiKey(this.providerId);
+  async getApiKey(modelId: string): Promise<string> {
+    const canonical = modelId.startsWith(`${this.id}/`)
+      ? modelId.slice(this.id.length + 1)
+      : modelId;
+    const provider = ApiKeyProviderSchema.parse(canonical.split("/")[0]);
+    const apiKey = await this.auth.getApiKey(provider);
     if (!apiKey) {
-      throw new Error(`Missing API key for ${this.gatewayId}. Run /gateway to configure it.`);
+      throw new Error(`Missing API key for api_key/${provider}. Run /gateway to configure it.`);
     }
     return apiKey;
   }
 
-  resolveLanguageModel(args: {
+  async resolveLanguageModel(args: {
     modelId: string;
     providerId: string;
     apiKey: string;
     headers?: Record<string, string>;
-  }): Promise<GatewayLanguageModel> | GatewayLanguageModel {
-    return this.delegate.resolveLanguageModel(args);
+  }): Promise<GatewayLanguageModel> {
+    const model = await this.delegate.resolveLanguageModel(args);
+    if (model.specificationVersion !== "v3") throw new Error("Unsupported API model adapter.");
+    const fresh = async () => {
+      const apiKey = await this.getApiKey(`${args.providerId}/${args.modelId}`);
+      const resolved = await this.delegate.resolveLanguageModel({ ...args, apiKey });
+      if (resolved.specificationVersion !== "v3") throw new Error("Unsupported API model adapter.");
+      return resolved;
+    };
+    // Let each native provider format its own auth, including Google and Anthropic.
+    return wrapLanguageModel({
+      model,
+      middleware: {
+        specificationVersion: "v3",
+        wrapGenerate: async ({ params }) => (await fresh()).doGenerate(params),
+        wrapStream: async ({ params }) => (await fresh()).doStream(params),
+      },
+    });
   }
 
   serializeForSpan(): { id: string; name: string } {

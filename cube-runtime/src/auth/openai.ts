@@ -1,16 +1,14 @@
 import crypto from "node:crypto";
 import http, { type Server } from "node:http";
 import { spawn } from "node:child_process";
-import {
-  OpenAISubscriptionCredentialSchema,
-  type OpenAISubscriptionCredential,
-} from "@cube/workspace";
+import { OpenAIOAuthCredentialSchema, type OpenAIOAuthCredential } from "@cube/workspace";
 
 export const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const OPENAI_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 export const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
 export const OPENAI_REDIRECT_URI = "http://localhost:1455/auth/callback";
-export const OPENAI_SCOPE = "openid profile email offline_access api.connectors.read api.connectors.invoke";
+export const OPENAI_SCOPE =
+  "openid profile email offline_access api.connectors.read api.connectors.invoke";
 export const OPENAI_JWT_CLAIM_PATH = "https://api.openai.com/auth";
 export const OPENAI_CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
@@ -34,7 +32,7 @@ export type OpenAICallbackHandle = {
 
 export type OpenAILoginHandle = {
   authorizationUrl: string;
-  completion: Promise<OpenAISubscriptionCredential>;
+  completion: Promise<OpenAIOAuthCredential>;
   cancel(): Promise<void>;
 };
 
@@ -47,9 +45,7 @@ export type OpenAIOAuthOptions = {
   createCallback?: (state: string, redirectUri: string) => Promise<OpenAICallbackHandle>;
 };
 
-export type OpenAICallbackResult =
-  | { ok: true; code: string }
-  | { ok: false };
+export type OpenAICallbackResult = { ok: true; code: string } | { ok: false };
 
 export const createOpenAIPkce = (
   randomBytes: (size: number) => Buffer = crypto.randomBytes,
@@ -87,9 +83,11 @@ export const parseOpenAICallback = (
 ): OpenAICallbackResult => {
   const expected = new URL(redirectUri);
   const callback = new URL(requestUrl, redirectUri);
-  if (callback.pathname !== expected.pathname
-    || callback.searchParams.has("error")
-    || callback.searchParams.get("state") !== expectedState) {
+  if (
+    callback.pathname !== expected.pathname ||
+    callback.searchParams.has("error") ||
+    callback.searchParams.get("state") !== expectedState
+  ) {
     return { ok: false };
   }
   const code = callback.searchParams.get("code");
@@ -102,7 +100,7 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | undefined =>
     if (!payload) return undefined;
     const parsed: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     return parsed !== null && typeof parsed === "object"
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : undefined;
   } catch {
     return undefined;
@@ -116,9 +114,7 @@ const accountIdFromToken = (token: unknown): string | undefined => {
   if (auth === null || typeof auth !== "object") return undefined;
   const claims = auth as Record<string, unknown>;
   const accountId = claims.chatgpt_account_id ?? claims.account_id;
-  return typeof accountId === "string" && accountId.length > 0
-    ? accountId
-    : undefined;
+  return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
 };
 
 const expiresAtFromToken = (token: unknown): number | undefined => {
@@ -132,28 +128,35 @@ const expiresAtFromToken = (token: unknown): number | undefined => {
 export const tokenResponseToCredential = (
   response: OpenAITokenResponse,
   now: number,
-  previous?: OpenAISubscriptionCredential,
-): OpenAISubscriptionCredential => {
+  previous?: OpenAIOAuthCredential,
+): OpenAIOAuthCredential => {
   const accessToken = response.access_token;
   const refreshToken = response.refresh_token ?? previous?.refresh_token;
   const expiresIn = response.expires_in;
-  const expiresAt = typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0
-    ? now + Math.floor(expiresIn * 1_000)
-    : expiresAtFromToken(response.access_token) ?? expiresAtFromToken(response.id_token);
-  const accountId = accountIdFromToken(response.id_token)
-    ?? accountIdFromToken(accessToken)
-    ?? previous?.account_id;
+  const expiresAt =
+    typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0
+      ? now + Math.floor(expiresIn * 1_000)
+      : (expiresAtFromToken(response.access_token) ?? expiresAtFromToken(response.id_token));
+  const accountId =
+    accountIdFromToken(response.id_token) ??
+    accountIdFromToken(accessToken) ??
+    previous?.account_id;
 
   if (typeof accountId !== "string" || accountId.length === 0) {
     throw new Error("OpenAI account information is missing from the sign-in response.");
   }
-  if (typeof accessToken !== "string" || accessToken.length === 0
-    || typeof refreshToken !== "string" || refreshToken.length === 0
-    || expiresAt === undefined || expiresAt <= now) {
+  if (
+    typeof accessToken !== "string" ||
+    accessToken.length === 0 ||
+    typeof refreshToken !== "string" ||
+    refreshToken.length === 0 ||
+    expiresAt === undefined ||
+    expiresAt <= now
+  ) {
     throw new Error("OpenAI returned an invalid session.");
   }
 
-  return OpenAISubscriptionCredentialSchema.parse({
+  return OpenAIOAuthCredentialSchema.parse({
     access_token: accessToken,
     refresh_token: refreshToken,
     expires_at: expiresAt,
@@ -174,8 +177,8 @@ export const exchangeOpenAIAuthorizationCode = async (
   code: string,
   verifier: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-  options: { now?: () => number; redirectUri?: string } = {},
-): Promise<OpenAISubscriptionCredential> => {
+  options: { now?: () => number; redirectUri?: string; signal?: AbortSignal } = {},
+): Promise<OpenAIOAuthCredential> => {
   try {
     const body = new URLSearchParams({
       grant_type: "authorization_code",
@@ -188,6 +191,9 @@ export const exchangeOpenAIAuthorizationCode = async (
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)])
+        : AbortSignal.timeout(15_000),
     });
     return tokenResponseToCredential(
       await readTokenResponse(response),
@@ -202,10 +208,10 @@ export const exchangeOpenAIAuthorizationCode = async (
 };
 
 export const refreshOpenAICredential = async (
-  previous: OpenAISubscriptionCredential,
+  previous: OpenAIOAuthCredential,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
   now: () => number = Date.now,
-): Promise<OpenAISubscriptionCredential> => {
+): Promise<OpenAIOAuthCredential> => {
   try {
     const response = await fetchImpl(OPENAI_TOKEN_URL, {
       method: "POST",
@@ -215,12 +221,9 @@ export const refreshOpenAICredential = async (
         grant_type: "refresh_token",
         refresh_token: previous.refresh_token,
       }),
+      signal: AbortSignal.timeout(15_000),
     });
-    const refreshed = tokenResponseToCredential(
-      await readTokenResponse(response),
-      now(),
-      previous,
-    );
+    const refreshed = tokenResponseToCredential(await readTokenResponse(response), now(), previous);
     if (refreshed.account_id !== previous.account_id) {
       throw new Error("OpenAI refresh returned a different account.");
     }
@@ -230,19 +233,24 @@ export const refreshOpenAICredential = async (
   }
 };
 
-const closeServer = (server: Server): Promise<void> => new Promise((resolve) => {
-  if (!server.listening) return resolve();
-  server.close(() => resolve());
-});
+const closeServer = (server: Server): Promise<void> =>
+  new Promise((resolve) => {
+    if (!server.listening) return resolve();
+    server.close(() => resolve());
+    server.closeAllConnections();
+  });
 
 export const createOpenAICallback = async (
   expectedState: string,
   redirectUri = OPENAI_REDIRECT_URI,
+  providerName = "OpenAI",
 ): Promise<OpenAICallbackHandle> => {
   const callbackUrl = new URL(redirectUri);
-  if (callbackUrl.protocol !== "http:"
-    || (callbackUrl.hostname !== "localhost" && callbackUrl.hostname !== "127.0.0.1")) {
-    throw new Error("OpenAI sign-in requires a localhost HTTP callback.");
+  if (
+    callbackUrl.protocol !== "http:" ||
+    (callbackUrl.hostname !== "localhost" && callbackUrl.hostname !== "127.0.0.1")
+  ) {
+    throw new Error(`${providerName} sign-in requires a localhost HTTP callback.`);
   }
   const port = Number(callbackUrl.port || 80);
   const bindHost = callbackUrl.hostname === "localhost" ? "127.0.0.1" : callbackUrl.hostname;
@@ -259,13 +267,15 @@ export const createOpenAICallback = async (
       const result = parseOpenAICallback(requestUrl.toString(), expectedState, redirectUri);
       if (!result.ok) {
         response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
-        response.end("OpenAI sign-in failed. Return to Cube and try again.");
-        void closeServer(server).then(() => reject(new Error("OpenAI sign-in callback was rejected.")));
+        response.once("finish", () => void closeServer(server));
+        response.end(`${providerName} sign-in failed. Return to Cube and try again.`);
+        reject(new Error(`${providerName} sign-in callback was rejected.`));
         return;
       }
-      response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      response.end("OpenAI sign-in complete. You can return to Cube.");
-      void closeServer(server).then(() => resolve(result.code));
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8", connection: "close" });
+      response.once("finish", () => void closeServer(server));
+      response.end("Authorization received. Return to Cube to finish sign-in.");
+      resolve(result.code);
     });
   });
 
@@ -276,24 +286,25 @@ export const createOpenAICallback = async (
       resolve();
     });
   }).catch(() => {
-    throw new Error("Cube could not start the OpenAI sign-in callback server.");
+    throw new Error(`Cube could not start the ${providerName} sign-in callback server.`);
   });
 
   return {
     completion,
     close: async () => {
+      rejectCompletion(new Error(`${providerName} sign-in cancelled.`));
       await closeServer(server);
-      rejectCompletion(new Error("OpenAI sign-in cancelled."));
     },
   };
 };
 
 export const openExternalUrl = async (url: string): Promise<void> => {
-  const [command, args] = process.platform === "win32"
-    ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
-    : process.platform === "darwin"
-      ? ["open", [url]]
-      : ["xdg-open", [url]];
+  const [command, args] =
+    process.platform === "win32"
+      ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
+      : process.platform === "darwin"
+        ? ["open", [url]]
+        : ["xdg-open", [url]];
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
       detached: true,
@@ -317,13 +328,21 @@ export const beginOpenAILogin = async (
   const pkce = createOpenAIPkce(options.randomBytes);
   const authorizationUrl = buildOpenAIAuthorizationUrl(pkce, redirectUri);
   const callback = await (options.createCallback ?? createOpenAICallback)(pkce.state, redirectUri);
-  const cancel = callback.close;
+  const exchangeAbort = new AbortController();
+  const cancel = async () => {
+    exchangeAbort.abort();
+    await callback.close();
+  };
   const abort = () => void cancel();
-  const completion = callback.completion.then((code) =>
-    exchangeOpenAIAuthorizationCode(code, pkce.verifier, options.fetch, {
-      now: options.now,
-      redirectUri,
-    })).finally(() => signal?.removeEventListener("abort", abort));
+  const completion = callback.completion
+    .then((code) =>
+      exchangeOpenAIAuthorizationCode(code, pkce.verifier, options.fetch, {
+        now: options.now,
+        redirectUri,
+        signal: exchangeAbort.signal,
+      }),
+    )
+    .finally(() => signal?.removeEventListener("abort", abort));
 
   if (signal?.aborted) {
     void completion.catch(() => undefined);

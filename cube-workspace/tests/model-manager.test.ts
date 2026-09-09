@@ -1,129 +1,162 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { HomeManager } from "../src/home-manager.js";
+import { createBootstrap } from "../src/bootstrap.js";
 import { ModelManager } from "../src/model-manager.js";
-import { ModelCatalogStore } from "../src/store/store.js";
+import { ConfigStore, ModelCatalogStore } from "../src/store/store.js";
+import { AuthStore } from "../src/store/auth.store.js";
+import type { GatewayId } from "../src/schemas/config.schema.js";
 
-const cleanup = (tmp: string) =>
-  rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-
-const providerFixtures = {
-  google: {
-    name: "Google",
-    models: {
-      "gemini-test": {
-        name: "Gemini Test",
-        reasoning: true,
-        tool_call: true,
-        structured_output: true,
-        attachment: true,
-        open_weights: false,
-        limit: { context: 1_000_000, output: 8_192 },
-        modalities: { input: ["text", "image"], output: ["text"] },
-      },
-    },
-  },
-  openrouter: {
-    name: "OpenRouter",
-    models: {
-      "vendor/model-test": {
-        name: "Router Test",
-        reasoning: false,
-        tool_call: true,
-        structured_output: true,
-        attachment: false,
-        open_weights: false,
-        limit: { context: 128_000, output: 4_096 },
-        modalities: { input: ["text"], output: ["text"] },
-      },
-    },
-  },
-};
-
-const createTestHome = async () => {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-model-manager-test-"));
+const fixture = async (t: TestContext) => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-catalog-"));
+  t.after(() => rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const home = new HomeManager({ cubeHome: tmp });
-  await home.ensure();
-  return { home, tmp };
+  await createBootstrap(home).run();
+  await ModelCatalogStore(home).write({ api_key: {}, oauth: {}, local: {} });
+  const auth = new AuthStore(home);
+  await auth.update(current => ({ ...current, api_keys: {
+    google: { api_key: "google-secret" }, openai: { api_key: "openai-secret" },
+  }, oauth: { openai: {
+    access_token: "access-secret", refresh_token: "refresh-secret",
+    account_id: "account-secret", expires_at: Date.now() + 3600000,
+  } } }));
+  await ConfigStore(home).update(current => ({ ...current,
+    gateway_options: { ...current.gateway_options, "local/ollama": { base_url: "http://localhost:11434" } },
+  }));
+  const source = async () => ({
+    google: { name: "Google", models: { test: { name: "Google Test", reasoning: false, tool_call: true } } },
+    openai: { name: "OpenAI", models: { test: {
+      name: "OpenAI Test", reasoning: true, tool_call: false, limit: { context: 100, output: 0 },
+      cost: { input: 1, output: 2, tiers: [], context_over_200k: { input: 3, output: 4 } },
+      reasoning_options: [{ type: "effort", values: [null, "high"] }],
+    } } },
+  });
+  const manager = new ModelManager(home, source);
+  const key = async (gatewayId: GatewayId) => ModelManager.sourceKey(gatewayId, {
+    auth: await auth.read(), config: await ConfigStore(home).read(),
+  })!;
+  const publish = async (gatewayId: GatewayId) => {
+    const provider = gatewayId.split("/")[1]!;
+    const view = await manager.preview(gatewayId, [{ modelId: `${provider}/test`, name: "test" }]);
+    assert.equal(await manager.publish(gatewayId, await key(gatewayId), view), true);
+    return view;
+  };
+  return { home, auth, source, manager, key, publish };
 };
 
-test("ModelManager builds a credential-agnostic canonical provider catalog", async () => {
-  const { home, tmp } = await createTestHome();
-  const previousGoogle = process.env.GOOGLE_API_KEY;
-  const previousOpenRouter = process.env.OPENROUTER_API_KEY;
-  delete process.env.GOOGLE_API_KEY;
-  delete process.env.OPENROUTER_API_KEY;
-  try {
-    const manager = new ModelManager(home, async () => providerFixtures);
-    const catalog = await manager.refreshCatalog();
-
-    assert.equal(catalog.version, 2);
-    assert.deepEqual(Object.keys(catalog.providers).sort(), ["google", "openrouter"]);
-    assert.equal(catalog.providers.google?.models[0]?.modelId, "google/gemini-test");
-    assert.equal(
-      catalog.providers.openrouter?.models[0]?.modelId,
-      "openrouter/vendor/model-test",
-    );
-  } finally {
-    if (previousGoogle === undefined) delete process.env.GOOGLE_API_KEY;
-    else process.env.GOOGLE_API_KEY = previousGoogle;
-    if (previousOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = previousOpenRouter;
-    await cleanup(tmp);
-  }
+test("catalog joins exact IDs, preserves backend-only models and unknown/false/zero, without invented OAuth costs", async t => {
+  const { manager, home } = await fixture(t);
+  const before = await readFile(home.getModelCatalogPath(), "utf8");
+  const preview = await manager.preview("oauth/openai", [
+    { modelId: "openai/test", name: "test", limit: { context: 200 }, tool_call: true },
+    { modelId: "openai/new-account-model", name: "New account model" },
+  ]);
+  const [known, unknown] = preview.providers.openai!.models;
+  assert.deepEqual(known!.limit, { context: 200, output: 0 });
+  assert.equal(known!.tool_call, true);
+  assert.equal(known!.cost, undefined);
+  assert.deepEqual(known!.reasoning_efforts, ["none", "high"]);
+  assert.deepEqual(unknown, { modelId: "openai/new-account-model", name: "New account model" });
+  const api = await manager.preview("api_key/openai");
+  assert.equal(api.providers.openai!.models[0]!.tool_call, false);
+  assert.deepEqual(api.providers.openai!.models[0]!.cost, { input: 1, output: 2 });
+  const google = await manager.preview("api_key/google");
+  assert.equal(google.providers.google!.models[0]!.reasoning_efforts, undefined);
+  assert.equal(await readFile(home.getModelCatalogPath(), "utf8"), before, "preview must not write");
 });
 
-test("ModelManager returns a fresh version-2 cache without consulting the source", async () => {
-  const { home, tmp } = await createTestHome();
-  try {
-    const cached = {
-      version: 2 as const,
-      updatedAt: new Date().toISOString(),
-      providers: {},
-    };
-    await ModelCatalogStore(home).write(cached);
-    let sourceCalls = 0;
-    const manager = new ModelManager(home, async () => {
-      sourceCalls += 1;
-      return providerFixtures;
-    });
-
-    assert.deepEqual(await manager.getCatalog(), cached);
-    assert.equal(sourceCalls, 0);
-  } finally {
-    await cleanup(tmp);
-  }
+test("Anthropic logout prunes only its OAuth catalog, including after a manual auth.json deletion", async t => {
+  const { home, auth, manager, publish } = await fixture(t);
+  await auth.update(current => ({ ...current,
+    api_keys: { ...current.api_keys, anthropic: { api_key: "anthropic-api" } },
+    oauth: { ...current.oauth, anthropic: { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000 } },
+  }));
+  await publish("api_key/anthropic");
+  await publish("oauth/anthropic");
+  await publish("oauth/openai");
+  await publish("local/ollama");
+  const before = await ModelCatalogStore(home).read();
+  await auth.update(current => { delete current.oauth.anthropic; return current; });
+  assert.equal(await manager.getCatalog("oauth/anthropic"), undefined);
+  const after = await ModelCatalogStore(home).read();
+  assert.equal(after.oauth.anthropic, undefined);
+  assert.deepEqual(after.api_key, before.api_key);
+  assert.deepEqual(after.local, before.local);
+  assert.deepEqual(after.oauth.openai, before.oauth.openai);
 });
 
-test("ModelManager rebuilds stale or schema-incompatible cache files", async () => {
-  const { home, tmp } = await createTestHome();
-  try {
-    await writeFile(
-      home.getModelCatalogPath(),
-      JSON.stringify({ updatedAt: new Date().toISOString(), providers: {} }),
-      "utf8",
-    );
-    let sourceCalls = 0;
-    const manager = new ModelManager(home, async () => {
-      sourceCalls += 1;
-      return providerFixtures;
-    });
-
-    const rebuilt = await manager.getCatalog();
-    assert.equal(rebuilt.version, 2);
-    assert.equal(sourceCalls, 1);
-
-    await ModelCatalogStore(home).write({
-      version: 2,
-      updatedAt: new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString(),
-      providers: {},
-    });
-    await manager.getCatalog();
-    assert.equal(sourceCalls, 2);
-  } finally {
-    await cleanup(tmp);
+test("concurrent managers merge per home; deleting one credential reconciles immediately without touching other strategies", async t => {
+  const { home, auth, manager, key, publish, source } = await fixture(t);
+  const other = new ModelManager(home, source);
+  const localView = await manager.preview("local/ollama", [{ modelId: "ollama/test", name: "test" }]);
+  await Promise.all([
+    publish("api_key/google"), publish("api_key/openai"), publish("oauth/openai"),
+    other.publish("local/ollama", await key("local/ollama"), localView),
+  ]);
+  const before = await ModelCatalogStore(home).read();
+  assert.deepEqual(Object.keys(before.api_key).sort(), ["google", "openai"]);
+  assert.ok(before.oauth.openai && before.local.ollama);
+  await auth.update(current => { delete current.api_keys.google; return current; });
+  assert.equal(await manager.getCatalog("api_key/google"), undefined);
+  const after = await ModelCatalogStore(home).read();
+  assert.equal(after.api_key.google, undefined);
+  assert.deepEqual(after.oauth, before.oauth);
+  assert.deepEqual(after.local, before.local);
+  assert.deepEqual(after.api_key.openai, before.api_key.openai);
+  const serialized = await readFile(home.getModelCatalogPath(), "utf8");
+  for (const secret of ["google-secret", "openai-secret", "access-secret", "refresh-secret", "account-secret"]) {
+    assert.ok(!serialized.includes(secret));
   }
+  await auth.update(current => { delete current.oauth.openai; return current; });
+  await manager.remove("oauth/openai");
+  assert.equal((await ModelCatalogStore(home).read()).oauth.openai, undefined);
+  assert.ok(await manager.getCatalog("api_key/openai"));
+});
+
+test("delayed discovery cannot publish after logout/account replacement, and access-only refresh keeps identity", async t => {
+  const { home, auth, manager, key, publish } = await fixture(t);
+  const view = await publish("oauth/openai");
+  const originalKey = await key("oauth/openai");
+  await auth.update(current => { current.oauth.openai!.access_token = "fresh-access"; return current; });
+  assert.equal(await key("oauth/openai"), originalKey);
+  assert.ok(await manager.getCatalog("oauth/openai"));
+  await auth.update(current => { current.oauth.openai!.refresh_token = "rotated-refresh"; return current; });
+  assert.equal(await manager.publish("oauth/openai", originalKey, view), false);
+  assert.equal(await manager.getCatalog("oauth/openai"), undefined);
+  assert.equal((await ModelCatalogStore(home).read()).oauth.openai, undefined);
+  await auth.update(current => { delete current.oauth.openai; return current; });
+  assert.equal(await manager.publish("oauth/openai", originalKey, view), false);
+});
+
+test("fresh cache checks auth first; invalid auth never wipes catalog and stale/corrupt cache is only a cache miss", async t => {
+  const { home, manager, publish } = await fixture(t);
+  await publish("api_key/google");
+  const cached = await readFile(home.getModelCatalogPath(), "utf8");
+  const validAuth = await readFile(home.getAuthPath(), "utf8");
+  await writeFile(home.getAuthPath(), "{ invalid auth");
+  await assert.rejects(() => manager.getCatalog("api_key/google"));
+  assert.equal(await readFile(home.getModelCatalogPath(), "utf8"), cached);
+  await writeFile(home.getAuthPath(), validAuth);
+  const noDiscovery = new ModelManager(home, async () => { throw new Error("must not discover"); });
+  assert.ok(await noDiscovery.getCatalog("api_key/google"));
+  const stale = await ModelCatalogStore(home).read();
+  stale.api_key.google!.updatedAt = new Date(0).toISOString();
+  await ModelCatalogStore(home).write(stale);
+  assert.equal(await noDiscovery.getCatalog("api_key/google"), undefined);
+  await writeFile(home.getModelCatalogPath(), "{ invalid cache");
+  assert.equal(await noDiscovery.getCatalog("api_key/google"), undefined);
+});
+
+test("failed atomic catalog update preserves the last valid cache", async t => {
+  const { home, source, manager, key, publish } = await fixture(t);
+  await publish("api_key/google");
+  const before = await readFile(home.getModelCatalogPath(), "utf8");
+  const failing = new ModelManager(home, source, { writeCatalog: async () => { throw new Error("disk full"); } });
+  const view = await manager.preview("api_key/openai");
+  const keyValue = await key("api_key/openai");
+  await assert.rejects(() => failing.publish("api_key/openai", keyValue, view), /catalog could not be updated/);
+  assert.equal(await readFile(home.getModelCatalogPath(), "utf8"), before);
 });

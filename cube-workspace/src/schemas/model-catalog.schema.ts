@@ -1,19 +1,20 @@
 import { z } from "zod";
+import { ApiKeyProviderSchema } from "./auth.schema.js";
 
 const ModalitiesSchema = z.object({
-  input: z.array(z.string()),
-  output: z.array(z.string()),
+  input: z.array(z.string()).optional(),
+  output: z.array(z.string()).optional(),
 }).strict();
 
 const LimitSchema = z.object({
-  context: z.number().int().nonnegative(),
+  context: z.number().int().nonnegative().optional(),
   input: z.number().int().nonnegative().optional(),
-  output: z.number().int().nonnegative(),
+  output: z.number().int().nonnegative().optional(),
 }).strict();
 
 const CostSchema = z.object({
-  input: z.number().nonnegative(),
-  output: z.number().nonnegative(),
+  input: z.number().nonnegative().optional(),
+  output: z.number().nonnegative().optional(),
   cache_read: z.number().nonnegative().optional(),
   cache_write: z.number().nonnegative().optional(),
 }).strict();
@@ -22,14 +23,14 @@ export const CatalogModelSchema = z.object({
   modelId: z.string().min(1),
   name: z.string().min(1),
   family: z.string().optional(),
-  reasoning: z.boolean().default(false),
+  reasoning: z.boolean().optional(),
   reasoning_efforts: z.array(z.string()).optional(),
-  tool_call: z.boolean().default(false),
-  structured_output: z.boolean().default(false),
-  attachment: z.boolean().default(false),
-  open_weights: z.boolean().default(false),
-  limit: LimitSchema,
-  modalities: ModalitiesSchema,
+  tool_call: z.boolean().optional(),
+  structured_output: z.boolean().optional(),
+  attachment: z.boolean().optional(),
+  open_weights: z.boolean().optional(),
+  limit: LimitSchema.optional(),
+  modalities: ModalitiesSchema.optional(),
   cost: CostSchema.optional(), 
 }).strict();
 
@@ -39,7 +40,6 @@ export const ProviderCatalogGroupSchema = z.object({
 }).strict();
 
 export const ModelCatalogSchema = z.object({
-  version: z.literal(2),
   updatedAt: z.string(),
   providers: z.record(z.string(), ProviderCatalogGroupSchema),
 }).strict();
@@ -47,3 +47,28 @@ export const ModelCatalogSchema = z.object({
 export type CatalogModel = z.infer<typeof CatalogModelSchema>;
 export type ProviderCatalogGroup = z.infer<typeof ProviderCatalogGroupSchema>;
 export type ModelCatalog = z.infer<typeof ModelCatalogSchema>;
+
+export const ModelCatalogEntrySchema = ProviderCatalogGroupSchema.extend({
+  updatedAt: z.iso.datetime(),
+  sourceKey: z.string().regex(/^[a-f0-9]{64}$/),
+});
+
+export const ModelCatalogCacheSchema = z.object({
+  api_key: z.partialRecord(ApiKeyProviderSchema, ModelCatalogEntrySchema),
+  oauth: z.partialRecord(z.enum(["openai", "xai", "anthropic"]), ModelCatalogEntrySchema),
+  local: z.partialRecord(z.enum(["ollama", "lmstudio"]), ModelCatalogEntrySchema),
+}).strict().superRefine((cache, ctx) => {
+  for (const [strategy, providers] of Object.entries(cache)) {
+    for (const [provider, entry] of Object.entries(providers)) {
+      entry.models.forEach((model, index) => {
+        if (!model.modelId.startsWith(`${provider}/`) || model.modelId === `${provider}/`) {
+          ctx.addIssue({ code: "custom", message: "Model does not belong to the catalog provider.",
+            path: [strategy, provider, "models", index, "modelId"] });
+        }
+      });
+    }
+  }
+});
+
+export type ModelCatalogEntry = z.infer<typeof ModelCatalogEntrySchema>;
+export type ModelCatalogCache = z.infer<typeof ModelCatalogCacheSchema>;

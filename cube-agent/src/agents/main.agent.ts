@@ -58,6 +58,10 @@ export const buildModelConfig = (
               : 2048;
       providerOptions.anthropic = { thinking: { type: "enabled", budgetTokens: budget } };
     }
+  } else if (/^cube-oauth\/xai\/grok-4\.5(?:$|-)/.test(modelId)) {
+    if (effort && ["low", "medium", "high", "xhigh"].includes(effort)) {
+      providerOptions.openai = { reasoningEffort: effort };
+    }
   } else if (canonicalModelId.startsWith("openai/")) {
     if (effort && effort !== "none" && effort !== "default") {
       providerOptions.openai = { reasoningEffort: effort, reasoningSummary: "auto" };
@@ -75,7 +79,6 @@ export const buildModelConfig = (
     model: modelId,
     maxRetries: 2,
     enabled: true,
-    modelSettings: { temperature: 0.3 },
     ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
   };
 };

@@ -2,6 +2,7 @@ import {
   SelectList,
   Text,
   getKeybindings,
+  truncateToWidth,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
@@ -38,7 +39,12 @@ export type ModelPickerOptions = {
 };
 
 export class ModelPickerComponent implements Component, Focusable {
-  focused = true;
+  private hasFocus = true;
+  get focused(): boolean { return this.hasFocus; }
+  set focused(value: boolean) {
+    this.hasFocus = value;
+    this.searchBar.focused = value && this.step === "model";
+  }
   private step: "model" | "reasoning" = "model";
   private selectedModelId?: string;
   private readonly models;
@@ -66,12 +72,16 @@ export class ModelPickerComponent implements Component, Focusable {
     );
     this.modelList.onSelect = ({ value }) => {
       const model = this.models.find((item) => item.modelId === value);
-      if (model?.reasoning_efforts?.length) this.showReasoning(model.modelId, model.reasoning_efforts);
+      if (model?.reasoning_efforts?.length)
+        this.showReasoning(model.modelId, model.reasoning_efforts);
       else options.onSelect({ modelId: value });
     };
     this.modelList.onCancel = () => this.cancel();
     this.hint = new KeyHint([
-      { key: formatBinding("tui.select.up") + "/" + formatBinding("tui.select.down"), label: "Navigate" },
+      {
+        key: formatBinding("tui.select.up") + "/" + formatBinding("tui.select.down"),
+        label: "Navigate",
+      },
       { key: "Type", label: "Search" },
       { key: formatBinding("tui.select.confirm"), label: "Select" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },
@@ -80,16 +90,18 @@ export class ModelPickerComponent implements Component, Focusable {
 
   private showReasoning(modelId: string, efforts: string[]): void {
     this.step = "reasoning";
+    this.focused = this.hasFocus;
     this.selectedModelId = modelId;
     this.searchBar.clear();
     this.title.setText(appTheme.ui.text.bold("Select Reasoning Effort [" + modelId + "]"));
     this.reasoningList = new SelectList(
       efforts.map((effort) => ({
         value: effort,
-        label: effort + (
-          modelId === this.options.currentModelId &&
-          effort === this.options.currentReasoningEffort ? " (Current)" : ""
-        ),
+        label:
+          effort +
+          (modelId === this.options.currentModelId && effort === this.options.currentReasoningEffort
+            ? " (Current)"
+            : ""),
         description: EFFORT_DESCRIPTIONS[effort] ?? effort + " level",
       })),
       Math.min(8, Math.max(3, efforts.length)),
@@ -106,6 +118,7 @@ export class ModelPickerComponent implements Component, Focusable {
       this.modelList.setFilter("");
     } else if (this.step === "reasoning") {
       this.step = "model";
+      this.focused = this.hasFocus;
       this.selectedModelId = undefined;
       this.title.setText(appTheme.ui.text.bold("Select Model [" + this.options.gatewayId + "]"));
     } else {
@@ -118,7 +131,7 @@ export class ModelPickerComponent implements Component, Focusable {
       ...this.title.render(width),
       ...(this.step === "model"
         ? this.searchBar.render(width)
-        : [appTheme.ui.muted("Model: " + (this.selectedModelId ?? ""))]),
+        : [truncateToWidth(appTheme.ui.muted("Model: " + (this.selectedModelId ?? "")), width)]),
       "",
       ...(this.step === "reasoning" && this.reasoningList
         ? this.reasoningList.render(width)

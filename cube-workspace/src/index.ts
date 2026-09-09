@@ -20,9 +20,7 @@ export { Bootstrap, createBootstrap } from "./bootstrap.js";
 export { AuthStore } from "./store/auth.store.js";
 
 // Export Model Manager
-export { ModelManager, type ProviderCatalogItem } from "./model-manager.js";
-export * from "./gateway.js";
-export * from "./config-migration.js";
+export { ModelManager, type CatalogContext, type ModelManagerOptions } from "./model-manager.js";
 
 // Export Schemas & Types
 export * from "./schemas/config.schema.js";

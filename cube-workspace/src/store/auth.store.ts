@@ -4,13 +4,15 @@ import {
   CubeAuthSchema,
   type ApiKeyProvider,
   type CubeAuth,
-  type OpenAISubscriptionCredential,
+  type OpenAIOAuthCredential,
 } from "../schemas/auth.schema.js";
 import { atomicWriteFile } from "./atomic-write.js";
 
 type AuthWriter = typeof atomicWriteFile;
 
 export class AuthStore {
+  // Serialize read/mutate/write per auth path inside this process, including refresh and account replacement.
+  private static readonly updates = new Map<string, Promise<CubeAuth>>();
   constructor(
     private readonly home: HomeManager,
     private readonly writeFile: AuthWriter = atomicWriteFile,
@@ -25,13 +27,18 @@ export class AuthStore {
     }
   }
 
-  async update(mutator: (current: CubeAuth) => CubeAuth): Promise<CubeAuth> {
-    const next = CubeAuthSchema.parse(mutator(await this.read()));
-    await this.writeFile(
-      this.home.getAuthPath(),
-      `${JSON.stringify(next, null, 2)}\n`,
-      { mode: 0o600 },
-    );
+  update(mutator: (current: CubeAuth) => CubeAuth): Promise<CubeAuth> {
+    const authPath = this.home.getAuthPath();
+    const next = (AuthStore.updates.get(authPath) ?? Promise.resolve())
+      .catch(() => undefined).then(async () => {
+        const auth = CubeAuthSchema.parse(mutator(await this.read()));
+        await this.writeFile(authPath, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
+        return auth;
+      });
+    AuthStore.updates.set(authPath, next);
+    void next.finally(() => {
+      if (AuthStore.updates.get(authPath) === next) AuthStore.updates.delete(authPath);
+    }).catch(() => undefined);
     return next;
   }
 
@@ -49,17 +56,17 @@ export class AuthStore {
     }));
   }
 
-  async getOpenAISubscription(): Promise<OpenAISubscriptionCredential | undefined> {
-    return (await this.read()).subscriptions.openai;
+  async getOpenAIOAuth(): Promise<OpenAIOAuthCredential | undefined> {
+    return (await this.read()).oauth.openai;
   }
 
-  async replaceOpenAISubscription(
-    credential: OpenAISubscriptionCredential,
+  async replaceOpenAIOAuth(
+    credential: OpenAIOAuthCredential,
   ): Promise<void> {
     await this.update((current) => ({
       ...current,
-      subscriptions: {
-        ...current.subscriptions,
+      oauth: {
+        ...current.oauth,
         openai: credential,
       },
     }));

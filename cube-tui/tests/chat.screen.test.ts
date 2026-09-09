@@ -3,6 +3,16 @@ import test from "node:test";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { RuntimeDisplayState } from "@cube/runtime";
 import { ChatScreen } from "../src/screens/chat.screen.js";
+import { renderUsageBoxToString } from "../src/components/usage-box.js";
+
+test("unknown model limits show token usage without invented capacity or percentage", () => {
+  const rendered = renderUsageBoxToString({
+    model: "openai/account-only", capabilities: [], capabilitiesComplete: false,
+    promptTokens: 42, completionTokens: 5, totalTokens: 47, threadId: "test",
+  }, 100);
+  assert.match(rendered, /unknown \(42 tokens used\)/);
+  assert.doesNotMatch(rendered, /128K|NaN|Infinity|%/);
+});
 
 const createTui = () => {
   const added: Component[] = [];
@@ -148,7 +158,6 @@ test("ChatScreen reuses one gateway flow for stored configuration and model sele
       draftId: "draft-1",
       gatewayId: "api_key/google",
       catalog: {
-        version: 2,
         updatedAt: "2026-09-05T00:00:00.000Z",
         providers: {
           google: {
