@@ -7,6 +7,11 @@ import {
   SoulStore,
 } from "@cube/workspace";
 
+export interface MemoryListing {
+  path: string;
+  description: string;
+}
+
 export interface BuildSystemPromptOptions {
   selectedTools?: string[];
   toolSnippets?: Record<string, string>;
@@ -14,6 +19,15 @@ export interface BuildSystemPromptOptions {
   soul?: string;
   cwd: string;
   contextFiles?: ContextFile[];
+  memoryListing?: MemoryListing[];
+}
+
+// Một "part" tương ứng 1 system message block khi gửi API.
+// static=true => phần này gộp vào breakpoint cache, hiếm khi đổi.
+// static=false => phần cuối, đổi mỗi turn, KHÔNG cache.
+export interface SystemPromptPart {
+  content: string;
+  static: boolean;
 }
 
 const formatContextFiles = (files: ContextFile[]): string => {
@@ -24,7 +38,25 @@ const formatContextFiles = (files: ContextFile[]): string => {
   return `\n\n<project_context>\n\nProject-specific instructions and guidelines (if files conflict, project-root instructions take precedence over global ones, and nested per-tool instructions take precedence over project-root):\n\n${blocks}\n\n</project_context>\n`;
 };
 
-export const buildSystemPrompt = (options: BuildSystemPromptOptions): string => {
+const formatMemoryListing = (items: MemoryListing[]): string => {
+  if (items.length === 0) return "";
+  const lines = items.map((m) => `- ${m.path}: ${m.description}`).join("\n");
+  return `\n\n<memory_listing>\nFiles in memory (call memory_read(path) for full content):\n${lines}\n</memory_listing>\n`;
+};
+
+/**
+ * Thứ tự PHẢI giữ nguyên vì ảnh hưởng prompt cache:
+ * [1] tools + guidelines      — tĩnh tuyệt đối, không đổi giữa các turn
+ * [2] soul                    — tĩnh, chỉ đổi khi user sửa SOUL.md
+ * [3] contextFiles            — tĩnh trong 1 session, chỉ đổi khi mở project khác
+ * [4] cwd                     — tĩnh trong 1 session
+ * ---- breakpoint đặt NGAY SAU đây ----
+ * [5] memoryListing           — ĐỘNG, đổi mỗi lần agent ghi memory → không cache
+ *
+ * Trả về mảng parts thay vì string để caller (nơi gọi Anthropic API qua Mastra/AI SDK)
+ * tự set cacheControl cho phần static, không set cho phần cuối.
+ */
+export const buildSystemPrompt = (options: BuildSystemPromptOptions): SystemPromptPart[] => {
   const {
     selectedTools = ["read", "edit", "write", "bash"],
     toolSnippets = {},
@@ -32,6 +64,7 @@ export const buildSystemPrompt = (options: BuildSystemPromptOptions): string => 
     soul,
     cwd,
     contextFiles = [],
+    memoryListing = [],
   } = options;
 
   const visibleTools = selectedTools.filter((t) => toolSnippets[t]);
@@ -48,6 +81,8 @@ export const buildSystemPrompt = (options: BuildSystemPromptOptions): string => 
     if (trimmed) guidelines.add(trimmed);
   }
 
+  // [1] + [2] + [3] + [4]: gộp chung 1 part static — cache hit toàn bộ nếu
+  // không có gì trong các phần này đổi giữa 2 turn liên tiếp.
   const base = `You are Cube, an autonomous coding agent operating in a terminal.
 
 Available tools:
@@ -60,7 +95,18 @@ ${[...guidelines].map((g) => `- ${g}`).join("\n")}`;
   const contextSection = formatContextFiles(contextFiles);
   const cwdLine = `\nCurrent working directory: ${cwd.replace(/\\/g, "/")}`;
 
-  return base + soulSection + contextSection + cwdLine;
+  const staticPart: SystemPromptPart = {
+    content: base + soulSection + contextSection + cwdLine,
+    static: true,
+  };
+
+  // [5]: memory listing — part riêng, không static, đặt cuối cùng
+  const dynamicPart: SystemPromptPart = {
+    content: formatMemoryListing(memoryListing),
+    static: false,
+  };
+
+  return dynamicPart.content ? [staticPart, dynamicPart] : [staticPart];
 };
 
 export interface ComposeSystemPromptOptions {
@@ -69,9 +115,12 @@ export interface ComposeSystemPromptOptions {
   toolSnippets: Record<string, string>;
   selectedTools?: string[];
   promptGuidelines?: string[];
+  memoryListing?: MemoryListing[];
 }
 
-export const composeSystemPrompt = async (opts: ComposeSystemPromptOptions): Promise<string> => {
+export const composeSystemPrompt = async (
+  opts: ComposeSystemPromptOptions,
+): Promise<SystemPromptPart[]> => {
   const home = opts.home ?? CubeHome();
   const workspace = CubeWorkspace(home, opts.cwd);
 
@@ -80,15 +129,15 @@ export const composeSystemPrompt = async (opts: ComposeSystemPromptOptions): Pro
     AgentsStore(home)
       .read()
       .catch((err) => {
-        if (err.code === "ENOENT") return undefined; // chưa có file — hợp lệ, không phải lỗi
-        throw err; // lỗi khác (parse, quyền đọc...) — ném lên cho runtime xử lý
+        if (err.code === "ENOENT") return undefined;
+        throw err;
       }),
     workspace.getPaths(),
     SoulStore(home)
       .read()
       .catch((err) => {
         if (err.code === "ENOENT") return undefined;
-        throw err; // bao gồm cả lỗi "exceeds max length" từ SoulStore.validateCharacters
+        throw err;
       }),
   ]);
 
@@ -103,5 +152,6 @@ export const composeSystemPrompt = async (opts: ComposeSystemPromptOptions): Pro
     selectedTools: opts.selectedTools,
     promptGuidelines: opts.promptGuidelines,
     soul,
+    memoryListing: opts.memoryListing ?? [],
   });
 };

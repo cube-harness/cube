@@ -1,11 +1,15 @@
-import type {
-  ApiKeyGatewayId,
-  GatewayId,
-  OpenAISubscriptionCredential,
+import {
+  ApiKeyProviderSchema,
+  type ApiKeyProvider,
+  type ApiKeyGatewayId,
+  type GatewayId,
+  type OpenAIOAuthCredential,
+  type GrokOAuthCredential,
+  type AnthropicOAuthCredential,
 } from "@cube/workspace";
 
-export type GatewayGroup = "api_key" | "subscription" | "local";
-export type GatewayProviderId = "google" | "openrouter" | "openai" | "ollama" | "lmstudio";
+export type GatewayGroup = "api_key" | "oauth" | "local";
+export type GatewayProviderId = ApiKeyProvider | "ollama" | "lmstudio";
 
 export type GatewayDescriptor = {
   internalId: string;
@@ -14,42 +18,43 @@ export type GatewayDescriptor = {
 };
 
 export const gatewayDescriptors = {
-  "api_key/google": {
-    internalId: "cube-api-google",
-    group: "api_key",
-    providerId: "google",
-  },
-  "api_key/openrouter": {
-    internalId: "cube-api-openrouter",
-    group: "api_key",
-    providerId: "openrouter",
-  },
-  "api_key/openai": {
-    internalId: "cube-api-openai",
-    group: "api_key",
+  ...(Object.fromEntries(
+    ApiKeyProviderSchema.options.map((providerId) => [
+      `api_key/${providerId}`,
+      { internalId: "cube-api", group: "api_key", providerId },
+    ]),
+  ) as Record<
+    ApiKeyGatewayId,
+    { internalId: "cube-api"; group: "api_key"; providerId: ApiKeyProvider }
+  >),
+  "oauth/openai": {
+    internalId: "cube-oauth",
+    group: "oauth",
     providerId: "openai",
   },
-  "subscription/openai": {
-    internalId: "cube-subscription-openai",
-    group: "subscription",
-    providerId: "openai",
+  "oauth/xai": {
+    internalId: "cube-oauth",
+    group: "oauth",
+    providerId: "xai",
+  },
+  "oauth/anthropic": {
+    internalId: "cube-oauth",
+    group: "oauth",
+    providerId: "anthropic",
   },
   "local/ollama": {
-    internalId: "cube-local-ollama",
+    internalId: "cube-local",
     group: "local",
     providerId: "ollama",
   },
   "local/lmstudio": {
-    internalId: "cube-local-lmstudio",
+    internalId: "cube-local",
     group: "local",
     providerId: "lmstudio",
   },
 } as const satisfies Record<GatewayId, GatewayDescriptor>;
 
-export const toMastraRouterId = (
-  gatewayId: GatewayId,
-  canonicalModelId: string,
-): string => {
+export const toMastraRouterId = (gatewayId: GatewayId, canonicalModelId: string): string => {
   const descriptor = gatewayDescriptors[gatewayId];
   if (!canonicalModelId.startsWith(`${descriptor.providerId}/`)) {
     throw new Error(`Model ${canonicalModelId} does not belong to gateway ${gatewayId}.`);
@@ -57,12 +62,9 @@ export const toMastraRouterId = (
   return `${descriptor.internalId}/${canonicalModelId}`;
 };
 
-export const toCanonicalModelId = (
-  gatewayId: GatewayId,
-  routerModelId: string,
-): string => {
+export const toCanonicalModelId = (gatewayId: GatewayId, routerModelId: string): string => {
   const prefix = `${gatewayDescriptors[gatewayId].internalId}/`;
-  if (!routerModelId.startsWith(prefix)) {
+  if (!routerModelId.startsWith(`${prefix}${gatewayDescriptors[gatewayId].providerId}/`)) {
     throw new Error(`Model route ${routerModelId} does not belong to gateway ${gatewayId}.`);
   }
   return routerModelId.slice(prefix.length);
@@ -78,8 +80,14 @@ export const getCanonicalModelId = (routerOrCanonicalModelId: string): string =>
   return routerOrCanonicalModelId;
 };
 
-export interface OpenAISubscriptionCredentialProvider {
-  getValidCredential(): Promise<OpenAISubscriptionCredential>;
+export interface OpenAIOAuthCredentialProvider {
+  getValidCredential(): Promise<OpenAIOAuthCredential>;
 }
+
+export type OAuthCredentialProviders = {
+  openai: OpenAIOAuthCredentialProvider;
+  xai?: { getValidCredential(): Promise<GrokOAuthCredential> };
+  anthropic?: { getValidCredential(): Promise<AnthropicOAuthCredential> };
+};
 
 export type { ApiKeyGatewayId };

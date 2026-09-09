@@ -110,7 +110,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/gateway",
-    description: "Choose or configure an API, subscription, or local gateway",
+    description: "Choose or configure an API, oauth, or local gateway",
     execute: async (_argument, context) => {
       const [choices, readiness] = await Promise.all([
         context.gateway.listChoices(),

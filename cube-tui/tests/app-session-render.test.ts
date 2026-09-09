@@ -300,106 +300,88 @@ test("CubeApp attaches to an already mounted screen without mounting it twice", 
   await app.stop();
 });
 
-test("prepared startup mounts before onboarding and commits before runtime construction", async () => {
+const createOnboarding = () => {
+  const calls: unknown[][] = [];
+  return {
+    calls,
+    mount: () => { calls.push(["mount"]); },
+    stopTerminal: () => { calls.push(["stop"]); },
+    showNotice: (notice: unknown) => { calls.push(["notice", notice]); },
+    pickGateway: async () => ({ draftId: "draft-1", model: { modelId: "google/new" } }),
+    waitForRetry: async () => false,
+  };
+};
+
+test("startup mounts onboarding before setup and only constructs chat after commit and runtime", async () => {
   const { runtime } = createRuntime();
   const { screen } = createScreen();
   const order: string[] = [];
-  screen.mount = () => { order.push("mount"); };
-  screen.startTerminal = () => { order.push("terminal"); };
-  screen.pickGateway = async () => {
+  const onboarding = createOnboarding();
+  onboarding.mount = () => { order.push("onboard"); };
+  onboarding.stopTerminal = () => { order.push("leave-onboard"); };
+  onboarding.pickGateway = async () => {
     order.push("picker");
     return { draftId: "draft-1", model: { modelId: "google/new" } };
   };
-  screen.setSubmitHandler = () => { order.push("attach"); };
-  const preflight = {
-    readiness: { ready: false, reason: "Choose a gateway and model to continue." },
-    gateway: {
-      listChoices: async () => [{
-        gatewayId: "api_key/google",
-        group: "api_key",
-        provider: "google",
-        configured: false,
-      }],
-      commitInitial: async () => {
-        order.push("commit");
-        return { gatewayId: "api_key/google", model: { modelId: "google/new" } };
-      },
-    },
-    start: async () => {
-      order.push("runtime");
-      return runtime;
-    },
+  screen.mount = () => { order.push("chat"); };
+  let ready = false;
+  let preparations = 0;
+  const prepare = async () => {
+    preparations++;
+    return {
+      readiness: { ready },
+      gateway: { commitInitial: async () => { order.push("commit"); ready = true; } },
+      start: async () => { order.push("runtime"); return runtime; },
+    };
   };
-
-  const launched = await startPreparedCube(preflight as never, screen, {
+  const launched = await startPreparedCube(prepare as never, () => screen, {
     onExitRequested: () => undefined,
-  });
-
-  assert.deepEqual(order.slice(0, 6), [
-    "mount",
-    "terminal",
-    "picker",
-    "commit",
-    "runtime",
-    "attach",
-  ]);
+  }, onboarding as never);
+  assert.deepEqual(order, ["onboard", "picker", "commit", "runtime", "leave-onboard", "chat"]);
   assert.ok(launched);
   await launched.app.stop();
+  assert.equal(preparations, 1, "onboarding must reuse the prepared bootstrap");
 });
 
-test("prepared startup bypasses onboarding when persisted readiness is complete", async () => {
+test("startup bypasses onboarding when persisted readiness is complete", async () => {
   const { runtime } = createRuntime();
   const { screen } = createScreen();
-  let picked = false;
-  screen.pickGateway = async () => {
-    picked = true;
-    return null;
-  };
-  const preflight = {
-    readiness: {
-      ready: true,
-      gatewayId: "api_key/google",
-      model: { modelId: "google/gemini-3.7-flash" },
-    },
-    gateway: { listChoices: async () => [] },
+  const onboarding = createOnboarding();
+  const launched = await startPreparedCube(async () => ({
+    readiness: { ready: true },
     start: async () => runtime,
-  };
-
-  const launched = await startPreparedCube(preflight as never, screen, {
-    onExitRequested: () => undefined,
-  });
-
-  assert.equal(picked, false);
+  }) as never, () => screen, { onExitRequested: () => undefined }, onboarding as never);
+  assert.equal(onboarding.calls.some(([name]) => name === "mount"), false);
   assert.ok(launched);
   await launched.app.stop();
 });
 
-test("prepared startup renders setup failures after mount and allows cancellation", async () => {
-  const { screen, calls } = createScreen();
-  let attempts = 0;
-  screen.pickGateway = async () => {
-    attempts += 1;
-    if (attempts === 1) throw new Error("HTTP 401 leaked-secret");
-    return null;
-  };
-  const preflight = {
-    readiness: { ready: false, reason: "setup" },
-    gateway: { listChoices: async () => [] },
-  };
-
-  const launched = await startPreparedCube(preflight as never, screen, {
-    onExitRequested: () => undefined,
-  });
-
+test("bootstrap failures are recoverable on onboarding without ever creating chat", async () => {
+  const onboarding = createOnboarding();
+  let retries = 0;
+  onboarding.waitForRetry = async () => ++retries < 2;
+  let prepared = 0;
+  const launched = await startPreparedCube(async () => {
+    prepared++;
+    throw new Error("Invalid Cube authentication file.");
+  }, () => { throw new Error("chat must not be constructed"); },
+  { onExitRequested: () => undefined }, onboarding as never);
   assert.equal(launched, null);
-  assert.equal(attempts, 2);
-  assert.deepEqual(calls.filter((call) => call[0] === "showNotice"), [[
-    "showNotice",
-    {
-      level: "error",
-      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
-    },
-  ]]);
+  assert.equal(prepared, 2);
+  assert.deepEqual(onboarding.calls.filter(([name]) => name === "notice"), [
+    ["notice", { level: "error", message: "Invalid Cube authentication file." }],
+    ["notice", { level: "error", message: "Invalid Cube authentication file." }],
+  ]);
+});
+
+test("onboarding cancellation never starts a runtime or creates chat", async () => {
+  const onboarding = { ...createOnboarding(), pickGateway: async () => null };
+  const result = await startPreparedCube(async () => ({
+    readiness: { ready: false }, gateway: {},
+    start: async () => { throw new Error("runtime must not be started"); },
+  }) as never, () => { throw new Error("chat must not be created"); },
+  { onExitRequested: () => undefined }, onboarding as never);
+  assert.equal(result, null);
 });
 
 test("CubeApp renders submitted user input before runtime submission settles", async () => {
@@ -419,7 +401,7 @@ test("CubeApp renders submitted user input before runtime submission settles", a
   await pending;
 });
 
-test("CubeApp stops working state and hides raw provider errors", async () => {
+test("CubeApp stops working state and displays the provider error without credentials", async () => {
   const { runtime } = createRuntime();
   runtime.prompt.submit = async () => {
     throw new Error("HTTP 401 Bearer leaked-secret");
@@ -434,7 +416,7 @@ test("CubeApp stops working state and hides raw provider errors", async () => {
     "showNotice",
     {
       level: "error",
-      message: "Authentication failed. Run /gateway to sign in or replace the credential.",
+      message: "HTTP 401 Bearer [Redacted]",
     },
   ]]);
   assert.equal(JSON.stringify(calls).includes("leaked-secret"), false);
@@ -705,7 +687,7 @@ test("CubeApp renders an upstream runtime error as one readable system notice", 
       "showNotice",
       {
         level: "error",
-        message: "Quota or token limit reached. Run /gateway or /model to continue.",
+        message: "Provider is temporarily rate-limited",
       },
     ]],
   );

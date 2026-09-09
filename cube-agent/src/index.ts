@@ -26,7 +26,6 @@ export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
 export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
 export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";
-export { buildGatewayCatalog } from "./gateways/gateway-catalog.js";
 export {
   createCubeGateways,
   type CreateCubeGatewaysOptions,
@@ -34,17 +33,17 @@ export {
   type CubeGatewayComposition,
 } from "./gateways/factory.js";
 export {
-  OllamaGateway,
+  LocalGateway,
   normalizeOllamaBaseUrl,
   type LocalGatewayOptions,
-} from "./gateways/ollama.gateway.js";
-export {
-  LMStudioGateway,
   normalizeLMStudioBaseUrl,
-} from "./gateways/lmstudio.gateway.js";
+} from "./gateways/local.gateway.js";
 export {
-  OpenAISubscriptionGateway,
+  OAuthGateway,
   OPENAI_CODEX_BASE_URL,
-  selectOpenAISubscriptionModels,
-} from "./gateways/openai-subscription.gateway.js";
+  GROK_BUILD_BASE_URL,
+  GROK_BUILD_HEADERS,
+  ANTHROPIC_BASE_URL,
+  ANTHROPIC_OAUTH_HEADERS,
+} from "./gateways/oauth.gateway.js";
 export * from "./gateways/types.js";

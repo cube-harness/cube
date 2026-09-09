@@ -1,25 +1,18 @@
 import type { MastraModelGatewayInterface } from "@mastra/core/llm";
-import type {
-  AuthStore,
-  GatewayId,
-  RunnableCubeConfig,
-} from "@cube/workspace";
+import type { AuthStore, GatewayId, LocalGatewayId, RunnableCubeConfig } from "@cube/workspace";
 import { CubeApiKeyGateway } from "./api-key.gateway.js";
-import { LMStudioGateway } from "./lmstudio.gateway.js";
-import { OllamaGateway } from "./ollama.gateway.js";
-import { OpenAISubscriptionGateway } from "./openai-subscription.gateway.js";
-import type { OpenAISubscriptionCredentialProvider } from "./types.js";
+import { LocalGateway } from "./local.gateway.js";
+import { OAuthGateway } from "./oauth.gateway.js";
+import { gatewayDescriptors, type OAuthCredentialProviders } from "./types.js";
 
 export type CubeGatewayAdapter = MastraModelGatewayInterface & {
-  gatewayId: GatewayId;
-  getBaseUrl?(): string;
-  setBaseUrl?(baseUrl: string): void;
+  getBaseUrl?(gatewayId: LocalGatewayId): string;
+  setBaseUrl?(baseUrl: string, gatewayId: LocalGatewayId): void;
 };
 
 export type CreateCubeGatewaysOptions = {
   auth: Pick<AuthStore, "getApiKey">;
-  openAISubscription: OpenAISubscriptionCredentialProvider;
-  openAISubscriptionModelIds: readonly string[];
+  oauth: OAuthCredentialProviders;
   gatewayOptions?: RunnableCubeConfig["gateway_options"];
   fetch?: typeof globalThis.fetch;
   requestTimeoutMs?: number;
@@ -31,9 +24,7 @@ export type CubeGatewayComposition = {
   byGatewayId: ReadonlyMap<GatewayId, CubeGatewayAdapter>;
 };
 
-export const createCubeGateways = (
-  options: CreateCubeGatewaysOptions,
-): CubeGatewayComposition => {
+export const createCubeGateways = (options: CreateCubeGatewaysOptions): CubeGatewayComposition => {
   const sharedLocal = {
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.requestTimeoutMs === undefined
@@ -41,25 +32,23 @@ export const createCubeGateways = (
       : { requestTimeoutMs: options.requestTimeoutMs }),
   };
   const ordered: CubeGatewayAdapter[] = [
-    new CubeApiKeyGateway("api_key/google", options.auth),
-    new CubeApiKeyGateway("api_key/openrouter", options.auth),
-    new CubeApiKeyGateway("api_key/openai", options.auth),
-    new OpenAISubscriptionGateway(
-      options.openAISubscription,
-      options.openAISubscriptionModelIds,
-    ),
-    new OllamaGateway({
+    new CubeApiKeyGateway(options.auth),
+    new OAuthGateway(options.oauth),
+    new LocalGateway({
       ...sharedLocal,
-      baseUrl: options.gatewayOptions?.["local/ollama"]?.base_url,
-    }),
-    new LMStudioGateway({
-      ...sharedLocal,
-      baseUrl: options.gatewayOptions?.["local/lmstudio"]?.base_url,
+      gatewayOptions: options.gatewayOptions,
     }),
   ];
   return {
     record: Object.fromEntries(ordered.map((adapter) => [adapter.id, adapter])),
     ordered,
-    byGatewayId: new Map(ordered.map((adapter) => [adapter.gatewayId, adapter])),
+    byGatewayId: new Map(
+      (Object.entries(gatewayDescriptors) as Array<[GatewayId, { internalId: string }]>).map(
+        ([gatewayId, descriptor]) => [
+          gatewayId,
+          ordered.find((adapter) => adapter.id === descriptor.internalId)!,
+        ],
+      ),
+    ),
   };
 };

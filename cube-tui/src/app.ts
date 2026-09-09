@@ -1,7 +1,7 @@
 import {
   toRuntimeNotice,
   type CubeRuntime,
-  type CubePreflight,
+  type CubeBootstrap,
   type ModelState,
   type PreferenceState,
   type PromptResult,
@@ -11,6 +11,7 @@ import {
 import { copyToClipboard } from "./clipboard.js";
 import { matchesBinding } from "./keybindings.js";
 import type { ChatScreen } from "./screens/chat.screen.js";
+import type { OnBoardScreen } from "./screens/on-board.screen.js";
 import { formatTerminalTitle } from "./components/title-picker.js";
 import { setSyntaxTheme } from "./themes/syntax.theme.js";
 
@@ -270,10 +271,8 @@ export class CubeApp {
         this.activeSuspensionIds.add(event.toolCallId);
         this.suspensionInputQueue = this.suspensionInputQueue.then(async () => {
           try {
-            if (
-              this.suspensionQueueCancelled ||
-              this.cancelledSuspensionIds.has(event.toolCallId)
-            ) return;
+            if (this.suspensionQueueCancelled || this.cancelledSuspensionIds.has(event.toolCallId))
+              return;
             const resolution = await this.screen.requestToolSuspension({
               toolCallId: event.toolCallId,
               toolName: event.toolName,
@@ -411,7 +410,7 @@ export class CubeApp {
       status: state.isRunning ? "Busy" : "Idle",
     });
     try {
-      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${title}\x07`);
+      if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${title}\x07\x1b]2;${title}\x07`);
       process.title = title;
     } catch {
       // Terminal title updates are best effort.
@@ -426,33 +425,46 @@ export class CubeApp {
 }
 
 export const startPreparedCube = async (
-  preflight: CubePreflight,
-  screen: ChatScreen,
+  prepare: () => Promise<CubeBootstrap>,
+  createScreen: (bootstrap: CubeBootstrap) => ChatScreen,
   options: CubeAppOptions,
+  onboarding: Pick<
+    OnBoardScreen,
+    "mount" | "stopTerminal" | "showNotice" | "pickGateway" | "waitForRetry"
+  >,
 ): Promise<PreparedCube | null> => {
-  screen.mount({ onSubmit: () => undefined });
-  screen.startTerminal();
-  let needsSetup = !preflight.readiness.ready;
   while (true) {
+    let runtime: CubeRuntime | undefined;
     try {
-      if (needsSetup) {
-        const selection = await screen.pickGateway(preflight.gateway, {
-          choices: await preflight.gateway.listChoices(),
-        });
+      const bootstrap = await prepare();
+      if (!bootstrap.readiness.ready) {
+        onboarding.mount();
+        const selection = await onboarding.pickGateway(bootstrap.gateway);
         if (!selection) {
-          screen.stopTerminal();
+          onboarding.stopTerminal();
           return null;
         }
-        await preflight.gateway.commitInitial(selection);
+        await bootstrap.gateway.commitInitial(selection);
       }
-      const runtime = await preflight.start();
+      runtime = await bootstrap.start();
+      onboarding.stopTerminal();
+      const screen = createScreen(bootstrap);
       const app = new CubeApp(runtime, screen, options);
-      await app.start({ screenAlreadyMounted: true });
+      try {
+        await app.start();
+      } catch (error) {
+        await app.stop();
+        throw error;
+      }
       return { app, runtime };
     } catch (error) {
-      screen.workingIndicator.stop();
-      screen.showNotice(toRuntimeNotice(error));
-      needsSetup = true;
+      await runtime?.shutdown().catch(() => undefined);
+      onboarding.mount();
+      onboarding.showNotice(toRuntimeNotice(error));
+      if (!(await onboarding.waitForRetry())) {
+        onboarding.stopTerminal();
+        return null;
+      }
     }
   }
 };

@@ -9,7 +9,8 @@ export interface UsageBoxContent {
   capabilities?: string[];
   directory?: string;
   sessionId?: string;
-  contextLimit: number;
+  capabilitiesComplete?: boolean;
+  contextLimit?: number;
   maxOutput?: number;
   activeTurnTokens?: number;
   promptTokens: number;
@@ -89,7 +90,9 @@ export class UsageBox implements Component {
     const emptyBars = 20 - filledBars;
     const progressBar = `${appTheme.status.success("█".repeat(filledBars))}${appTheme.ui.muted("░".repeat(emptyBars))}`;
 
-    const capText = capabilities.length > 0 ? capabilities.join(", ") : "none";
+    const capText = capabilities.length > 0
+      ? capabilities.join(", ") + (this.content.capabilitiesComplete === false ? " (others unknown)" : "")
+      : this.content.capabilitiesComplete === true ? "none" : "unknown";
 
     const modelDisplay =
       reasoningEffort && reasoningEffort !== "none" ? `${model} (${reasoningEffort})` : model;
@@ -126,7 +129,7 @@ export class UsageBox implements Component {
 
     contentLines.push(
       "",
-      `${appTheme.ui.muted("Context Window   :")} [${progressBar}] ${appTheme.ui.primary(percent.toFixed(1) + "%")} ${appTheme.ui.muted(`(${formatTokensK(currentContextTokens)} / ${formatTokensK(contextLimit)} tokens)`)}`,
+      contextLimit === undefined ? `${appTheme.ui.muted("Context Window   :")} unknown (${formatTokensK(currentContextTokens)} tokens used)` : `${appTheme.ui.muted("Context Window   :")} [${progressBar}] ${appTheme.ui.primary(percent.toFixed(1) + "%")} ${appTheme.ui.muted(`(${formatTokensK(currentContextTokens)} / ${formatTokensK(contextLimit)} tokens)`)}`,
     );
 
     if (cachedTokens > 0 || cacheCreationTokens > 0) {

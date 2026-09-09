@@ -37,6 +37,12 @@ export class PromptService {
         return executeSlashCommand(command.name, command.argument, this.commands);
       }
 
+      if (!(await this.commands.gateway.readiness()).ready) {
+        return {
+          kind: "gateways",
+          request: { choices: await this.commands.gateway.listChoices() },
+        };
+      }
       const threadId = await this.thread.ensureForPrompt(trimmed);
       await this.appendHistory(trimmed, threadId);
       const warn = console.warn;

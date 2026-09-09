@@ -105,7 +105,7 @@ test("createCubeAgent installs the Cube logger before the agent is registered wi
 });
 
 test("keeps local models as Mastra router IDs instead of constructing Ollama directly", () => {
-  const routerId = "cube-local-ollama/ollama/qwen2.5:7b";
+  const routerId = "cube-local/ollama/qwen2.5:7b";
   const config = buildModelConfig(routerId, "none");
 
   assert.equal(config.model, routerId);
@@ -114,11 +114,11 @@ test("keeps local models as Mastra router IDs instead of constructing Ollama dir
 
 test("derives provider options from canonical IDs behind a Cube gateway prefix", () => {
   const config = buildModelConfig(
-    "cube-api-google/google/gemini-3.7-flash",
+    "cube-api/google/gemini-3.7-flash",
     "high",
   );
 
-  assert.equal(config.model, "cube-api-google/google/gemini-3.7-flash");
+  assert.equal(config.model, "cube-api/google/gemini-3.7-flash");
   assert.deepEqual(config.providerOptions, {
     google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } },
   });

@@ -13,7 +13,6 @@ import {
 import { ModelService } from "../../src/services/model.service.js";
 
 const catalog: ModelCatalog = {
-  version: 2,
   updatedAt: new Date(0).toISOString(),
   providers: {
     google: {
@@ -82,7 +81,7 @@ test("ModelService restores config when live model apply fails", async () => {
       home,
       session,
       { modelId: "google/gemini-old" },
-      async () => { throw new Error("agent rejected model"); },
+      async (selection) => { if (selection.modelId !== "google/gemini-old") throw new Error("agent rejected model"); },
       { listModels: async () => catalog },
     );
     await assert.rejects(

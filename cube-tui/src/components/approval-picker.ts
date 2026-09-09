@@ -1,12 +1,12 @@
 import {
   SelectList,
+  wrapTextWithAnsi,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
-import { renderPickerCard } from "./picker-card.js";
 
 export type ToolApprovalDecision = "approve" | "decline" | "approve_prefix";
 
@@ -188,7 +188,6 @@ export class ApprovalPicker implements Component, Focusable {
   render(width: number): string[] {
     const cardContentLines: string[] = [];
 
-    cardContentLines.push("");
     if (this.parsed.command) {
       cardContentLines.push(
         appTheme.ui.text.bold("Would you like to run the following command?"),
@@ -239,11 +238,9 @@ export class ApprovalPicker implements Component, Focusable {
     }
 
     cardContentLines.push("");
-    const maxInnerContentWidth = Math.max(10, width - 4);
-    const listLines = this.list.render(maxInnerContentWidth);
-    cardContentLines.push(...listLines);
-    cardContentLines.push("");
-
-    return renderPickerCard(cardContentLines, width);
+    return [
+      ...cardContentLines.flatMap((line) => wrapTextWithAnsi(line, width)),
+      ...this.list.render(width),
+    ];
   }
 }

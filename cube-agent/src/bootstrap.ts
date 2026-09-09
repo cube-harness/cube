@@ -3,7 +3,6 @@ import { LibSQLStore } from "@mastra/libsql";
 import { MastraStorageExporter, Observability } from "@mastra/observability";
 import {
   AuthStore,
-  ModelManager,
   type CubeConfig,
   type HomeManager,
   type WorkspaceManager,
@@ -12,12 +11,34 @@ import { createCubeAgent } from "./agents/main.agent.js";
 import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
 import { createMcpServer } from "./mcp/server.js";
-import { createMemory } from "./memory.js";
-import {
-  createCubeGateways,
-  type CubeGatewayComposition,
-} from "./gateways/factory.js";
+import { createCubeGateways, type CubeGatewayComposition } from "./gateways/factory.js";
 import { toMastraRouterId } from "./gateways/types.js";
+
+// Mastra 1.17.4 does not await in-flight storage writes on shutdown.
+export class DrainingStorageExporter extends MastraStorageExporter {
+  private pendingFlush: Promise<void> = Promise.resolve();
+  private shutdownPromise?: Promise<void>;
+
+  constructor() {
+    super({ strategy: "realtime" });
+  }
+
+  override _exportTracingEvent(
+    ...args: Parameters<MastraStorageExporter["_exportTracingEvent"]>
+  ): Promise<void> {
+    if (this.shutdownPromise) return Promise.resolve();
+    this.pendingFlush = this.pendingFlush.then(() => super._exportTracingEvent(...args));
+    return this.pendingFlush;
+  }
+
+  override shutdown(): Promise<void> {
+    this.shutdownPromise ??= (async () => {
+      await this.pendingFlush;
+      await super.shutdown();
+    })();
+    return this.shutdownPromise;
+  }
+}
 
 export interface CubeMastraComposition {
   agent: Awaited<ReturnType<typeof createCubeAgent>>;
@@ -36,27 +57,47 @@ export const createCubeMastra = async (
 ): Promise<CubeMastraComposition> => {
   const logging = await createCubeLogger(home);
   const auth = new AuthStore(home);
-  const gateways = options.gateways ?? createCubeGateways({
-    auth,
-    openAISubscription: {
-      getValidCredential: async () => {
-        const credential = await auth.getOpenAISubscription();
-        if (!credential || credential.expires_at <= Date.now()) {
-          throw new Error("OpenAI subscription is unavailable. Run Cube and use /gateway.");
-        }
-        return credential;
-      },
-    },
-    openAISubscriptionModelIds:
-      (await new ModelManager(home).getCatalog()).providers.openai?.models
-        .map((model) => model.modelId) ?? [],
-    gatewayOptions: config.gateway_options,
-  });
+  const gateways =
+    options.gateways ??
+    createCubeGateways({
+      auth,
+      oauth: { openai: {
+        getValidCredential: async () => {
+          const credential = await auth.getOpenAIOAuth();
+          if (!credential || credential.expires_at <= Date.now()) {
+            throw new Error("OpenAI OAuth is unavailable. Run Cube and use /gateway.");
+          }
+          return credential;
+        },
+      }, xai: {
+        getValidCredential: async () => {
+          const credential = (await auth.read()).oauth.xai;
+          if (!credential || credential.expires_at <= Date.now()) throw new Error("Grok Build OAuth is unavailable. Run Cube and use /gateway.");
+          return credential;
+        },
+      } },
+      gatewayOptions: config.gateway_options,
+    });
   const routedConfig = {
     ...config,
     model: toMastraRouterId(config.gateway, config.model),
   };
   const agent = await createCubeAgent(home, workspace, routedConfig, logging.logger);
+  const pendingStreams = new Set<Promise<void>>();
+  // Session emits agent_end on abort before the native stream finishes DB cleanup.
+  // Keep its public completion promise so shutdown cannot close SQLite too early.
+  for (const method of ["stream", "resumeStream"] as const) {
+    const stream = agent[method].bind(agent) as (
+      ...args: any[]
+    ) => Promise<{ consumeStream(): Promise<void> }>;
+    agent[method] = ((...args: any[]) => {
+      const output = stream(...args);
+      const completion = output.then((result) => result.consumeStream());
+      pendingStreams.add(completion);
+      void completion.finally(() => pendingStreams.delete(completion)).catch(() => undefined);
+      return output;
+    }) as typeof agent.stream & typeof agent.resumeStream;
+  }
   const controller = await createCubeController(
     home,
     workspace,
@@ -64,7 +105,6 @@ export const createCubeMastra = async (
     agent,
     gateways.ordered,
   );
-  const memory = createMemory(routedConfig, home);
   const mcpServer = createMcpServer();
 
   const mastra = new Mastra({
@@ -82,14 +122,16 @@ export const createCubeMastra = async (
     mcpServers: {
       myServer: mcpServer,
     },
-    observability: new Observability({
-      configs: {
-        default: {
-          serviceName: "cube-agent",
-          exporters: [new MastraStorageExporter()],
-        },
-      },
-    }),
+    observability: config.telemetry
+      ? new Observability({
+          configs: {
+            default: {
+              serviceName: "cube-agent",
+              exporters: [new DrainingStorageExporter()],
+            },
+          },
+        })
+      : undefined,
     gateways: gateways.record,
   });
 
@@ -104,6 +146,9 @@ export const createCubeMastra = async (
     shutdown: () => {
       shutdownPromise ??= (async () => {
         try {
+          await Promise.allSettled([...pendingStreams]);
+          // Mastra 1.63 closes storage before observability; drain exporters first.
+          await mastra.observability.shutdown();
           await mastra.shutdown();
         } finally {
           await logging.close();

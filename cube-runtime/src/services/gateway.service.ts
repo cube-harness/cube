@@ -1,12 +1,18 @@
 import crypto from "node:crypto";
 import {
-  buildGatewayCatalog,
+  GROK_BUILD_BASE_URL,
+  GROK_BUILD_HEADERS,
+  ANTHROPIC_BASE_URL,
+  ANTHROPIC_OAUTH_HEADERS,
   gatewayDescriptors,
   normalizeLMStudioBaseUrl,
   normalizeOllamaBaseUrl,
 } from "@cube/agent";
 import {
   CubeAuthSchema,
+  ModelManager,
+  type CatalogModel,
+  ApiKeyProviderSchema,
   RunnableConfigSchema,
   type ApiKeyGatewayId,
   type CubeAuth,
@@ -14,10 +20,15 @@ import {
   type GatewayId,
   type LocalGatewayId,
   type ModelCatalog,
-  type OpenAISubscriptionCredential,
+  type OpenAIOAuthCredential,
+  type GrokOAuthCredential,
+  type AnthropicOAuthCredential,
 } from "@cube/workspace";
 import type { OpenAILoginHandle } from "../auth/openai.js";
+import type { AnthropicAuthManager, GrokAuthManager } from "../auth/auth-manager.js";
 import type {
+  CredentialGatewayId,
+  GatewayRemovalResult,
   GatewayChoice,
   GatewayDraft,
   GatewayReadiness,
@@ -32,64 +43,106 @@ type UpdatingStore<T> = {
 };
 
 export type GatewayRuntimeAdapter = {
-  gatewayId: GatewayId;
-  getBaseUrl?(): string;
-  setBaseUrl?(baseUrl: string): void;
+  getBaseUrl?(gatewayId: LocalGatewayId): string;
+  setBaseUrl?(baseUrl: string, gatewayId: LocalGatewayId): void;
 };
 
 type OpenAILoginSource = {
   beginLogin(signal?: AbortSignal): Promise<OpenAILoginHandle>;
+  getValidCredential?(): Promise<OpenAIOAuthCredential>;
 };
 
 export type GatewayServiceDependencies = {
   config: UpdatingStore<CubeConfigDocument>;
   auth: UpdatingStore<CubeAuth>;
   adapters: ReadonlyMap<GatewayId, GatewayRuntimeAdapter>;
-  catalog: { getCatalog(): Promise<ModelCatalog> };
+  catalog: Pick<ModelManager, "getCatalog" | "preview" | "publish" | "remove">;
+  mutationKey?: string;
+  onActiveCredentialRemoved?: (gatewayId: CredentialGatewayId) => void | Promise<void>;
   openAIAuth?: OpenAILoginSource;
+  grokAuth?: Pick<GrokAuthManager, "beginLogin" | "getValidCredential">;
+  anthropicAuth?: Pick<AnthropicAuthManager, "beginLogin" | "getValidCredential">;
   fetch?: typeof globalThis.fetch;
   requestTimeoutMs?: number;
-  applyLiveSelection?: (
-    gatewayId: GatewayId,
-    model: ModelSelection,
-  ) => void | Promise<void>;
+  applyLiveSelection?: (gatewayId: GatewayId, model: ModelSelection) => void | Promise<void>;
 };
 
 type PendingCandidate =
   | { kind: "stored" }
   | { kind: "api_key"; gatewayId: ApiKeyGatewayId; apiKey: string }
-  | { kind: "subscription"; credential: OpenAISubscriptionCredential }
+  | { kind: "oauth"; provider: "openai"; credential: OpenAIOAuthCredential }
+  | { kind: "oauth"; provider: "xai"; credential: GrokOAuthCredential }
+  | { kind: "oauth"; provider: "anthropic"; credential: AnthropicOAuthCredential }
   | { kind: "local"; gatewayId: LocalGatewayId; baseUrl: string };
 
 type PendingDraft = {
   draft: GatewayDraft;
   candidate: PendingCandidate;
   timeout: ReturnType<typeof setTimeout>;
+  generation: number;
+  sourceKey?: string;
 };
 
-const API_PROVIDER = {
-  "api_key/google": "google",
-  "api_key/openrouter": "openrouter",
-  "api_key/openai": "openai",
-} as const;
-
-const emptyCatalog = (canonical: ModelCatalog): ModelCatalog => ({
-  version: 2,
-  updatedAt: canonical.updatedAt,
-  providers: {},
-});
-
-const allProviderModels = (catalog: ModelCatalog, provider: string): string[] =>
-  catalog.providers[provider]?.models.map((item) => item.modelId) ?? [];
+const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.153.1";
 
 const containsModel = (catalog: ModelCatalog, modelId: string): boolean =>
-  Object.values(catalog.providers)
-    .some((provider) => provider.models.some((model) => model.modelId === modelId));
+  Object.values(catalog.providers).some((provider) =>
+    provider.models.some((model) => model.modelId === modelId),
+  );
 
 export class GatewayService {
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly requestTimeoutMs: number;
   private readonly pending = new Map<string, PendingDraft>();
+  private readonly logins = new Map<GatewayId, { cancel(): Promise<void> }>();
+  private static readonly mutations = new Map<object | string, Promise<unknown>>();
+  private readonly generations = new Map<GatewayId, number>();
+
+  private generation(gatewayId: GatewayId): number {
+    return this.generations.get(gatewayId) ?? 0;
+  }
+
+  private async cancelLogin(gatewayId: GatewayId): Promise<void> {
+    const login = this.logins.get(gatewayId);
+    if (!login) return;
+    try { await login.cancel(); }
+    finally { if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId); }
+  }
+
+  private invalidate(gatewayId: GatewayId): number {
+    const generation = this.generation(gatewayId) + 1;
+    this.generations.set(gatewayId, generation);
+    for (const pending of this.pending.values()) {
+      if (pending.draft.gatewayId === gatewayId) this.discardDraft(pending.draft.draftId);
+    }
+    return generation;
+  }
+
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const key = this.dependencies.mutationKey ?? this.dependencies.auth;
+    const next = (GatewayService.mutations.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(operation);
+    GatewayService.mutations.set(key, next);
+    void next
+      .finally(() => {
+        if (GatewayService.mutations.get(key) === next) GatewayService.mutations.delete(key);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
+  private assertGeneration(gatewayId: GatewayId, generation: number): void {
+    if (this.generation(gatewayId) !== generation)
+      throw new Error("Gateway selection expired. Run /gateway again.");
+  }
+
+  private async sourceKey(gatewayId: GatewayId): Promise<string | undefined> {
+    return ModelManager.sourceKey(gatewayId, {
+      auth: await this.dependencies.auth.read(),
+      config: await this.dependencies.config.read(),
+    });
+  }
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.fetchImpl = dependencies.fetch ?? globalThis.fetch;
@@ -139,18 +192,20 @@ export class GatewayService {
       this.dependencies.auth.read(),
       this.dependencies.config.read(),
     ]);
-    return (Object.entries(gatewayDescriptors) as Array<[
-      GatewayId,
-      (typeof gatewayDescriptors)[GatewayId],
-    ]>).map(([gatewayId, descriptor]) => ({
+    return (
+      Object.entries(gatewayDescriptors) as Array<
+        [GatewayId, (typeof gatewayDescriptors)[GatewayId]]
+      >
+    ).map(([gatewayId, descriptor]) => ({
       gatewayId,
       group: descriptor.group,
       provider: descriptor.providerId,
-      configured: descriptor.group === "api_key"
-        ? Boolean(auth.api_keys[descriptor.providerId as keyof typeof auth.api_keys])
-        : descriptor.group === "subscription"
-          ? Boolean(auth.subscriptions.openai)
-          : Boolean(config.gateway_options[gatewayId as LocalGatewayId]),
+      configured:
+        descriptor.group === "api_key"
+          ? Boolean(auth.api_keys[descriptor.providerId as keyof typeof auth.api_keys])
+          : descriptor.group === "oauth"
+            ? Boolean(auth.oauth[descriptor.providerId as keyof typeof auth.oauth])
+            : Boolean(config.gateway_options[gatewayId as LocalGatewayId]),
     }));
   }
 
@@ -158,15 +213,15 @@ export class GatewayService {
     const config = await this.dependencies.config.read();
     const selected = gatewayId ?? config.gateway;
     if (!selected) {
-      return emptyCatalog(await this.dependencies.catalog.getCatalog());
+      return { updatedAt: new Date().toISOString(), providers: {} };
     }
-    return this.discover(selected, { kind: "stored" }, config);
+    const generation = this.generation(selected);
+    const catalog = await this.discover(selected, { kind: "stored" }, config, undefined, true);
+    this.assertGeneration(selected, generation);
+    return catalog;
   }
 
-  async createStoredDraft(
-    gatewayId: GatewayId,
-    signal?: AbortSignal,
-  ): Promise<GatewayDraft> {
+  async createStoredDraft(gatewayId: GatewayId, signal?: AbortSignal): Promise<GatewayDraft> {
     const config = await this.dependencies.config.read();
     const candidate = { kind: "stored" } as const;
     return this.createDraft(gatewayId, candidate, config, signal);
@@ -192,9 +247,10 @@ export class GatewayService {
     baseUrl: string,
     signal?: AbortSignal,
   ): Promise<GatewayDraft> {
-    const normalized = gatewayId === "local/ollama"
-      ? normalizeOllamaBaseUrl(baseUrl)
-      : normalizeLMStudioBaseUrl(baseUrl);
+    const normalized =
+      gatewayId === "local/ollama"
+        ? normalizeOllamaBaseUrl(baseUrl)
+        : normalizeLMStudioBaseUrl(baseUrl);
     const config = await this.dependencies.config.read();
     return this.createDraft(
       gatewayId,
@@ -212,20 +268,62 @@ export class GatewayService {
     if (!this.dependencies.openAIAuth) {
       throw new Error("OpenAI sign-in is unavailable.");
     }
+    const generation = this.invalidate("oauth/openai");
+    await this.cancelLogin("oauth/openai");
+    const sourceKey = await this.sourceKey("oauth/openai");
     const login = await this.dependencies.openAIAuth.beginLogin(signal);
-    return {
-      authorizationUrl: login.authorizationUrl,
-      cancel: login.cancel,
-      completion: login.completion.then(async (credential) => {
+    if (this.generation("oauth/openai") !== generation) {
+      void login.completion.catch(() => undefined);
+      await login.cancel();
+      this.assertGeneration("oauth/openai", generation);
+    }
+    this.logins.set("oauth/openai", login);
+    const completion = login.completion.then(async (credential) => {
+        this.assertGeneration("oauth/openai", generation);
+        if ((await this.sourceKey("oauth/openai")) !== sourceKey)
+          throw new Error("OpenAI account changed. Run /gateway again.");
         const config = await this.dependencies.config.read();
         return this.createDraft(
-          "subscription/openai",
-          { kind: "subscription", credential },
+          "oauth/openai",
+          { kind: "oauth", provider: "openai", credential },
           config,
           signal,
+          generation,
+          sourceKey,
         );
-      }),
-    };
+      }).finally(() => {
+        if (this.logins.get("oauth/openai") === login) this.logins.delete("oauth/openai");
+      });
+    void completion.catch(() => undefined);
+    return { authorizationUrl: login.authorizationUrl, cancel: login.cancel, completion };
+  }
+
+  async beginAnthropicLogin(signal?: AbortSignal) {
+    if (!this.dependencies.anthropicAuth) throw new Error("Anthropic sign-in is unavailable.");
+    const gatewayId = "oauth/anthropic";
+    const generation = this.invalidate(gatewayId);
+    await this.cancelLogin(gatewayId);
+    const sourceKey = await this.sourceKey(gatewayId);
+    const login = await this.dependencies.anthropicAuth.beginLogin(signal);
+    if (this.generation(gatewayId) !== generation) {
+      void login.completion.catch(() => undefined);
+      await login.cancel();
+      this.assertGeneration(gatewayId, generation);
+    }
+    this.logins.set(gatewayId, login);
+    const completion = login.completion.then(async (credential) => {
+      this.assertGeneration(gatewayId, generation);
+      if ((await this.sourceKey(gatewayId)) !== sourceKey)
+        throw new Error("Anthropic account changed. Run /gateway again.");
+      return this.createDraft(
+        gatewayId, { kind: "oauth", provider: "anthropic", credential },
+        await this.dependencies.config.read(), signal, generation, sourceKey,
+      );
+    }).finally(() => {
+      if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
+    });
+    void completion.catch(() => undefined);
+    return { ...login, completion };
   }
 
   discardDraft(draftId: string): void {
@@ -234,12 +332,76 @@ export class GatewayService {
     this.pending.delete(draftId);
   }
 
+  async beginGrokLogin(signal?: AbortSignal) {
+    if (!this.dependencies.grokAuth) throw new Error("Grok Build sign-in is unavailable.");
+    const generation = this.invalidate("oauth/xai");
+    await this.cancelLogin("oauth/xai");
+    const sourceKey = await this.sourceKey("oauth/xai");
+    const login = await this.dependencies.grokAuth.beginLogin(signal);
+    if (this.generation("oauth/xai") !== generation) {
+      void login.completion.catch(() => undefined);
+      await login.cancel();
+      this.assertGeneration("oauth/xai", generation);
+    }
+    this.logins.set("oauth/xai", login);
+    const completion = login.completion.then(async (credential) => {
+      this.assertGeneration("oauth/xai", generation);
+      if ((await this.sourceKey("oauth/xai")) !== sourceKey)
+        throw new Error("xAI account changed. Run /gateway again.");
+      return this.createDraft(
+        "oauth/xai",
+        { kind: "oauth", provider: "xai", credential },
+        await this.dependencies.config.read(),
+        signal,
+        generation,
+        sourceKey,
+      );
+    });
+    void completion.finally(() => {
+      if (this.logins.get("oauth/xai") === login) this.logins.delete("oauth/xai");
+    }).catch(() => undefined);
+    return {
+      authorizationUrl: login.authorizationUrl,
+      userCode: login.userCode,
+      expiresAt: login.expiresAt,
+      cancel: login.cancel,
+      completion,
+    };
+  }
+
   commitInitial(selection: GatewaySelection): Promise<GatewayState> {
-    return this.commit(selection, false);
+    return this.mutate(() => this.commit(selection, false));
   }
 
   set(selection: GatewaySelection): Promise<GatewayState> {
-    return this.commit(selection, true);
+    return this.mutate(() => this.commit(selection, true));
+  }
+
+  removeCredential(gatewayId: CredentialGatewayId): Promise<GatewayRemovalResult> {
+    if (!gatewayId.startsWith("oauth/") && !gatewayId.startsWith("api_key/"))
+      throw new Error("This gateway has no credential to remove.");
+    this.invalidate(gatewayId);
+    void this.cancelLogin(gatewayId).catch(() => undefined);
+    return this.mutate(async () => {
+      const config = await this.dependencies.config.read();
+      const expectedKey = await this.sourceKey(gatewayId);
+      const [, provider] = gatewayId.split("/");
+      await this.dependencies.auth.update((current) => {
+        const next = structuredClone(current);
+        if (gatewayId.startsWith("oauth/")) delete next.oauth[provider as keyof typeof next.oauth];
+        else delete next.api_keys[provider as keyof typeof next.api_keys];
+        return next;
+      });
+      const active = config.gateway === gatewayId;
+      if (active) await this.dependencies.onActiveCredentialRemoved?.(gatewayId);
+      let cacheCleared = true;
+      try {
+        await this.dependencies.catalog.remove(gatewayId, expectedKey);
+      } catch {
+        cacheCleared = false;
+      }
+      return { gatewayId, active, cacheCleared };
+    });
   }
 
   private async createDraft(
@@ -247,20 +409,36 @@ export class GatewayService {
     candidate: PendingCandidate,
     config: CubeConfigDocument,
     signal?: AbortSignal,
+    generation = this.invalidate(gatewayId),
+    expectedSourceKey?: string,
   ): Promise<GatewayDraft> {
+    if (candidate.kind === "stored" && gatewayId === "oauth/openai")
+      await this.dependencies.openAIAuth?.getValidCredential?.();
+    if (candidate.kind === "stored" && gatewayId === "oauth/xai")
+      await this.dependencies.grokAuth?.getValidCredential();
+    if (candidate.kind === "stored" && gatewayId === "oauth/anthropic")
+      await this.dependencies.anthropicAuth?.getValidCredential();
+    const sourceKey = expectedSourceKey ?? (await this.sourceKey(gatewayId));
     const catalog = await this.discover(gatewayId, candidate, config, signal);
+    signal?.throwIfAborted();
+    this.assertGeneration(gatewayId, generation);
+    if ((await this.sourceKey(gatewayId)) !== sourceKey)
+      throw new Error("Gateway credential changed. Run /gateway again.");
     const draftId = crypto.randomUUID();
     const draft: GatewayDraft = {
       draftId,
       gatewayId,
       catalog,
-      ...(config.model && containsModel(catalog, config.model)
+      ...(sourceKey &&
+      config.gateway === gatewayId &&
+      config.model &&
+      containsModel(catalog, config.model)
         ? { currentModelId: config.model }
         : {}),
     };
     const timeout = setTimeout(() => this.pending.delete(draftId), 10 * 60_000);
     timeout.unref?.();
-    this.pending.set(draftId, { draft, candidate, timeout });
+    this.pending.set(draftId, { draft, candidate, timeout, generation, sourceKey });
     return structuredClone(draft);
   }
 
@@ -269,33 +447,46 @@ export class GatewayService {
     candidate: PendingCandidate,
     config: CubeConfigDocument,
     signal?: AbortSignal,
+    persist = false,
   ): Promise<ModelCatalog> {
-    const canonical = await this.dependencies.catalog.getCatalog();
+    if (candidate.kind === "stored" && gatewayId === "oauth/openai")
+      await this.dependencies.openAIAuth?.getValidCredential?.();
+    if (candidate.kind === "stored" && gatewayId === "oauth/xai")
+      await this.dependencies.grokAuth?.getValidCredential();
+    if (candidate.kind === "stored" && gatewayId === "oauth/anthropic")
+      await this.dependencies.anthropicAuth?.getValidCredential();
     const auth = await this.dependencies.auth.read();
-    let canonicalModelIds: string[];
+    const sourceKey = ModelManager.sourceKey(gatewayId, { auth, config });
+    if (candidate.kind === "stored") {
+      const cached = await this.dependencies.catalog.getCatalog(gatewayId);
+      if (cached) return cached;
+    }
+    let canonicalModelIds: string[] | undefined;
+    let available: CatalogModel[] | undefined;
 
     if (gatewayId.startsWith("api_key/")) {
       const typedGateway = gatewayId as ApiKeyGatewayId;
-      const provider = API_PROVIDER[typedGateway];
-      const apiKey = candidate.kind === "api_key" && candidate.gatewayId === typedGateway
-        ? candidate.apiKey
-        : auth.api_keys[provider]?.api_key;
-      if (!apiKey) throw new Error(`Missing API key for ${gatewayId}. Run /gateway to configure it.`);
-      canonicalModelIds = await this.discoverApiKeyModels(
-        typedGateway,
-        apiKey,
-        canonical,
-        signal,
-      );
-    } else if (gatewayId === "subscription/openai") {
-      const credential = candidate.kind === "subscription"
-        ? candidate.credential
-        : auth.subscriptions.openai;
+      const provider = ApiKeyProviderSchema.parse(typedGateway.slice("api_key/".length));
+      const apiKey =
+        candidate.kind === "api_key" && candidate.gatewayId === typedGateway
+          ? candidate.apiKey
+          : auth.api_keys[provider]?.api_key;
+      if (!apiKey)
+        throw new Error(`Missing API key for ${gatewayId}. Run /gateway to configure it.`);
+      canonicalModelIds = await this.discoverApiKeyModels(typedGateway, apiKey, signal);
+    } else if (gatewayId === "oauth/openai") {
+      const credential =
+        candidate.kind === "oauth" && candidate.provider === "openai"
+          ? candidate.credential
+          : auth.oauth.openai;
       if (!credential) {
-        throw new Error("OpenAI subscription is not configured. Run /gateway to sign in.");
+        throw new Error("OpenAI OAuth is not configured. Run /gateway to sign in.");
+      }
+      if (credential.expires_at <= Date.now()) {
+        throw new Error("OpenAI OAuth credential expired. Run /gateway to sign in.");
       }
       const payload = await this.fetchJson(
-        "https://chatgpt.com/backend-api/codex/models",
+        OPENAI_BACKEND,
         {
           headers: {
             authorization: `Bearer ${credential.access_token}`,
@@ -303,49 +494,118 @@ export class GatewayService {
             originator: "codex_cli_rs",
           },
         },
-        "OpenAI subscription",
+        "OpenAI OAuth",
         signal,
       );
-      canonicalModelIds = this.readStringArray(payload, "models", "slug")
-        .map((id) => `openai/${id}`);
+      const ids = this.readStringArray(payload, "models", "slug");
+      const rows = (payload as { models: Array<Record<string, unknown>> }).models;
+      available = ids.map((id) => {
+        const row = rows.find((item) => item.slug === id)!;
+        const efforts = Array.isArray(row.supported_reasoning_levels)
+          ? row.supported_reasoning_levels.flatMap((value) => {
+              const effort =
+                typeof value === "object" && value !== null
+                  ? (value as Record<string, unknown>).effort
+                  : value;
+              return typeof effort === "string" ? [effort] : [];
+            })
+          : undefined;
+        return {
+          modelId: `openai/${id}`,
+          name: typeof row.display_name === "string" ? row.display_name : id,
+          ...(typeof row.context_window === "number" && row.context_window >= 0
+            ? { limit: { context: row.context_window } }
+            : {}),
+          ...(efforts ? { reasoning_efforts: efforts } : {}),
+          ...(Array.isArray(row.input_modalities) &&
+          row.input_modalities.every((value) => typeof value === "string")
+            ? { modalities: { input: row.input_modalities as string[] } }
+            : {}),
+        };
+      });
+    } else if (gatewayId === "oauth/anthropic") {
+      const credential = candidate.kind === "oauth" && candidate.provider === "anthropic"
+        ? candidate.credential : auth.oauth.anthropic;
+      if (!credential || credential.expires_at <= Date.now())
+        throw new Error("Anthropic session is unavailable or expired. Run /gateway to sign in.");
+      canonicalModelIds = [];
+      const cursors = new Set<string>();
+      let after = "";
+      while (true) {
+        const payload = await this.fetchJson(
+          `${ANTHROPIC_BASE_URL}/models?limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ""}`,
+          { headers: { ...ANTHROPIC_OAUTH_HEADERS, authorization: `Bearer ${credential.access_token}` } },
+          "Anthropic OAuth", signal,
+        );
+        canonicalModelIds.push(...this.readStringArray(payload, "data", "id").map((id) => `anthropic/${id}`));
+        const page = payload as { has_more?: boolean; last_id?: string };
+        if (!page.has_more) break;
+        if (typeof page.last_id !== "string" || !page.last_id || cursors.has(page.last_id))
+          throw new Error("Invalid Anthropic model catalog pagination.");
+        after = page.last_id;
+        cursors.add(after);
+      }
+    } else if (gatewayId === "oauth/xai") {
+      const credential =
+        candidate.kind === "oauth" && candidate.provider === "xai"
+          ? candidate.credential
+          : auth.oauth.xai;
+      if (!credential || credential.expires_at <= Date.now())
+        throw new Error("Grok Build session is unavailable or expired. Run /gateway to sign in.");
+      const payload = await this.fetchJson(
+        `${GROK_BUILD_BASE_URL}/models`,
+        {
+          headers: { ...GROK_BUILD_HEADERS, authorization: `Bearer ${credential.access_token}` },
+        },
+        "Grok Build",
+        signal,
+      );
+      canonicalModelIds = this.readStringArray(payload, "data", "id").map((id) => `xai/${id}`);
     } else {
       const local = gatewayId as LocalGatewayId;
-      const configuredUrl = candidate.kind === "local" && candidate.gatewayId === local
-        ? candidate.baseUrl
-        : config.gateway_options[local]?.base_url;
+      const configuredUrl =
+        candidate.kind === "local" && candidate.gatewayId === local
+          ? candidate.baseUrl
+          : config.gateway_options[local]?.base_url;
       if (!configuredUrl) throw new Error(`Missing endpoint for ${gatewayId}.`);
       if (local === "local/ollama") {
         const baseUrl = normalizeOllamaBaseUrl(configuredUrl);
-        const payload = await this.fetchJson(
-          `${baseUrl}/api/tags`,
-          {},
-          "Ollama",
-          signal,
+        const payload = await this.fetchJson(`${baseUrl}/api/tags`, {}, "Ollama", signal);
+        canonicalModelIds = this.readStringArray(payload, "models", "name").map(
+          (id) => `ollama/${id}`,
         );
-        canonicalModelIds = this.readStringArray(payload, "models", "name")
-          .map((id) => `ollama/${id}`);
       } else {
         const baseUrl = normalizeLMStudioBaseUrl(configuredUrl);
-        const payload = await this.fetchJson(
-          `${baseUrl}/models`,
-          {},
-          "LM Studio",
-          signal,
+        const payload = await this.fetchJson(`${baseUrl}/models`, {}, "LM Studio", signal);
+        canonicalModelIds = this.readStringArray(payload, "data", "id").map(
+          (id) => `lmstudio/${id}`,
         );
-        canonicalModelIds = this.readStringArray(payload, "data", "id")
-          .map((id) => `lmstudio/${id}`);
       }
     }
 
-    return buildGatewayCatalog(canonical, gatewayId, canonicalModelIds);
+    const view = await this.dependencies.catalog.preview(
+      gatewayId,
+      available ??
+        canonicalModelIds?.map((modelId) => ({
+          modelId,
+          name: modelId.slice(modelId.indexOf("/") + 1),
+        })),
+    );
+    signal?.throwIfAborted();
+    if (candidate.kind === "stored") {
+      if (!sourceKey || (await this.sourceKey(gatewayId)) !== sourceKey)
+        throw new Error("Gateway credential changed. Run /gateway again.");
+      if (persist && !(await this.dependencies.catalog.publish(gatewayId, sourceKey, view)))
+        throw new Error("Gateway credential changed. Run /gateway again.");
+    }
+    return view;
   }
 
   private async discoverApiKeyModels(
     gatewayId: ApiKeyGatewayId,
     apiKey: string,
-    catalog: ModelCatalog,
     signal?: AbortSignal,
-  ): Promise<string[]> {
+  ): Promise<string[] | undefined> {
     if (gatewayId === "api_key/google") {
       const payload = await this.fetchJson(
         "https://generativelanguage.googleapis.com/v1beta/models",
@@ -353,8 +613,9 @@ export class GatewayService {
         "Google",
         signal,
       );
-      return this.readStringArray(payload, "models", "name")
-        .map((id) => `google/${id.replace(/^models\//, "")}`);
+      return this.readStringArray(payload, "models", "name").map(
+        (id) => `google/${id.replace(/^models\//, "")}`,
+      );
     }
     if (gatewayId === "api_key/openrouter") {
       await this.fetchJson(
@@ -363,15 +624,20 @@ export class GatewayService {
         "OpenRouter",
         signal,
       );
-      return allProviderModels(catalog, "openrouter");
+      return undefined;
     }
-    const payload = await this.fetchJson(
-      "https://api.openai.com/v1/models",
-      { headers: { authorization: `Bearer ${apiKey}` } },
-      "OpenAI",
-      signal,
-    );
-    return this.readStringArray(payload, "data", "id").map((id) => `openai/${id}`);
+    if (gatewayId === "api_key/openai") {
+      const payload = await this.fetchJson(
+        "https://api.openai.com/v1/models",
+        { headers: { authorization: `Bearer ${apiKey}` } },
+        "OpenAI",
+        signal,
+      );
+      return this.readStringArray(payload, "data", "id").map((id) => `openai/${id}`);
+    }
+    // Native providers do not share a credential-validation/models endpoint.
+    // List canonical capabilities; authentication errors surface on inference.
+    return undefined;
   }
 
   private async fetchJson(
@@ -389,51 +655,79 @@ export class GatewayService {
       if (!response.ok) throw new Error("request rejected");
       return await response.json();
     } catch {
+      signal?.throwIfAborted();
       if (status === 401 || status === 403) {
         throw new Error(`${label} credential was rejected.`);
       }
-      if (status === 429) {
+      if (status === 429 || status === 402) {
         throw new Error(`${label} quota or rate limit reached.`);
       }
-      throw new Error(`${label} gateway is unavailable or rejected the credential.`);
+      if (status !== undefined)
+        throw new Error(`${label} model catalog request failed (HTTP ${status}).`);
+      throw new Error(`${label} gateway is unavailable or timed out.`);
     }
   }
 
-  private readStringArray(
-    payload: unknown,
-    collectionKey: string,
-    valueKey: string,
-  ): string[] {
-    if (payload === null || typeof payload !== "object") return [];
+  private readStringArray(payload: unknown, collectionKey: string, valueKey: string): string[] {
+    if (payload === null || typeof payload !== "object")
+      throw new Error("Invalid gateway model catalog.");
     const collection = (payload as Record<string, unknown>)[collectionKey];
-    if (!Array.isArray(collection)) return [];
+    if (!Array.isArray(collection)) throw new Error("Invalid gateway model catalog.");
     return collection.flatMap((item) => {
-      if (item === null || typeof item !== "object") return [];
+      if (item === null || typeof item !== "object")
+        throw new Error("Invalid gateway model catalog.");
       const value = (item as Record<string, unknown>)[valueKey];
-      return typeof value === "string" && value.length > 0 ? [value] : [];
+      if (typeof value !== "string" || !value) throw new Error("Invalid gateway model catalog.");
+      return [value];
     });
   }
 
-  private async commit(
-    selection: GatewaySelection,
-    applyLive: boolean,
-  ): Promise<GatewayState> {
+  private async commit(selection: GatewaySelection, applyLive: boolean): Promise<GatewayState> {
     const pending = this.pending.get(selection.draftId);
     if (!pending) throw new Error("Gateway selection expired. Run /gateway again.");
     if (!containsModel(pending.draft.catalog, selection.model.modelId)) {
-      throw new Error(`Model ${selection.model.modelId} is not available through ${pending.draft.gatewayId}.`);
+      throw new Error(
+        `Model ${selection.model.modelId} is not available through ${pending.draft.gatewayId}.`,
+      );
     }
 
+    const gatewayId = pending.draft.gatewayId;
+    this.assertGeneration(gatewayId, pending.generation);
+    if ((await this.sourceKey(gatewayId)) !== pending.sourceKey)
+      throw new Error("Gateway credential changed. Run /gateway again.");
     const previousConfig = await this.dependencies.config.read();
     const previousAuth = await this.dependencies.auth.read();
+    const stagedAuth = structuredClone(previousAuth);
+    const stagedConfig = structuredClone(previousConfig);
+    if (pending.candidate.kind === "oauth") {
+      Object.assign(stagedAuth.oauth, {
+        [pending.candidate.provider]: pending.candidate.credential,
+      });
+    } else if (pending.candidate.kind === "api_key") {
+      stagedAuth.api_keys[ApiKeyProviderSchema.parse(gatewayId.slice("api_key/".length))] = {
+        api_key: pending.candidate.apiKey,
+      };
+    } else if (pending.candidate.kind === "local") {
+      stagedConfig.gateway_options[pending.candidate.gatewayId] = {
+        base_url: pending.candidate.baseUrl,
+      };
+    }
+    const expectedKey = ModelManager.sourceKey(gatewayId, {
+      auth: stagedAuth,
+      config: stagedConfig,
+    });
     const adapter = this.dependencies.adapters.get(pending.draft.gatewayId);
-    const previousBaseUrl = adapter?.getBaseUrl?.();
+    const localId = pending.draft.gatewayId.startsWith("local/")
+      ? (pending.draft.gatewayId as LocalGatewayId)
+      : undefined;
+    const previousBaseUrl = localId ? adapter?.getBaseUrl?.(localId) : undefined;
     let liveApplyAttempted = false;
 
     try {
-      await this.applyCandidateAuth(pending.candidate);
+      await this.applyCandidateAuth(pending.candidate, pending, previousConfig);
+      this.assertGeneration(gatewayId, pending.generation);
       if (pending.candidate.kind === "local") {
-        adapter?.setBaseUrl?.(pending.candidate.baseUrl);
+        adapter?.setBaseUrl?.(pending.candidate.baseUrl, pending.candidate.gatewayId);
       }
       await this.dependencies.config.update((current) => ({
         ...current,
@@ -442,55 +736,135 @@ export class GatewayService {
         model_config: selection.model.reasoningEffort
           ? { ...current.model_config, reasoning_effort: selection.model.reasoningEffort }
           : {},
-        gateway_options: pending.candidate.kind === "local"
-          ? {
-              ...current.gateway_options,
-              [pending.candidate.gatewayId]: { base_url: pending.candidate.baseUrl },
-            }
-          : current.gateway_options,
+        gateway_options:
+          pending.candidate.kind === "local"
+            ? {
+                ...current.gateway_options,
+                [pending.candidate.gatewayId]: { base_url: pending.candidate.baseUrl },
+              }
+            : current.gateway_options,
       }));
       if (applyLive && this.dependencies.applyLiveSelection) {
         liveApplyAttempted = true;
-        await this.dependencies.applyLiveSelection(
-          pending.draft.gatewayId,
-          selection.model,
-        );
+        await this.dependencies.applyLiveSelection(pending.draft.gatewayId, selection.model);
       }
+      this.assertGeneration(gatewayId, pending.generation);
+      if (
+        !expectedKey ||
+        !(await this.dependencies.catalog.publish(gatewayId, expectedKey, pending.draft.catalog))
+      )
+        throw new Error("Gateway credential changed.");
+      this.assertGeneration(gatewayId, pending.generation);
       return { gatewayId: pending.draft.gatewayId, model: { ...selection.model } };
-    } catch {
-      await this.dependencies.auth.update(() => previousAuth).catch(() => undefined);
-      await this.dependencies.config.update(() => previousConfig).catch(() => undefined);
-      if (previousBaseUrl) adapter?.setBaseUrl?.(previousBaseUrl);
+    } catch (originalError) {
+      const rollbackErrors: unknown[] = [];
+      const restore = async (action: () => unknown | Promise<unknown>) => {
+        try {
+          await action();
+        } catch (error) {
+          rollbackErrors.push(error);
+        }
+      };
+      await restore(() =>
+        this.dependencies.auth.update((current) => {
+          const [, provider] = gatewayId.split("/");
+          const branch = gatewayId.startsWith("oauth/") ? "oauth" : "api_keys";
+          if (pending.candidate.kind === "local" || pending.candidate.kind === "stored")
+            return current;
+          const expected =
+            pending.candidate.kind === "oauth"
+              ? pending.candidate.credential
+              : { api_key: pending.candidate.apiKey };
+          if (
+            JSON.stringify((current[branch] as Record<string, unknown>)[provider!]) !==
+            JSON.stringify(expected)
+          )
+            return current;
+          const next = structuredClone(current);
+          const target = next[branch] as Record<string, unknown>;
+          const old = (previousAuth[branch] as Record<string, unknown>)[provider!];
+          if (old === undefined) delete target[provider!];
+          else target[provider!] = old;
+          return next;
+        }),
+      );
+      await restore(() =>
+        this.dependencies.config.update((current) =>
+          current.gateway !== gatewayId || current.model !== selection.model.modelId
+            ? current
+            : {
+                ...current,
+                gateway: previousConfig.gateway,
+                model: previousConfig.model,
+                model_config: previousConfig.model_config,
+                gateway_options: localId
+                  ? {
+                      ...current.gateway_options,
+                      [localId]: previousConfig.gateway_options[localId],
+                    }
+                  : current.gateway_options,
+              },
+        ),
+      );
+      if (previousBaseUrl && localId)
+        await restore(() => adapter?.setBaseUrl?.(previousBaseUrl, localId));
       const previousRunnable = RunnableConfigSchema.safeParse(previousConfig);
       if (liveApplyAttempted && previousRunnable.success && this.dependencies.applyLiveSelection) {
-        await Promise.resolve(this.dependencies.applyLiveSelection(previousRunnable.data.gateway, {
-          modelId: previousRunnable.data.model,
-          ...(previousRunnable.data.model_config.reasoning_effort
-            ? { reasoningEffort: previousRunnable.data.model_config.reasoning_effort }
-            : {}),
-        })).catch(() => undefined);
+        await restore(() =>
+          this.dependencies.applyLiveSelection!(previousRunnable.data.gateway, {
+            modelId: previousRunnable.data.model,
+            ...(previousRunnable.data.model_config.reasoning_effort
+              ? { reasoningEffort: previousRunnable.data.model_config.reasoning_effort }
+              : {}),
+          }),
+        );
       }
-      throw new Error("Gateway switch failed; the previous configuration is still active.");
+      if (rollbackErrors.length) {
+        throw new AggregateError(
+          [originalError, ...rollbackErrors],
+          "Gateway switch failed and rollback failed; configuration may be inconsistent. Run /gateway to recover.",
+        );
+      }
+      throw new Error("Gateway switch failed; the previous configuration is still active.", {
+        cause: originalError,
+      });
     } finally {
       this.discardDraft(selection.draftId);
     }
   }
 
-  private async applyCandidateAuth(candidate: PendingCandidate): Promise<void> {
+  private async applyCandidateAuth(
+    candidate: PendingCandidate,
+    pending: PendingDraft,
+    config: CubeConfigDocument,
+  ): Promise<void> {
+    const check = (current: CubeAuth) => {
+      this.assertGeneration(pending.draft.gatewayId, pending.generation);
+      if (
+        ModelManager.sourceKey(pending.draft.gatewayId, { auth: current, config }) !==
+        pending.sourceKey
+      )
+        throw new Error("Gateway credential changed. Run /gateway again.");
+      return current;
+    };
     if (candidate.kind === "api_key") {
-      const provider = API_PROVIDER[candidate.gatewayId];
-      await this.dependencies.auth.update((current) => CubeAuthSchema.parse({
-        ...current,
-        api_keys: {
-          ...current.api_keys,
-          [provider]: { api_key: candidate.apiKey },
-        },
-      }));
-    } else if (candidate.kind === "subscription") {
-      await this.dependencies.auth.update((current) => CubeAuthSchema.parse({
-        ...current,
-        subscriptions: { ...current.subscriptions, openai: candidate.credential },
-      }));
+      const provider = ApiKeyProviderSchema.parse(candidate.gatewayId.slice("api_key/".length));
+      await this.dependencies.auth.update((stored) =>
+        CubeAuthSchema.parse({
+          ...check(stored),
+          api_keys: {
+            ...stored.api_keys,
+            [provider]: { api_key: candidate.apiKey },
+          },
+        }),
+      );
+    } else if (candidate.kind === "oauth") {
+      await this.dependencies.auth.update((stored) =>
+        CubeAuthSchema.parse({
+          ...check(stored),
+          oauth: { ...stored.oauth, [candidate.provider]: candidate.credential },
+        }),
+      );
     }
   }
 }

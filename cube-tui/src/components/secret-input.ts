@@ -7,6 +7,8 @@ import {
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { appTheme } from "../themes/app.theme.js";
+import { formatBinding } from "../keybindings.js";
+import { KeyHint } from "./key-hint.js";
 
 export type SecretInputOptions = {
   title: string;
@@ -19,6 +21,10 @@ export type SecretInputOptions = {
 export class SecretInput implements Component, Focusable {
   private readonly input = new Input();
   private readonly title: Text;
+  private readonly hint = new KeyHint([
+    { key: formatBinding("tui.select.confirm"), label: "Confirm" },
+    { key: formatBinding("tui.select.cancel"), label: "Cancel" },
+  ]);
 
   constructor(private readonly options: SecretInputOptions) {
     this.title = new Text(appTheme.ui.text.bold(options.title), 0, 0);
@@ -44,7 +50,7 @@ export class SecretInput implements Component, Focusable {
     const input = this.options.masked === false
       ? this.input.render(width)
       : [truncateToWidth(
-          "> " + "•".repeat([...this.input.getValue()].length) +
+          "❯ " + "•".repeat([...this.input.getValue()].length) +
             (this.focused ? CURSOR_MARKER : ""),
           width,
         )];
@@ -54,7 +60,7 @@ export class SecretInput implements Component, Focusable {
       "",
       ...input,
       "",
-      truncateToWidth(appTheme.ui.muted("Enter Confirm  •  Esc Cancel"), width),
+      ...this.hint.render(width),
     ];
   }
 
@@ -63,6 +69,8 @@ export class SecretInput implements Component, Focusable {
   }
 
   invalidate(): void {
+    this.title.invalidate();
+    this.hint.invalidate();
     this.input.invalidate();
   }
 }

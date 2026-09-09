@@ -48,7 +48,8 @@ const truncatePlainText = (str: string, maxWidth: number): string => {
 };
 
 export class ThreadPickerOverlay extends Container implements Component, Focusable {
-  focused = true;
+  get focused(): boolean { return this.searchBar.focused; }
+  set focused(value: boolean) { this.searchBar.focused = value; }
   private readonly title: Text;
   private readonly searchBar: SearchBar;
   private readonly threadList: SelectList;

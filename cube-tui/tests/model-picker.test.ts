@@ -8,7 +8,6 @@ import {
 } from "../src/components/model-picker.js";
 
 const catalog: ModelCatalog = {
-  version: 2,
   updatedAt: "2026-09-05T00:00:00.000Z",
   providers: {
     google: {

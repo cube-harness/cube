@@ -1,10 +1,10 @@
-// ---- primitives ----
 export const GLOBAL_ROOT = ".cube";
 export const PROJECT_ROOT = [".agents", ".cube", ".claude", ".codex"] as const;
 export const CONTEXT_FILE = "AGENTS.md";
 export const SKILL_DIR = "skills";
+export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
 
-// ---- ~/.cube (global home dir) ----
 export const HOME_PATHS = {
   ROOT: GLOBAL_ROOT,
   MEMORIES: "memories",
@@ -29,7 +29,6 @@ export const HOME_LIMITS = {
   MODEL_CATALOG_TTL_MS: 24 * 60 * 60 * 1000,
 } as const;
 
-// ---- project workspace (per-repo) ----
 export const WORKSPACE_PATHS = {
   ROOT: PROJECT_ROOT,
   SKILLS: PROJECT_ROOT.map((dir) => `${dir}/${SKILL_DIR}`),
@@ -37,6 +36,25 @@ export const WORKSPACE_PATHS = {
 
 export const WORKSPACE_FILES = {
   CONTEXT: CONTEXT_FILE,
+} as const;
+
+export const API_KEY_PROVIDERS = {
+  google: "Google",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  moonshotai: "Moonshot",
+  openrouter: "OpenRouter",
+  mistral: "Mistral",
+  nvidia: "Nvidia",
+  poolside: "Poolside",
+  zai: "Z.AI",
+  "zai-coding-plan": "Z.AI Coding Plan",
+  alibaba: "Alibaba",
+  "alibaba-coding-plan": "Alibaba Coding Plan",
+  huggingface: "Hugging Face",
+  groq: "Groq",
 } as const;
 
 export type HomePathKey = keyof typeof HOME_PATHS;

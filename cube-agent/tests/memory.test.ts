@@ -15,7 +15,6 @@ import {
 } from "../src/memory.js";
 
 const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
-  version: 2,
   gateway: "api_key/google",
   model: "google/gemini-3.7-flash",
   model_config: { reasoning_effort: "high" },
