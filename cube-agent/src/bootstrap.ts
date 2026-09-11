@@ -7,7 +7,7 @@ import {
   type HomeManager,
   type WorkspaceManager,
 } from "@cube/workspace";
-import { createCubeAgent } from "./agents/main.agent.js";
+import { createCubeAgent } from "./agents/default.agent.js";
 import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
 import { createMcpServer } from "./mcp/server.js";
@@ -61,21 +61,25 @@ export const createCubeMastra = async (
     options.gateways ??
     createCubeGateways({
       auth,
-      oauth: { openai: {
-        getValidCredential: async () => {
-          const credential = await auth.getOpenAIOAuth();
-          if (!credential || credential.expires_at <= Date.now()) {
-            throw new Error("OpenAI OAuth is unavailable. Run Cube and use /gateway.");
-          }
-          return credential;
+      oauth: {
+        openai: {
+          getValidCredential: async () => {
+            const credential = await auth.getOpenAIOAuth();
+            if (!credential || credential.expires_at <= Date.now()) {
+              throw new Error("OpenAI OAuth is unavailable. Run Cube and use /gateway.");
+            }
+            return credential;
+          },
         },
-      }, xai: {
-        getValidCredential: async () => {
-          const credential = (await auth.read()).oauth.xai;
-          if (!credential || credential.expires_at <= Date.now()) throw new Error("Grok Build OAuth is unavailable. Run Cube and use /gateway.");
-          return credential;
+        xai: {
+          getValidCredential: async () => {
+            const credential = (await auth.read()).oauth.xai;
+            if (!credential || credential.expires_at <= Date.now())
+              throw new Error("Grok Build OAuth is unavailable. Run Cube and use /gateway.");
+            return credential;
+          },
         },
-      } },
+      },
       gatewayOptions: config.gateway_options,
     });
   const routedConfig = {

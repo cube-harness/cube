@@ -88,6 +88,29 @@ test("Anthropic logout prunes only its OAuth catalog, including after a manual a
   assert.deepEqual(after.oauth.openai, before.oauth.openai);
 });
 
+test("Google project replacement and logout prune only its OAuth catalog", async t => {
+  const { home, auth, manager, key, publish } = await fixture(t);
+  await auth.update(current => ({ ...current, oauth: { ...current.oauth,
+    google: { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, project_id: "first-project" },
+  } }));
+  await publish("api_key/google");
+  await publish("oauth/google");
+  await publish("oauth/openai");
+  await publish("local/ollama");
+  const before = await ModelCatalogStore(home).read();
+  const oldKey = await key("oauth/google");
+  await auth.update(current => { current.oauth.google!.project_id = "second-project"; return current; });
+  assert.notEqual(await key("oauth/google"), oldKey);
+  assert.equal(await manager.getCatalog("oauth/google"), undefined);
+  await publish("oauth/google");
+  await auth.update(current => { delete current.oauth.google; return current; });
+  assert.equal(await manager.getCatalog("oauth/google"), undefined);
+  const after = await ModelCatalogStore(home).read();
+  assert.deepEqual(after.api_key, before.api_key);
+  assert.deepEqual(after.local, before.local);
+  assert.deepEqual(after.oauth.openai, before.oauth.openai);
+});
+
 test("concurrent managers merge per home; deleting one credential reconciles immediately without touching other strategies", async t => {
   const { home, auth, manager, key, publish, source } = await fixture(t);
   const other = new ModelManager(home, source);

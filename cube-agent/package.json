@@ -20,6 +20,7 @@
     "mastra": "^1.25.0"
   },
   "dependencies": {
+    "@ai-sdk/google": "3.0.122",
     "@cube/workspace": "workspace:*",
     "@mastra/core": "1.63.2",
     "@mastra/libsql": "1.22.2",
@@ -28,6 +29,7 @@
     "@mastra/memory": "1.28.1",
     "@mastra/observability": "1.17.4",
     "ai": "6.0.241",
+    "eventsource-parser": "3.1.0",
     "ollama-ai-provider-v2": "^3.6.0",
     "zod": "4.4.3"
   }

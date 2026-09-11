@@ -8,10 +8,17 @@ import {
 } from "@mastra/core/llm";
 import type { OAuthCredentialProviders } from "./types.js";
 import { wrapLanguageModel } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { EventSourceParserStream } from "eventsource-parser/stream";
 
 export const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const GROK_BUILD_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
+export const GOOGLE_CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com/v1internal";
+export const GOOGLE_CODE_ASSIST_HEADERS = {
+  "user-agent": "GeminiCLI/0.34.0",
+  "x-goog-api-client": "google-genai-sdk/1.41.0 gl-node/v22.19.0",
+};
 // Experimental subscription compatibility; isolated from the native API-key gateway.
 export const ANTHROPIC_OAUTH_HEADERS = {
   "anthropic-version": "2023-06-01",
@@ -34,6 +41,7 @@ export class OAuthGateway implements MastraModelGatewayInterface {
   constructor(
     private readonly credentials: OAuthCredentialProviders,
     private readonly delegate?: OAuthDelegate,
+    private readonly fetchImpl: typeof globalThis.fetch = globalThis.fetch,
   ) {}
 
   private readonly providers: Record<string, ProviderConfig> = Object.fromEntries(
@@ -42,6 +50,7 @@ export class OAuthGateway implements MastraModelGatewayInterface {
         ["openai", "OpenAI", OPENAI_CODEX_BASE_URL],
         ["xai", "xAI", GROK_BUILD_BASE_URL],
         ["anthropic", "Anthropic", ANTHROPIC_BASE_URL],
+        ["google", "Google", GOOGLE_CODE_ASSIST_BASE_URL],
       ] as const
     ).map(([provider, name, url]) => [
       provider,
@@ -50,7 +59,7 @@ export class OAuthGateway implements MastraModelGatewayInterface {
         url,
         apiKeyEnvVar: [],
         gateway: this.id,
-        npm: provider === "anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai",
+        npm: provider === "google" ? "@ai-sdk/google" : provider === "anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai",
         models: [],
       },
     ]),
@@ -66,10 +75,18 @@ export class OAuthGateway implements MastraModelGatewayInterface {
     const provider = modelId.replace(/^cube-oauth\//, "").split("/")[0]!;
     const config = this.providers[provider];
     if (!config) throw new Error("Unsupported OAuth provider.");
+    if (provider === "google") return `${config.url}:streamGenerateContent?alt=sse`;
     return `${config.url}/${provider === "anthropic" ? "messages" : "responses"}`;
   }
 
   async resolveAuth(request: GatewayAuthRequest): Promise<GatewayAuthResult> {
+    if (request.providerId === "google") {
+      if (!this.credentials.google)
+        throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
+      const credential = await this.credentials.google.getValidCredential();
+      return { bearerToken: credential.access_token, apiKey: credential.access_token,
+        headers: { ...GOOGLE_CODE_ASSIST_HEADERS }, source: "gateway" };
+    }
     if (request.providerId === "anthropic") {
       if (!this.credentials.anthropic)
         throw new Error("Anthropic OAuth is not configured. Run /gateway to sign in.");
@@ -116,6 +133,56 @@ export class OAuthGateway implements MastraModelGatewayInterface {
   }): Promise<GatewayLanguageModel> {
     const provider = this.providers[args.providerId];
     if (!provider) throw new Error("Unsupported OAuth provider.");
+    if (args.providerId === "google") {
+      // Keep the native SDK's tools/thought signatures/usage. Only adapt the Code Assist envelope.
+      return createGoogleGenerativeAI({
+        apiKey: args.apiKey,
+        baseURL: GOOGLE_CODE_ASSIST_BASE_URL,
+        fetch: async (input, init) => {
+          if (!this.credentials.google)
+            throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
+          const credential = await this.credentials.google.getValidCredential();
+          init?.signal?.throwIfAborted();
+          const stream = String(input).includes(":streamGenerateContent");
+          const headers = new Headers(init?.headers);
+          headers.delete("x-goog-api-key");
+          headers.set("authorization", `Bearer ${credential.access_token}`);
+          for (const [name, value] of Object.entries(GOOGLE_CODE_ASSIST_HEADERS)) headers.set(name, value);
+          const response = await this.fetchImpl(
+            `${GOOGLE_CODE_ASSIST_BASE_URL}:${stream ? "streamGenerateContent?alt=sse" : "generateContent"}`,
+            { ...init, headers, redirect: "error", body: JSON.stringify({
+              project: credential.project_id, model: args.modelId,
+              user_prompt_id: crypto.randomUUID(), request: JSON.parse(String(init?.body)),
+            }) },
+          );
+          if (!response.ok || !response.body) return response;
+          const unwrap = (value: unknown) => {
+            if (!value || typeof value !== "object") throw new Error("Invalid Google Code Assist response.");
+            const data = value as Record<string, unknown>;
+            if (data.error) {
+              const error = data.error as { message?: unknown };
+              throw new Error(typeof error.message === "string" ? error.message : "Google Code Assist request failed.");
+            }
+            if (!data.response || typeof data.response !== "object" || Array.isArray(data.response))
+              throw new Error("Invalid Google Code Assist response.");
+            return { responseId: data.traceId, ...data.response };
+          };
+          const responseHeaders = new Headers(response.headers);
+          responseHeaders.delete("content-length");
+          responseHeaders.delete("content-encoding");
+          if (!stream) return Response.json(unwrap(await response.json()), { headers: responseHeaders });
+          const body = response.body.pipeThrough(new TextDecoderStream())
+            .pipeThrough(new EventSourceParserStream())
+            .pipeThrough(new TransformStream({
+              transform(event, controller) {
+                if (event.data === "[DONE]") return;
+                controller.enqueue(`data: ${JSON.stringify(unwrap(JSON.parse(event.data)))}\n\n`);
+              },
+            })).pipeThrough(new TextEncoderStream());
+          return new Response(body, { headers: responseHeaders });
+        },
+      }).chat(args.modelId);
+    }
     const delegate =
       this.delegate ??
       new ModelsDevGateway({

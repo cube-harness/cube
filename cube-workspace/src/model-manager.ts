@@ -78,6 +78,7 @@ export class ModelManager {
       const credential = auth.oauth[provider as keyof typeof auth.oauth];
       if (!credential) return undefined;
       identity = ["account_id" in credential ? credential.account_id : "", credential.refresh_token];
+      if ("project_id" in credential) identity.push(credential.project_id);
     } else {
       const endpoint = config.gateway_options[gatewayId as LocalGatewayId]?.base_url;
       if (!endpoint) return undefined;

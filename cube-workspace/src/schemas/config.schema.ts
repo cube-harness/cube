@@ -6,6 +6,7 @@ export const GATEWAY_IDS = [
   "oauth/openai",
   "oauth/xai",
   "oauth/anthropic",
+  "oauth/google",
   "local/ollama",
   "local/lmstudio",
 ] as const;

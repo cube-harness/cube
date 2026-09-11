@@ -4,13 +4,7 @@ export interface DisplayTool {
   id: string;
   name: string;
   args: unknown;
-  status:
-    | "streaming_input"
-    | "waiting_approval"
-    | "running"
-    | "completed"
-    | "error"
-    | "declined";
+  status: "streaming_input" | "waiting_approval" | "running" | "completed" | "error" | "declined";
   partialResult?: string;
   result?: unknown;
   shellOutput?: string;

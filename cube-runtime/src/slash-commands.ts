@@ -4,11 +4,7 @@ import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
-import {
-  toRuntimeNotice,
-  type PromptResult,
-  type SlashCommandSuggestion,
-} from "./types.js";
+import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
   name: `/${string}`;
@@ -143,7 +139,8 @@ const definitions: SlashCommandDefinition[] = [
             kind: "notice",
             notice: {
               level: "info",
-              message: "No models are available for this gateway. Run /gateway to choose another gateway.",
+              message:
+                "No models are available for this gateway. Run /gateway to choose another gateway.",
             },
           };
         }
@@ -164,6 +161,68 @@ const definitions: SlashCommandDefinition[] = [
       return {
         kind: "model",
         model: await context.model.set(parseModelSelection(argument)),
+      };
+    },
+  },
+  {
+    name: "/effort",
+    aliases: ["/thinking"],
+    description: "Set reasoning effort for the active model",
+    execute: async (argument, context) => {
+      const current = context.model.current();
+      if (!current.modelId) {
+        return {
+          kind: "notice",
+          notice: { level: "error", message: "No active model is configured." },
+        };
+      }
+
+      const input = argument.trim().toLowerCase();
+
+      if (!input) {
+        const catalog = await context.model.list();
+        const readiness = await context.gateway.readiness();
+        if (!readiness.ready) {
+          return { kind: "notice", notice: { level: "error", message: readiness.reason } };
+        }
+
+        const currentModel = Object.values(catalog.providers)
+          .flatMap((p) => p.models)
+          .find((m) => m.modelId === current.modelId);
+
+        if (!currentModel?.reasoning_efforts?.length) {
+          return {
+            kind: "notice",
+            notice: {
+              level: "error",
+              message: `Model ${current.modelId} does not support reasoning effort.`,
+            },
+          };
+        }
+
+        return {
+          kind: "models",
+          gatewayId: readiness.gatewayId,
+          catalog,
+          current,
+          step: "reasoning",
+        };
+      }
+
+      const effort = input as ReasoningEffort;
+      if (!reasoningEfforts.has(effort)) {
+        return {
+          kind: "notice",
+          notice: {
+            level: "error",
+            message: `Unsupported reasoning effort: "${input}". Valid values: ${Array.from(reasoningEfforts).join(", ")}`,
+          },
+        };
+      }
+
+      return {
+        kind: "model",
+        model: await context.model.set({ modelId: current.modelId, reasoningEffort: effort }),
       };
     },
   },

@@ -4,6 +4,8 @@ import {
   GROK_BUILD_HEADERS,
   ANTHROPIC_BASE_URL,
   ANTHROPIC_OAUTH_HEADERS,
+  GOOGLE_CODE_ASSIST_BASE_URL,
+  GOOGLE_CODE_ASSIST_HEADERS,
   gatewayDescriptors,
   normalizeLMStudioBaseUrl,
   normalizeOllamaBaseUrl,
@@ -23,9 +25,14 @@ import {
   type OpenAIOAuthCredential,
   type GrokOAuthCredential,
   type AnthropicOAuthCredential,
+  type GoogleOAuthCredential,
 } from "@cube/workspace";
 import type { OpenAILoginHandle } from "../auth/openai.js";
-import type { AnthropicAuthManager, GrokAuthManager } from "../auth/auth-manager.js";
+import type {
+  AnthropicAuthManager,
+  GoogleAuthManager,
+  GrokAuthManager,
+} from "../auth/auth-manager.js";
 import type {
   CredentialGatewayId,
   GatewayRemovalResult,
@@ -62,6 +69,7 @@ export type GatewayServiceDependencies = {
   openAIAuth?: OpenAILoginSource;
   grokAuth?: Pick<GrokAuthManager, "beginLogin" | "getValidCredential">;
   anthropicAuth?: Pick<AnthropicAuthManager, "beginLogin" | "getValidCredential">;
+  googleAuth?: Pick<GoogleAuthManager, "beginLogin" | "getValidCredential">;
   fetch?: typeof globalThis.fetch;
   requestTimeoutMs?: number;
   applyLiveSelection?: (gatewayId: GatewayId, model: ModelSelection) => void | Promise<void>;
@@ -73,6 +81,7 @@ type PendingCandidate =
   | { kind: "oauth"; provider: "openai"; credential: OpenAIOAuthCredential }
   | { kind: "oauth"; provider: "xai"; credential: GrokOAuthCredential }
   | { kind: "oauth"; provider: "anthropic"; credential: AnthropicOAuthCredential }
+  | { kind: "oauth"; provider: "google"; credential: GoogleOAuthCredential }
   | { kind: "local"; gatewayId: LocalGatewayId; baseUrl: string };
 
 type PendingDraft = {
@@ -105,8 +114,11 @@ export class GatewayService {
   private async cancelLogin(gatewayId: GatewayId): Promise<void> {
     const login = this.logins.get(gatewayId);
     if (!login) return;
-    try { await login.cancel(); }
-    finally { if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId); }
+    try {
+      await login.cancel();
+    } finally {
+      if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
+    }
   }
 
   private invalidate(gatewayId: GatewayId): number {
@@ -278,7 +290,8 @@ export class GatewayService {
       this.assertGeneration("oauth/openai", generation);
     }
     this.logins.set("oauth/openai", login);
-    const completion = login.completion.then(async (credential) => {
+    const completion = login.completion
+      .then(async (credential) => {
         this.assertGeneration("oauth/openai", generation);
         if ((await this.sourceKey("oauth/openai")) !== sourceKey)
           throw new Error("OpenAI account changed. Run /gateway again.");
@@ -291,7 +304,8 @@ export class GatewayService {
           generation,
           sourceKey,
         );
-      }).finally(() => {
+      })
+      .finally(() => {
         if (this.logins.get("oauth/openai") === login) this.logins.delete("oauth/openai");
       });
     void completion.catch(() => undefined);
@@ -311,17 +325,57 @@ export class GatewayService {
       this.assertGeneration(gatewayId, generation);
     }
     this.logins.set(gatewayId, login);
-    const completion = login.completion.then(async (credential) => {
+    const completion = login.completion
+      .then(async (credential) => {
+        this.assertGeneration(gatewayId, generation);
+        if ((await this.sourceKey(gatewayId)) !== sourceKey)
+          throw new Error("Anthropic account changed. Run /gateway again.");
+        return this.createDraft(
+          gatewayId,
+          { kind: "oauth", provider: "anthropic", credential },
+          await this.dependencies.config.read(),
+          signal,
+          generation,
+          sourceKey,
+        );
+      })
+      .finally(() => {
+        if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
+      });
+    void completion.catch(() => undefined);
+    return { ...login, completion };
+  }
+
+  async beginGoogleLogin(signal?: AbortSignal) {
+    if (!this.dependencies.googleAuth) throw new Error("Google sign-in is unavailable.");
+    const gatewayId = "oauth/google";
+    const generation = this.invalidate(gatewayId);
+    await this.cancelLogin(gatewayId);
+    const sourceKey = await this.sourceKey(gatewayId);
+    const login = await this.dependencies.googleAuth.beginLogin(signal);
+    if (this.generation(gatewayId) !== generation) {
+      void login.completion.catch(() => undefined);
+      await login.cancel();
       this.assertGeneration(gatewayId, generation);
-      if ((await this.sourceKey(gatewayId)) !== sourceKey)
-        throw new Error("Anthropic account changed. Run /gateway again.");
-      return this.createDraft(
-        gatewayId, { kind: "oauth", provider: "anthropic", credential },
-        await this.dependencies.config.read(), signal, generation, sourceKey,
-      );
-    }).finally(() => {
-      if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
-    });
+    }
+    this.logins.set(gatewayId, login);
+    const completion = login.completion
+      .then(async (credential) => {
+        this.assertGeneration(gatewayId, generation);
+        if ((await this.sourceKey(gatewayId)) !== sourceKey)
+          throw new Error("Google account changed. Run /gateway again.");
+        return this.createDraft(
+          gatewayId,
+          { kind: "oauth", provider: "google", credential },
+          await this.dependencies.config.read(),
+          signal,
+          generation,
+          sourceKey,
+        );
+      })
+      .finally(() => {
+        if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
+      });
     void completion.catch(() => undefined);
     return { ...login, completion };
   }
@@ -357,9 +411,11 @@ export class GatewayService {
         sourceKey,
       );
     });
-    void completion.finally(() => {
-      if (this.logins.get("oauth/xai") === login) this.logins.delete("oauth/xai");
-    }).catch(() => undefined);
+    void completion
+      .finally(() => {
+        if (this.logins.get("oauth/xai") === login) this.logins.delete("oauth/xai");
+      })
+      .catch(() => undefined);
     return {
       authorizationUrl: login.authorizationUrl,
       userCode: login.userCode,
@@ -418,6 +474,8 @@ export class GatewayService {
       await this.dependencies.grokAuth?.getValidCredential();
     if (candidate.kind === "stored" && gatewayId === "oauth/anthropic")
       await this.dependencies.anthropicAuth?.getValidCredential();
+    if (candidate.kind === "stored" && gatewayId === "oauth/google")
+      await this.dependencies.googleAuth?.getValidCredential();
     const sourceKey = expectedSourceKey ?? (await this.sourceKey(gatewayId));
     const catalog = await this.discover(gatewayId, candidate, config, signal);
     signal?.throwIfAborted();
@@ -455,6 +513,8 @@ export class GatewayService {
       await this.dependencies.grokAuth?.getValidCredential();
     if (candidate.kind === "stored" && gatewayId === "oauth/anthropic")
       await this.dependencies.anthropicAuth?.getValidCredential();
+    if (candidate.kind === "stored" && gatewayId === "oauth/google")
+      await this.dependencies.googleAuth?.getValidCredential();
     const auth = await this.dependencies.auth.read();
     const sourceKey = ModelManager.sourceKey(gatewayId, { auth, config });
     if (candidate.kind === "stored") {
@@ -473,7 +533,6 @@ export class GatewayService {
           : auth.api_keys[provider]?.api_key;
       if (!apiKey)
         throw new Error(`Missing API key for ${gatewayId}. Run /gateway to configure it.`);
-      canonicalModelIds = await this.discoverApiKeyModels(typedGateway, apiKey, signal);
     } else if (gatewayId === "oauth/openai") {
       const credential =
         candidate.kind === "oauth" && candidate.provider === "openai"
@@ -523,9 +582,47 @@ export class GatewayService {
             : {}),
         };
       });
+    } else if (gatewayId === "oauth/google") {
+      const credential =
+        candidate.kind === "oauth" && candidate.provider === "google"
+          ? candidate.credential
+          : auth.oauth.google;
+      if (!credential || credential.expires_at <= Date.now())
+        throw new Error("Google session is unavailable or expired. Run /gateway to sign in.");
+      const payload = await this.fetchJson(
+        `${GOOGLE_CODE_ASSIST_BASE_URL}:retrieveUserQuota`,
+        {
+          method: "POST",
+          headers: {
+            ...GOOGLE_CODE_ASSIST_HEADERS,
+            "content-type": "application/json",
+            authorization: `Bearer ${credential.access_token}`,
+          },
+          body: JSON.stringify({ project: credential.project_id }),
+        },
+        "Google OAuth",
+        signal,
+      );
+      // Quota buckets identify account models, not capabilities. Keep models with exhausted quota visible.
+      const buckets = (payload as { buckets?: Array<{ modelId?: unknown }> } | null)?.buckets;
+      if (!Array.isArray(buckets))
+        throw new Error("Google did not return an account model catalog.");
+      canonicalModelIds = [
+        ...new Set(
+          buckets.flatMap((bucket) =>
+            typeof bucket?.modelId === "string" && bucket.modelId.trim()
+              ? [`google/${bucket.modelId.replace(/^models\//, "")}`]
+              : [],
+          ),
+        ),
+      ];
+      if (!canonicalModelIds.length)
+        throw new Error("Google did not return any models for this account.");
     } else if (gatewayId === "oauth/anthropic") {
-      const credential = candidate.kind === "oauth" && candidate.provider === "anthropic"
-        ? candidate.credential : auth.oauth.anthropic;
+      const credential =
+        candidate.kind === "oauth" && candidate.provider === "anthropic"
+          ? candidate.credential
+          : auth.oauth.anthropic;
       if (!credential || credential.expires_at <= Date.now())
         throw new Error("Anthropic session is unavailable or expired. Run /gateway to sign in.");
       canonicalModelIds = [];
@@ -534,10 +631,18 @@ export class GatewayService {
       while (true) {
         const payload = await this.fetchJson(
           `${ANTHROPIC_BASE_URL}/models?limit=1000${after ? `&after_id=${encodeURIComponent(after)}` : ""}`,
-          { headers: { ...ANTHROPIC_OAUTH_HEADERS, authorization: `Bearer ${credential.access_token}` } },
-          "Anthropic OAuth", signal,
+          {
+            headers: {
+              ...ANTHROPIC_OAUTH_HEADERS,
+              authorization: `Bearer ${credential.access_token}`,
+            },
+          },
+          "Anthropic OAuth",
+          signal,
         );
-        canonicalModelIds.push(...this.readStringArray(payload, "data", "id").map((id) => `anthropic/${id}`));
+        canonicalModelIds.push(
+          ...this.readStringArray(payload, "data", "id").map((id) => `anthropic/${id}`),
+        );
         const page = payload as { has_more?: boolean; last_id?: string };
         if (!page.has_more) break;
         if (typeof page.last_id !== "string" || !page.last_id || cursors.has(page.last_id))
@@ -599,45 +704,6 @@ export class GatewayService {
         throw new Error("Gateway credential changed. Run /gateway again.");
     }
     return view;
-  }
-
-  private async discoverApiKeyModels(
-    gatewayId: ApiKeyGatewayId,
-    apiKey: string,
-    signal?: AbortSignal,
-  ): Promise<string[] | undefined> {
-    if (gatewayId === "api_key/google") {
-      const payload = await this.fetchJson(
-        "https://generativelanguage.googleapis.com/v1beta/models",
-        { headers: { "x-goog-api-key": apiKey } },
-        "Google",
-        signal,
-      );
-      return this.readStringArray(payload, "models", "name").map(
-        (id) => `google/${id.replace(/^models\//, "")}`,
-      );
-    }
-    if (gatewayId === "api_key/openrouter") {
-      await this.fetchJson(
-        "https://openrouter.ai/api/v1/key",
-        { headers: { authorization: `Bearer ${apiKey}` } },
-        "OpenRouter",
-        signal,
-      );
-      return undefined;
-    }
-    if (gatewayId === "api_key/openai") {
-      const payload = await this.fetchJson(
-        "https://api.openai.com/v1/models",
-        { headers: { authorization: `Bearer ${apiKey}` } },
-        "OpenAI",
-        signal,
-      );
-      return this.readStringArray(payload, "data", "id").map((id) => `openai/${id}`);
-    }
-    // Native providers do not share a credential-validation/models endpoint.
-    // List canonical capabilities; authentication errors surface on inference.
-    return undefined;
   }
 
   private async fetchJson(

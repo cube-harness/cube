@@ -42,7 +42,12 @@ export const startTui = async (): Promise<void> => {
     return exitPromise;
   };
 
-  launched = await startPreparedCube(prepareCubeRuntime, createScreen, { onExitRequested: exit }, onboarding);
+  launched = await startPreparedCube(
+    prepareCubeRuntime,
+    createScreen,
+    { onExitRequested: exit },
+    onboarding,
+  );
   if (!launched) return;
   process.once("SIGTERM", () => void exit());
   process.on("SIGINT", () => void launched?.app.handleExit());

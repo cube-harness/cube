@@ -56,6 +56,13 @@ export class GatewayPickerComponent implements Component, Focusable {
   private step: "group" | "provider" | "saved" | "remove" = "group";
   private group?: GatewayChoice["group"];
   private readonly title = new Text(appTheme.ui.text.bold("Select Gateway Strategy"), 0, 0);
+  private readonly riskNotice = new Text(
+    appTheme.ui.muted(
+      "  Risk Notice: This provider uses a subscription/OAuth session not officially licensed. Account may be restricted or banned. Use at your own risk.",
+    ),
+    0,
+    0,
+  );
   private list: SelectList;
   private readonly hint = new KeyHint([
     { key: "↑/↓", label: "Navigate" },
@@ -110,7 +117,7 @@ export class GatewayPickerComponent implements Component, Focusable {
         const choice = choices.find((item) => item.gatewayId === value);
         if (!choice) return;
         if (!choice.configured || choice.group === "oauth") {
-          this.options.onSelect({ gatewayId: choice.gatewayId, replace: true });
+          this.options.onSelect({ gatewayId: choice.gatewayId, replace: !choice.configured });
         } else {
           this.showSavedChoice(choice);
         }
@@ -173,10 +180,8 @@ export class GatewayPickerComponent implements Component, Focusable {
       ...(this.group && this.step === "saved" ? [appTheme.ui.muted(groupLabels[this.group])] : []),
       "",
       ...this.list.render(width),
-      ...(this.step === "provider" && selected?.gatewayId === "oauth/anthropic"
-        ? new Text(appTheme.ui.muted(
-            "Note: Anthropic subscription OAuth is experimental and not endorsed by Anthropic. It may violate their terms and lead to access restrictions. Cube provides compatibility only; use at your own risk.",
-          ), 0, 0).render(width)
+      ...(this.step === "provider" && (selected?.gatewayId === "oauth/anthropic" || selected?.gatewayId === "oauth/google")
+        ? this.riskNotice.render(width)
         : []),
       "",
       ...this.hint.render(width),
@@ -230,6 +235,7 @@ export type GatewaySetupOptions = {
     | "beginOpenAILogin"
     | "beginGrokLogin"
     | "beginAnthropicLogin"
+    | "beginGoogleLogin"
     | "discardDraft"
     | "removeCredential"
     | "listChoices"
@@ -401,6 +407,8 @@ export class GatewaySetupComponent implements Component, Focusable {
         ? gateway.beginGrokLogin(this.abort.signal)
         : selection.gatewayId === "oauth/anthropic"
           ? gateway.beginAnthropicLogin(this.abort.signal)
+          : selection.gatewayId === "oauth/google"
+            ? gateway.beginGoogleLogin(this.abort.signal)
           : gateway.beginOpenAILogin(this.abort.signal));
       if (this.done) {
         void login.completion.catch(() => undefined);
