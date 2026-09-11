@@ -55,7 +55,7 @@ export const ModelCatalogEntrySchema = ProviderCatalogGroupSchema.extend({
 
 export const ModelCatalogCacheSchema = z.object({
   api_key: z.partialRecord(ApiKeyProviderSchema, ModelCatalogEntrySchema),
-  oauth: z.partialRecord(z.enum(["openai", "xai", "anthropic"]), ModelCatalogEntrySchema),
+  oauth: z.partialRecord(z.enum(["openai", "xai", "anthropic", "google"]), ModelCatalogEntrySchema),
   local: z.partialRecord(z.enum(["ollama", "lmstudio"]), ModelCatalogEntrySchema),
 }).strict().superRefine((cache, ctx) => {
   for (const [strategy, providers] of Object.entries(cache)) {

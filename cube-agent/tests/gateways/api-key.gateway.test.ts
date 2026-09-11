@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { GatewayLanguageModel, ProviderConfig } from "@mastra/core/llm";
-import { AuthStore, HomeManager, snapshotProviders } from "@cube/workspace";
+import { ApiKeyProviderSchema, AuthStore, HomeManager, snapshotProviders } from "@cube/workspace";
 import { CubeApiKeyGateway } from "../../src/gateways/api-key.gateway.js";
 
 const cleanup = (tmp: string) =>
@@ -39,9 +39,7 @@ const createDelegate = () => {
 };
 
 test("one API strategy routes every requested provider and rejects unknown providers", async () => {
-  const ids = ["google", "openrouter", "openai", "anthropic", "groq", "xai", "mistral",
-    "deepseek", "moonshotai", "nvidia", "poolside", "zai", "zai-coding-plan",
-    "alibaba", "alibaba-coding-plan", "huggingface"];
+  const ids = ApiKeyProviderSchema.options;
   const gateway = new CubeApiKeyGateway({ getApiKey: async id => `test-${id}` }, {
     ...createDelegate(),
     fetchProviders: async () => Object.fromEntries([...ids, "unknown"].map(id => [id, provider(id)])),
@@ -66,7 +64,6 @@ test("native Mastra adapters send each provider key to its own inference endpoin
     ["deepseek", "https://api.deepseek.com/chat/completions", "authorization"],
     ["moonshotai", "https://api.moonshot.ai/anthropic/v1/messages", "x-api-key"],
     ["nvidia", "https://integrate.api.nvidia.com/v1/chat/completions", "authorization"],
-    ["poolside", "https://inference.poolside.ai/v1/chat/completions", "authorization"],
     ["zai", "https://api.z.ai/api/paas/v4/chat/completions", "authorization"],
     ["zai-coding-plan", "https://api.z.ai/api/coding/paas/v4/chat/completions", "authorization"],
     ["alibaba", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", "authorization"],

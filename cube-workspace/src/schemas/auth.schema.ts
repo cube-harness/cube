@@ -19,6 +19,11 @@ export type GrokOAuthCredential = z.infer<typeof GrokOAuthCredentialSchema>;
 export const AnthropicOAuthCredentialSchema = GrokOAuthCredentialSchema;
 export type AnthropicOAuthCredential = z.infer<typeof AnthropicOAuthCredentialSchema>;
 
+export const GoogleOAuthCredentialSchema = GrokOAuthCredentialSchema.extend({
+  project_id: z.string().min(1),
+});
+export type GoogleOAuthCredential = z.infer<typeof GoogleOAuthCredentialSchema>;
+
 export const CubeAuthSchema = z.object({
   api_keys: z.partialRecord(
     ApiKeyProviderSchema,
@@ -28,6 +33,7 @@ export const CubeAuthSchema = z.object({
     openai: OpenAIOAuthCredentialSchema.optional(),
     xai: GrokOAuthCredentialSchema.optional(),
     anthropic: AnthropicOAuthCredentialSchema.optional(),
+    google: GoogleOAuthCredentialSchema.optional(),
   }).strict(),
 }).strict();
 

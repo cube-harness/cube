@@ -10,10 +10,7 @@ import { createMastraWorkspace } from "../workspace.js";
 import { webFetchTool, webSearchTool } from "@mastra/core/tools";
 import { getCanonicalModelId } from "../gateways/types.js";
 
-export const buildModelConfig = (
-  modelId: string,
-  effort?: string,
-): Record<string, any> => {
+export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
   const providerOptions: Record<string, any> = {};
 
@@ -83,11 +80,7 @@ export const buildModelConfig = (
   };
 };
 
-export const updateCubeAgentModel = (
-  agent: any,
-  modelId: string,
-  effort?: string,
-): void => {
+export const updateCubeAgentModel = (agent: any, modelId: string, effort?: string): void => {
   const modelConfig = buildModelConfig(modelId, effort);
   agent.model = [modelConfig];
 };

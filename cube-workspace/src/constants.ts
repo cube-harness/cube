@@ -48,7 +48,6 @@ export const API_KEY_PROVIDERS = {
   openrouter: "OpenRouter",
   mistral: "Mistral",
   nvidia: "Nvidia",
-  poolside: "Poolside",
   zai: "Z.AI",
   "zai-coding-plan": "Z.AI Coding Plan",
   alibaba: "Alibaba",

@@ -33,7 +33,7 @@ export const createCubeGateways = (options: CreateCubeGatewaysOptions): CubeGate
   };
   const ordered: CubeGatewayAdapter[] = [
     new CubeApiKeyGateway(options.auth),
-    new OAuthGateway(options.oauth),
+    new OAuthGateway(options.oauth, undefined, options.fetch),
     new LocalGateway({
       ...sharedLocal,
       gatewayOptions: options.gatewayOptions,

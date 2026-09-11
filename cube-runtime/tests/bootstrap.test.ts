@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import {
   AuthStore,
   Bootstrap,
   ConfigStore,
   HomeManager,
   ModelCatalogStore,
+  ModelManager,
   Store,
   createBootstrap,
   type ModelCatalog,
@@ -39,20 +40,25 @@ const catalog: ModelCatalog = {
 const withHome = async (run: (home: HomeManager) => Promise<void>) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-bootstrap-"));
   const home = new HomeManager({ cubeHome: directory });
+  const canonical = new ModelManager(home, async () => ({ google: {
+    name: "Google", models: { "gemini-test": catalog.providers.google!.models[0]! },
+  } }));
+  const originalPreview = ModelManager.prototype.preview;
+  const preview = mock.method(ModelManager.prototype, "preview", (...args: Parameters<ModelManager["preview"]>) =>
+    originalPreview.apply(canonical, args));
   try {
     await createBootstrap(home).run();
     await ModelCatalogStore(home).write({ api_key: {}, oauth: {}, local: {} });
     await run(home);
   } finally {
+    preview.mock.restore();
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 };
 
-const googleFetch: typeof fetch = async () => new Response(JSON.stringify({
-  models: [{ name: "models/gemini-test" }],
-}), { status: 200 });
+const noProviderFetch: typeof fetch = async () => { assert.fail("API-key setup must not call the provider"); };
 
-test("bootstrap skips onboarding for a complete reachable persisted gateway", async () => {
+test("bootstrap skips onboarding for complete API-key config without probing the provider", async () => {
   await withHome(async (home) => {
     await new AuthStore(home).replaceApiKey("google", "test-key");
     await ConfigStore(home).update((config) => ({
@@ -61,7 +67,7 @@ test("bootstrap skips onboarding for a complete reachable persisted gateway", as
       model: modelId,
     }));
 
-    const bootstrap = await prepareCubeRuntime({ home, fetch: googleFetch });
+    const bootstrap = await prepareCubeRuntime({ home, fetch: noProviderFetch });
 
     assert.deepEqual(bootstrap.readiness, {
       ready: true,
@@ -77,7 +83,7 @@ test("bootstrap never infers or rewrites a gateway from model and credentials", 
     await new AuthStore(home).replaceApiKey("google", "test-key");
     await ConfigStore(home).update(config => ({ ...config, gateway: undefined, model: modelId }));
     const before = await readFile(home.getConfigPath(), "utf8");
-    const bootstrap = await prepareCubeRuntime({ home, fetch: googleFetch });
+    const bootstrap = await prepareCubeRuntime({ home, fetch: noProviderFetch });
     assert.equal(bootstrap.readiness.ready, false);
     assert.equal(await readFile(home.getConfigPath(), "utf8"), before);
   });
@@ -87,7 +93,7 @@ test("bootstrap reports invalid config without rewriting the file or leaking its
   await withHome(async home => {
     await new Store(home.getConfigPath(), "yaml").write({ unexpected: "private-content" });
     const before = await readFile(home.getConfigPath(), "utf8");
-    await assert.rejects(() => prepareCubeRuntime({ home, fetch: googleFetch }),
+    await assert.rejects(() => prepareCubeRuntime({ home, fetch: noProviderFetch }),
       (error: unknown) => error instanceof Error && /Invalid config.yaml/.test(error.message)
         && !error.message.includes("private-content"));
     assert.equal(await readFile(home.getConfigPath(), "utf8"), before);
@@ -96,7 +102,7 @@ test("bootstrap reports invalid config without rewriting the file or leaking its
 
 test("bootstrap requires onboarding when gateway configuration is incomplete", async () => {
   await withHome(async (home) => {
-    const bootstrap = await prepareCubeRuntime({ home, fetch: googleFetch });
+    const bootstrap = await prepareCubeRuntime({ home, fetch: noProviderFetch });
     assert.equal(bootstrap.readiness.ready, false);
   });
 });
@@ -120,7 +126,7 @@ test("bootstrap detects missing keys, unavailable models, and unreachable local 
         home,
         fetch: item.gateway === "local/ollama"
           ? async () => { throw new Error("offline"); }
-          : googleFetch,
+          : noProviderFetch,
       });
       assert.equal(bootstrap.readiness.ready, false, item.gateway);
     });
@@ -135,7 +141,7 @@ test("start rechecks readiness before constructing the runtime", async () => {
       gateway: "api_key/google",
       model: modelId,
     }));
-    const bootstrap = await prepareCubeRuntime({ home, fetch: googleFetch });
+    const bootstrap = await prepareCubeRuntime({ home, fetch: noProviderFetch });
     await ConfigStore(home).update((config) => ({ ...config, model: undefined }));
 
     await assert.rejects(() => bootstrap.start(), /Choose a gateway and model/);
@@ -153,7 +159,7 @@ test("startup reuses prepared resources and reads the committed model", { timeou
           ? Response.json({ data: [{ id: "grok-build" }] })
           : String(url).startsWith("https://chatgpt.com/backend-api/codex/models")
             ? Response.json({ models: [{ slug: "account-only-integration-model" }] })
-            : googleFetch(url, init),
+            : noProviderFetch(url, init),
     });
     assert.equal(prepared.readiness.ready, false);
     const draft = await prepared.gateway.createApiKeyDraft("api_key/google", "test-key");

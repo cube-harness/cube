@@ -17,9 +17,9 @@ export type RuntimeNotice = {
 };
 
 export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
-  let details = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  let message = typeof error === "string" ? error
-    : typeof details.message === "string" ? details.message : "";
+  let details = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  let message =
+    typeof error === "string" ? error : typeof details.message === "string" ? details.message : "";
   // Mastra can put a serialized error object in Error.message.
   if (message.trim().startsWith("{")) {
     try {
@@ -28,11 +28,14 @@ export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
         details = { ...details, ...parsed };
         message = typeof parsed.message === "string" ? parsed.message : "";
       }
-    } catch { /* Not JSON: preserve the original message. */ }
+    } catch {
+      /* Not JSON: preserve the original message. */
+    }
   }
   const status = details.statusCode ?? details.code;
   if (typeof status === "number" && status >= 100 && status <= 599) {
-    if (!message.includes(String(status))) message = `HTTP ${status}${message ? `: ${message}` : ""}`;
+    if (!message.includes(String(status)))
+      message = `HTTP ${status}${message ? `: ${message}` : ""}`;
   } else if (!message && typeof status === "string") {
     message = status;
   }
@@ -41,9 +44,15 @@ export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
   // Redact credentials echoed in provider messages without replacing the error itself.
   message = message
     .replace(/\b(Bearer|Basic)\s+[^\s"',;]+/gi, "$1 [Redacted]")
-    .replace(/(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s&,;}]+)/gi, "$1[Redacted]")
+    .replace(
+      /(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s&,;}]+)/gi,
+      "$1[Redacted]",
+    )
     .replace(/\b(?:sk-[\w-]+|AIza[\w-]+)\b/g, "[Redacted]");
-  return { level: "error", message: message.trim() || "Unknown error. Check Cube logs for details." };
+  return {
+    level: "error",
+    message: message.trim() || "Unknown error. Check Cube logs for details.",
+  };
 };
 
 export type ToolApprovalResponse = {
@@ -90,7 +99,11 @@ export type GatewayState = {
 };
 
 export type CredentialGatewayId = Exclude<GatewayId, LocalGatewayId>;
-export type GatewayRemovalResult = { gatewayId: CredentialGatewayId; active: boolean; cacheCleared: boolean };
+export type GatewayRemovalResult = {
+  gatewayId: CredentialGatewayId;
+  active: boolean;
+  cacheCleared: boolean;
+};
 
 export type GatewaySetupRequest = {
   choices: GatewayChoice[];
@@ -99,7 +112,13 @@ export type GatewaySetupRequest = {
 
 export type GatewayPromptResult =
   | { kind: "gateways"; request: GatewaySetupRequest }
-  | { kind: "models"; gatewayId: GatewayId; catalog: ModelCatalog; current: ModelState };
+  | {
+      kind: "models";
+      gatewayId: GatewayId;
+      catalog: ModelCatalog;
+      current: ModelState;
+      step?: "model" | "reasoning";
+    };
 
 export type GatewayReadiness =
   | { ready: true; gatewayId: GatewayId; model: ModelState }
@@ -175,10 +194,4 @@ export type PromptResult =
   | { kind: "exit-requested" };
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
-export type {
-  ApiKeyGatewayId,
-  GatewayId,
-  LocalGatewayId,
-  ModelCatalog,
-  ReasoningEffort,
-};
+export type { ApiKeyGatewayId, GatewayId, LocalGatewayId, ModelCatalog, ReasoningEffort };

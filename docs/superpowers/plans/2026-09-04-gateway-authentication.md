@@ -94,15 +94,22 @@ base URL, and model overrides. Cube supplies the selected key from `auth.json`,
 never via environment-credential fallback. Coding Plans have separate API-key
 routes/credentials; they do not use OAuth login.
 
-Google/OpenRouter/OpenAI retain their provider-specific discovery checks.
-Other providers list canonical models without assuming a shared validation endpoint.
+All API-key providers use models.dev for the catalog. No provider-specific
+credential-validation or model-list request runs during setup/readiness. Check key
+presence/schema locally; provider rejection surfaces on actual inference as a system message.
+
+Follow-up verification (2026-09-10): removed `discoverApiKeyModels` and its caller.
+TypeScript build and 50 focused catalog/bootstrap/native-gateway tests passed.
+Provider fixtures now use the current registry; no per-provider setup probe remains.
 Stored nonempty keys do not prove entitlement; inference errors become system messages.
 Onboarding does not trigger paid inference.
 
 ## OAuth and local strategies
 
 OpenAI OAuth uses PKCE/state, loopback callback, token exchange/refresh. Selecting
-OpenAI starts a fresh URL, auto-opens it, and leaves it clickable in the TUI.
+a configured OAuth provider uses its saved credential directly, with no account
+submenu or browser login. Switch accounts with `ctrl+d` logout, then select the
+unconfigured provider to auto-open login and leave the URL clickable in the TUI.
 Callback success proceeds without extra Enter. Credentials are staged until model
 selection commits. Account replacement preserves API keys.
 
@@ -128,6 +135,28 @@ values; unavailable servers yield notices.
 8. Provider/auth/network/quota errors become system messages, not terminal logs.
 
 ## Verification boundaries
+
+Google extension (2026-09-10): add the existing `oauth/google` route across schemas,
+bootstrap, credential manager, staged gateway setup and the shared provider picker.
+Use public Gemini CLI OAuth + managed Code Assist project setup. Keep native Google
+SDK serialization and adapt only Code Assist request/response envelopes within
+`OAuthGateway`; no new gateway strategy or UI screen. Join quota-bucket model IDs
+with models.dev capabilities. Validate login/cancel/expiry, refresh/logout races,
+streamed tools/reasoning, catalog isolation and existing gateway regression paths
+at the end. Do not claim real-account verification from mocked HTTP checks.
+
+Verification: TypeScript build passed. Focused gateway suite: 83/84 passed;
+the native API-provider fixture still expects Poolside, which the current
+`API_KEY_PROVIDERS` edit removes. Google protocol/lifecycle/catalog checks passed.
+Real Google account sign-in/inference has not been exercised.
+
+Anthropic extension (2026-09-09): reuse `OAuthGateway`, the loopback callback, and
+the staged gateway commit/logout path. Add only the provider-specific token
+exchange/refresh and Messages authentication. Show a passive risk note in the
+OAuth provider picker, with no confirmation step or transcript notice. Discover
+account model IDs before the existing models.dev capability join. Verify with
+focused auth, native adapter, lifecycle, and catalog tests at the end; real
+subscription login/inference remains a separate interactive check.
 
 - Controlled tests cover auth storage, routing, callback, refresh, cancellation,
   rollback, filtering, onboarding, URL rendering, and shutdown.

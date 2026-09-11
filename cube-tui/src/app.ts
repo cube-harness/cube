@@ -137,6 +137,7 @@ export class CubeApp {
           result.gatewayId,
           result.catalog,
           result.current,
+          result.step,
         );
         if (selection) {
           await this.handlePromptResult({

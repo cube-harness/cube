@@ -7,7 +7,7 @@ import type {
   ModelCatalog,
   OpenAIOAuthCredential,
 } from "@cube/workspace";
-import { ModelManager, HomeManager } from "@cube/workspace";
+import { ApiKeyProviderSchema, ModelManager, HomeManager } from "@cube/workspace";
 import { GatewayService } from "../../src/services/gateway.service.js";
 import type { GatewayServiceDependencies } from "../../src/services/gateway.service.js";
 
@@ -70,6 +70,7 @@ const baseConfig = (): CubeConfigDocument => ({
 
 const createHarness = (options: {
   catalog?: ModelCatalog;
+  beforeCatalog?: () => void | Promise<void>;
   removeCatalog?: () => Promise<void>;
   onRemoved?: () => void;
   config?: CubeConfigDocument;
@@ -92,6 +93,7 @@ const createHarness = (options: {
   };
   grokAuth?: GatewayServiceDependencies["grokAuth"];
   anthropicAuth?: GatewayServiceDependencies["anthropicAuth"];
+  googleAuth?: GatewayServiceDependencies["googleAuth"];
 } = {}) => {
   let config = structuredClone(options.config ?? baseConfig());
   let auth = structuredClone(options.auth ?? {
@@ -115,12 +117,15 @@ const createHarness = (options: {
     },
     adapters: options.adapters ?? new Map(),
     catalog: { getCatalog: async () => undefined,
-      preview: (gatewayId, available) => manager.preview(gatewayId, available),
+      preview: async (gatewayId, available) => {
+        await options.beforeCatalog?.();
+        return manager.preview(gatewayId, available);
+      },
       publish: async (gatewayId, key) => ModelManager.sourceKey(gatewayId, { auth, config }) === key,
       remove: options.removeCatalog ?? (async () => undefined),
     },
     onActiveCredentialRemoved: options.onRemoved,
-    fetch: options.fetch ?? (async () => new Response(JSON.stringify({ models: [{ name: "models/gemini-test" }] }), { status: 200 })),
+    fetch: options.fetch ?? (async () => { throw new Error("Unexpected provider request"); }),
     openAIAuth: options.openAIAuth ? { ...options.openAIAuth,
       getValidCredential: options.openAIAuth.getValidCredential ? async () => {
         const refreshed = await options.openAIAuth!.getValidCredential!();
@@ -130,12 +135,57 @@ const createHarness = (options: {
     } : undefined,
     grokAuth: options.grokAuth,
     anthropicAuth: options.anthropicAuth,
+    googleAuth: options.googleAuth,
     applyLiveSelection: options.apply
       ? (gatewayId, selection) => options.apply!(gatewayId, selection.modelId)
       : undefined,
   });
   return { service, config: () => config, auth: () => auth };
 };
+
+test("Google discovers account models, stages credentials, preserves capability ownership and logs out independently", async () => {
+  const credential = { access_token: "google", refresh_token: "refresh", expires_at: Date.now() + 3600000, project_id: "managed-project" };
+  let removed = false;
+  let completion = Promise.resolve(credential);
+  let empty = false;
+  const harness = createHarness({
+    auth: { api_keys: { google: { api_key: "keep-api" } }, oauth: { xai: { access_token: "keep-xai", refresh_token: "xai-refresh", expires_at: credential.expires_at } } },
+    googleAuth: { beginLogin: async () => ({ authorizationUrl: "https://accounts.google.com", expiresAt: Date.now() + 300000, completion, cancel: async () => undefined }),
+      getValidCredential: async () => credential },
+    removeCatalog: async () => { removed = true; },
+    fetch: async (input, init) => {
+      assert.equal(String(input), "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer google");
+      assert.deepEqual(JSON.parse(String(init?.body)), { project: "managed-project" });
+      return Response.json({ buckets: empty ? [] : [
+        { modelId: "gemini-test", remainingFraction: 0 }, { modelId: "gemini-test", tokenType: "other" }, { modelId: "new-model" }, {},
+      ] });
+    },
+  });
+  const draft = await (await harness.service.beginGoogleLogin()).completion;
+  assert.equal(harness.auth().oauth.google, undefined);
+  const models = draft.catalog.providers.google!.models;
+  assert.deepEqual(models.map(model => model.modelId), ["google/gemini-test", "google/new-model"]);
+  assert.equal(models[0]?.limit?.context, 128000);
+  assert.equal(models[1]?.limit, undefined);
+  await harness.service.set({ draftId: draft.draftId, model: { modelId: "google/gemini-test" } });
+  assert.equal(harness.config().gateway, "oauth/google");
+  assert.deepEqual(harness.auth().oauth.google, credential);
+  assert.equal((await harness.service.readiness()).ready, true);
+  empty = true;
+  await assert.rejects((await harness.service.beginGoogleLogin()).completion, /did not return any models/);
+  assert.deepEqual(harness.auth().oauth.google, credential);
+  let resolve!: (value: typeof credential) => void;
+  completion = new Promise(yes => { resolve = yes; });
+  const late = await harness.service.beginGoogleLogin();
+  await harness.service.removeCredential("oauth/google");
+  resolve(credential);
+  await assert.rejects(late.completion, /expired/);
+  assert.equal(removed, true);
+  assert.equal(harness.auth().oauth.google, undefined);
+  assert.equal(harness.auth().api_keys.google?.api_key, "keep-api");
+  assert.equal(harness.auth().oauth.xai?.access_token, "keep-xai");
+});
 
 test("Anthropic OAuth discovers paginated models, joins capabilities and commits/logs out independently", async () => {
   const candidate = { access_token: "anthropic-access", refresh_token: "anthropic-refresh", expires_at: Date.now() + 3600000 };
@@ -200,14 +250,13 @@ test("Anthropic rejected discovery and late login after logout cannot replace cr
   assert.equal(harness.config().gateway, "api_key/google");
 });
 
-test("new native API providers use canonical models, never the OpenAI discovery endpoint", async () => {
-  const ids = ["anthropic", "groq", "xai", "mistral", "deepseek", "moonshotai", "nvidia",
-    "poolside", "zai", "zai-coding-plan", "alibaba", "alibaba-coding-plan", "huggingface"] as const;
+test("all API-key providers use canonical models without credential or model-discovery requests", async () => {
+  const ids = ApiKeyProviderSchema.options;
   const nativeCatalog = { ...catalog, providers: { ...catalog.providers,
     ...Object.fromEntries(ids.map(id => [id, { name: id, models: [model(`${id}/vendor/model`)] }])),
   } };
   const harness = createHarness({ catalog: nativeCatalog,
-    fetch: async () => { throw new Error("Native provider discovery must not call an unrelated API"); },
+    fetch: async () => { assert.fail("API-key setup must not call the provider"); },
   });
   const choices = await harness.service.listChoices();
   for (const id of ids) {
@@ -221,7 +270,9 @@ test("new native API providers use canonical models, never the OpenAI discovery 
     await harness.service.set({ draftId: draft.draftId, model: { modelId: `${id}/vendor/model` } });
     assert.equal(harness.config().gateway, gatewayId);
     assert.equal(harness.auth().api_keys[id]?.api_key, `test-${id}`);
-    assert.equal(harness.auth().api_keys.google?.api_key, "stored-google");
+    for (const [provider, credential] of Object.entries(before.api_keys)) {
+      if (provider !== id) assert.deepEqual(harness.auth().api_keys[provider as typeof id], credential);
+    }
     assert.deepEqual(Object.keys((await harness.service.listModels()).providers), [id]);
     assert.equal((await harness.service.readiness()).ready, true);
   }
@@ -238,6 +289,9 @@ test("readiness requires a complete config and usable stored gateway", async () 
   });
 
   const ready = createHarness();
+  await assert.rejects(ready.service.createApiKeyDraft("api_key/google", "  "), /API key is required/);
+  const noKey = createHarness({ auth: { api_keys: {}, oauth: {} } });
+  assert.equal((await noKey.service.readiness()).ready, false);
   assert.deepEqual(await ready.service.readiness(), {
     ready: true,
     gatewayId: "api_key/google",
@@ -278,18 +332,10 @@ test("Grok login filters account models, stages credentials, and commits without
 });
 
 test("API-key drafts are credential-free and commit key, gateway, and model together", async () => {
-  const calls: Array<{ url: string; authorization?: string }> = [];
   const harness = createHarness({
     auth: {
       api_keys: { openrouter: { api_key: "keep-openrouter" } },
       oauth: {},
-    },
-    fetch: async (input, init) => {
-      calls.push({
-        url: String(input),
-        authorization: new Headers(init?.headers).get("authorization") ?? undefined,
-      });
-      return new Response(JSON.stringify({ models: [{ name: "models/gemini-test" }] }), { status: 200 });
     },
   });
 
@@ -298,8 +344,6 @@ test("API-key drafts are credential-free and commit key, gateway, and model toge
     "new-google-secret",
   );
   assert.equal(JSON.stringify(draft).includes("new-google-secret"), false);
-  assert.equal(calls[0]?.url, "https://generativelanguage.googleapis.com/v1beta/models");
-  assert.equal(calls[0]?.authorization, undefined);
 
   await harness.service.set({ draftId: draft.draftId, model: { modelId: "google/gemini-test" } });
   assert.equal(harness.auth().api_keys.google?.api_key, "new-google-secret");
@@ -318,7 +362,6 @@ test("failed live apply rolls auth and config back", async () => {
   const harness = createHarness({
     config: beforeConfig,
     auth: beforeAuth,
-    fetch: async () => new Response(JSON.stringify({ data: { label: "ok" } }), { status: 200 }),
     apply: async (gatewayId, modelId) => {
       applied.push(`${gatewayId}:${modelId}`);
       if (gatewayId === "api_key/openrouter") throw new Error("live failed");
@@ -351,45 +394,6 @@ test("model listing is scoped to one gateway", async () => {
   assert.deepEqual(listed.providers.google?.models.map((item) => item.modelId), [
     "google/gemini-test",
   ]);
-});
-
-test("provider drafts validate through provider-specific endpoints and headers", async (context) => {
-  const cases = [
-    {
-      gatewayId: "api_key/google" as const,
-      url: "https://generativelanguage.googleapis.com/v1beta/models",
-      body: { models: [{ name: "models/gemini-test" }] },
-      header: ["x-goog-api-key", "candidate-key"],
-    },
-    {
-      gatewayId: "api_key/openrouter" as const,
-      url: "https://openrouter.ai/api/v1/key",
-      body: { data: { label: "valid" } },
-      header: ["authorization", "Bearer candidate-key"],
-    },
-    {
-      gatewayId: "api_key/openai" as const,
-      url: "https://api.openai.com/v1/models",
-      body: { data: [{ id: "gpt-test" }] },
-      header: ["authorization", "Bearer candidate-key"],
-    },
-  ] as const;
-
-  for (const item of cases) {
-    await context.test(item.gatewayId, async () => {
-      let request: { url: string; headers: Headers } | undefined;
-      const harness = createHarness({
-        fetch: async (input, init) => {
-          request = { url: String(input), headers: new Headers(init?.headers) };
-          return new Response(JSON.stringify(item.body), { status: 200 });
-        },
-      });
-      const draft = await harness.service.createApiKeyDraft(item.gatewayId, "candidate-key");
-      assert.equal(request?.url, item.url);
-      assert.equal(request?.headers.get(item.header[0]), item.header[1]);
-      assert.equal(JSON.stringify(draft).includes("candidate-key"), false);
-    });
-  }
 });
 
 test("OpenAI login stages tokens until the selected oauth model commits", async () => {
@@ -455,21 +459,24 @@ test("local endpoint replacement remains staged and updates the registered adapt
   );
 });
 
-test("gateway validation preserves safe quota and authentication categories", async () => {
+test("OAuth discovery preserves safe quota and authentication categories", async () => {
+  const credential = { access_token: "access", refresh_token: "refresh", account_id: "account", expires_at: Date.now() + 3600000 };
   const quota = createHarness({
+    auth: { api_keys: {}, oauth: { openai: credential } },
     fetch: async () => new Response("limited", { status: 429 }),
   });
   await assert.rejects(
-    () => quota.service.createApiKeyDraft("api_key/google", "candidate"),
-    /Google quota or rate limit reached/,
+    () => quota.service.createStoredDraft("oauth/openai"),
+    /OpenAI OAuth quota or rate limit reached/,
   );
 
   const auth = createHarness({
+    auth: { api_keys: {}, oauth: { openai: credential } },
     fetch: async () => new Response("unauthorized", { status: 401 }),
   });
   await assert.rejects(
-    () => auth.service.createApiKeyDraft("api_key/google", "candidate"),
-    /Google credential was rejected/,
+    () => auth.service.createStoredDraft("oauth/openai"),
+    /OpenAI OAuth credential was rejected/,
   );
 });
 
@@ -512,7 +519,6 @@ test("a failed oauth refresh preserves stored auth and does not use expired acce
 
 test("rollback failure reports both failures and never claims the previous configuration is active", async () => {
   const harness = createHarness({
-    fetch: async () => Response.json({ data: {} }),
     apply: async () => { throw new Error("apply failed"); },
   });
   const draft = await harness.service.createApiKeyDraft("api_key/openrouter", "new-key");
@@ -528,9 +534,8 @@ test("rollback failure reports both failures and never claims the previous confi
 
 test("cancellation during discovery cannot produce a pending draft", async () => {
   const abort = new AbortController();
-  const harness = createHarness({ fetch: async () => {
+  const harness = createHarness({ beforeCatalog: () => {
     abort.abort();
-    return Response.json({ models: [{ name: "models/gemini-test" }] });
   } });
   await assert.rejects(() => harness.service.createStoredDraft("api_key/google", abort.signal), /abort/i);
   assert.equal(harness.config().gateway, "api_key/google");
@@ -572,9 +577,8 @@ test("delayed discovery and failed switch cannot resurrect credentials after rem
   let started!: () => void;
   const waiting = new Promise<void>(resolve => { started = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
-  const harness = createHarness({ fetch: async () => {
+  const harness = createHarness({ beforeCatalog: async () => {
     started(); await gate;
-    return Response.json({ models: [{ name: "models/gemini-test" }] });
   } });
   const draft = harness.service.createStoredDraft("api_key/google");
   const rejected = assert.rejects(draft, /expired|changed/);

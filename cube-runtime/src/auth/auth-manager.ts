@@ -4,6 +4,7 @@ import {
   type OpenAIOAuthCredential,
   type GrokOAuthCredential,
   type AnthropicOAuthCredential,
+  type GoogleOAuthCredential,
 } from "@cube/workspace";
 import type { OpenAIOAuthCredentialProvider } from "@cube/agent";
 import {
@@ -13,7 +14,12 @@ import {
   type OpenAIOAuthOptions,
 } from "./openai.js";
 import { beginGrokLogin, refreshGrokCredential, type GrokOAuthOptions } from "./grok.js";
-import { beginAnthropicLogin, refreshAnthropicCredential, type AnthropicOAuthOptions } from "./anthropic.js";
+import { beginGoogleLogin, refreshGoogleCredential, type GoogleOAuthOptions } from "./google.js";
+import {
+  beginAnthropicLogin,
+  refreshAnthropicCredential,
+  type AnthropicOAuthOptions,
+} from "./anthropic.js";
 
 type OpenAIAuthStore = Pick<AuthStore, "read" | "update">;
 
@@ -66,6 +72,38 @@ export class OpenAIAuthManager implements OpenAIOAuthCredentialProvider {
 
 export { OpenAIAuthManager as AuthManager };
 
+export class GoogleAuthManager {
+  private pendingCredential?: Promise<GoogleOAuthCredential>;
+  constructor(
+    private readonly store: Pick<AuthStore, "read" | "update">,
+    private readonly options: GoogleOAuthOptions = {},
+  ) {}
+
+  beginLogin(signal?: AbortSignal) {
+    return beginGoogleLogin(this.options, signal);
+  }
+
+  getValidCredential(): Promise<GoogleOAuthCredential> {
+    this.pendingCredential ??= this.readAndRefresh().finally(() => {
+      this.pendingCredential = undefined;
+    });
+    return this.pendingCredential;
+  }
+
+  private async readAndRefresh(): Promise<GoogleOAuthCredential> {
+    const current = (await this.store.read()).oauth.google;
+    if (!current) throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
+    if (current.expires_at > (this.options.now ?? Date.now)() + 5 * 60_000) return current;
+    const refreshed = await refreshGoogleCredential(current, this.options);
+    const saved = await this.store.update(auth => {
+      if (JSON.stringify(auth.oauth.google) !== JSON.stringify(current))
+        throw new Error("Google credential changed. Run /gateway again.");
+      return { ...auth, oauth: { ...auth.oauth, google: refreshed } };
+    });
+    return saved.oauth.google!;
+  }
+}
+
 export class AnthropicAuthManager {
   private pendingCredential?: Promise<AnthropicOAuthCredential>;
   constructor(
@@ -78,7 +116,9 @@ export class AnthropicAuthManager {
   }
 
   getValidCredential(): Promise<AnthropicOAuthCredential> {
-    this.pendingCredential ??= this.readAndRefresh().finally(() => { this.pendingCredential = undefined; });
+    this.pendingCredential ??= this.readAndRefresh().finally(() => {
+      this.pendingCredential = undefined;
+    });
     return this.pendingCredential;
   }
 

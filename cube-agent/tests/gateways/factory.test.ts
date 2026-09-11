@@ -14,7 +14,11 @@ test("createCubeGateways registers three shared strategy instances for Mastra an
         expires_at: Date.now() + 60_000,
         account_id: "account",
       }),
-    }, xai: { getValidCredential: async () => ({ access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 60000 }) } },
+    },
+      xai: { getValidCredential: async () => ({ access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 60000 }) },
+      anthropic: { getValidCredential: async () => ({ access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 60000 }) },
+      google: { getValidCredential: async () => ({ access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 60000, project_id: "project" }) },
+    },
   });
 
   assert.deepEqual([...gateways.byGatewayId.keys()], GATEWAY_IDS);
@@ -27,6 +31,7 @@ test("createCubeGateways registers three shared strategy instances for Mastra an
   assert.equal(gateways.byGatewayId.get("api_key/google"), gateways.byGatewayId.get("api_key/openai"));
   assert.equal(gateways.byGatewayId.get("local/ollama"), gateways.byGatewayId.get("local/lmstudio"));
   assert.notEqual(gateways.byGatewayId.get("api_key/openai"), gateways.byGatewayId.get("oauth/openai"));
+  assert.equal(gateways.byGatewayId.get("oauth/anthropic"), gateways.byGatewayId.get("oauth/openai"));
   const local = gateways.byGatewayId.get("local/ollama")!;
   const ollamaUrl = local.getBaseUrl!("local/ollama");
   local.setBaseUrl!("http://localhost:4321", "local/lmstudio");

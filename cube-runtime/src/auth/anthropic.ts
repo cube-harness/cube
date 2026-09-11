@@ -1,7 +1,6 @@
 import { AnthropicOAuthCredentialSchema, type AnthropicOAuthCredential } from "@cube/workspace";
 import { createOpenAICallback, createOpenAIPkce, openExternalUrl, type OpenAIOAuthOptions } from "./openai.js";
 
-// Experimental Claude subscription OAuth; provider behavior is not a public API contract.
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
 const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
@@ -23,7 +22,7 @@ const requestCredential = async (
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     redirect: "error",
   });
-  const data = await response.json() as Record<string, unknown>;
+  const data = await response.json().catch(() => undefined) as Record<string, unknown> | undefined;
   if (!response.ok) {
     const error = data?.error;
     const message = typeof data?.error_description === "string" ? data.error_description
@@ -80,9 +79,10 @@ export const beginAnthropicLogin = async (
   const completion = callback.completion.then(async (code) => {
     abort.signal.throwIfAborted();
     const [authorizationCode, codeState] = code.split("#");
+    if (!authorizationCode) throw new Error("Anthropic authorization code is missing.");
     if (codeState !== undefined && codeState !== pkce.state) throw new Error("Anthropic OAuth state mismatch.");
     return requestCredential({
-      grant_type: "authorization_code", code: authorizationCode!, state: pkce.state,
+      grant_type: "authorization_code", code: authorizationCode, state: pkce.state,
       code_verifier: pkce.verifier, redirect_uri: redirectUri,
     }, options, abort.signal);
   }).then((credential) => {

@@ -21,11 +21,11 @@ remain API-key routes with separate stored keys and native endpoints, not OAuth
 login. Native Mastra metadata owns endpoint/protocol/model overrides;
 Cube supplies the selected provider's key from `auth.json` explicitly.
 
-Google/OpenRouter/OpenAI retain their existing credential/discovery checks. New
-providers list canonical catalog models without assuming a common `/models` or
-key-validation endpoint. A stored nonempty key is not proof of validity or model
-entitlement; inference errors use the existing system-message boundary. No paid
-inference is triggered by onboarding. OAuth and local behavior is unchanged.
+All API-key providers list models/capabilities from models.dev. Setup checks only
+that a key exists and the local schema is valid; it never calls provider-specific
+key-validation or model-list endpoints. A stored nonempty key is not proof of
+validity or model entitlement; errors surface on the user's actual inference
+through the existing system-message boundary. OAuth/local discovery is unchanged.
 
 ### Grok Build extension (approved 2026-09-07)
 
@@ -194,8 +194,8 @@ This retains the current ability to configure Google and OpenRouter at the same
 time while keeping only one active runtime gateway.
 
 Phase 1 stores one API key per provider and one OpenAI OAuth account. A new
-login or key replacement updates only that provider after the new credential has
-been validated.
+login or key replacement updates only that provider on selection commit. API keys
+are checked locally for structure/presence, not remotely for validity.
 
 The auth store must:
 
@@ -270,7 +270,7 @@ The interactive flow is:
 1. Select `api_key`, `oauth`, or `local`.
 2. Select a provider in that group.
 3. Reuse a stored credential/endpoint or configure a replacement.
-4. Discover and validate available models without making a paid inference call.
+4. Load API-key models from models.dev; discover account/server models for OAuth/local.
 5. Retain the current canonical model when it is available through the candidate
    gateway; otherwise open the shared model picker filtered to the candidate
    gateway.
@@ -291,8 +291,9 @@ configuration unchanged.
 
 ## OpenAI OAuth Login
 
-Selecting `oauth/openai` starts a new login, which also provides account
-switching:
+Selecting a configured OAuth provider uses the saved credential directly. Account
+switching requires `ctrl+d` logout first. Selecting unconfigured `oauth/openai`
+starts login:
 
 1. Generate state, PKCE verifier/challenge, redirect URI, and authorization URL.
 2. Start the localhost callback listener.
@@ -310,7 +311,7 @@ clickable URL is the recovery path when the automatically opened browser is clos
 
 Token refresh occurs before an expired token is used. Refresh failure preserves the
 stored credential record, emits a recoverable system message, and allows the user
-to select `oauth/openai` again to reauthenticate.
+to log out with `ctrl+d`, then select `oauth/openai` again to reauthenticate.
 
 OpenAI documents this browser-login, localhost-callback, cached-credential, and
 automatic-refresh behavior for Codex clients. It does not document a general public
@@ -352,8 +353,8 @@ A gateway or model change is a transaction:
 6. Surface both the original and rollback error if persistence rollback also fails.
 
 Changing an API key or oauth account follows the same commit discipline:
-the old credential remains usable until the replacement has been validated and
-written successfully.
+the old credential remains stored until the replacement selection has been
+written successfully. API-key validity is determined by actual inference.
 
 No selection or credential validation sends an inference prompt. The first paid or
 quota-consuming inference remains the user's next actual prompt.
@@ -477,9 +478,7 @@ were skipped. Completion cannot be claimed from unit tests alone.
 - Failed or cancelled changes preserve the previous credential, config, runtime
   model, and session.
 
-## References
-
-### Anthropic OAuth extension (2026-09-09)
+## Anthropic OAuth extension (2026-09-09)
 
 - Add `oauth/anthropic` within the existing OAuth strategy, using authorization
   code + PKCE and a loopback callback. No Agent SDK runtime or extra strategy.
@@ -500,6 +499,34 @@ were skipped. Completion cannot be claimed from unit tests alone.
 - Local login waiting is limited to five minutes; this is distinct from the
   provider-issued access token expiry. Real account login/inference must be
   verified separately from mocked HTTP tests.
+
+## Google OAuth extension (2026-09-10)
+
+- Add `oauth/google` to the existing OAuth strategy and shared picker; keep
+  `api_key/google` independent. Reuse the passive risk note, clickable URL,
+  countdown, cancellation, staged commit, account replacement and logout flow.
+- Use Gemini CLI / Code Assist authorization code + PKCE, an offline refresh
+  token and an explicit account chooser. The local sign-in window is five minutes.
+- Store access/refresh tokens, expiry and the provider-managed `project_id` in
+  `auth.json`; never read Google credentials or project IDs from `.env`.
+- Resolve the managed project through `loadCodeAssist`; if needed, onboard only
+  the offered default free tier and poll its operation. Do not create billable
+  Cloud projects or enable paid overages. Accounts requiring a user-supplied
+  Cloud project receive an actionable system error, not a silent fallback.
+- Discover model IDs from account quota buckets (`retrieveUserQuota`), deduplicate,
+  and join exact IDs against models.dev. Exhausted models remain visible; quota
+  is not a capability. Empty/invalid discovery fails without replacing saved
+  configuration. Do not substitute a static model list.
+- Use `@ai-sdk/google` inside `OAuthGateway` with a custom fetch that wraps
+  `{ model, project, request }` and unwraps Code Assist responses. The native SDK
+  retains tools, thought signatures, reasoning and usage. Never send an API key
+  or forward OAuth credentials outside the fixed Code Assist endpoint.
+- Refresh before expiry with the existing concurrent-refresh/logout guards.
+  Catalog identity includes project ID; logout prunes only `oauth.google`.
+- Focused mocked HTTP tests verify the protocol and lifecycle; real Google
+  account login and inference require a separate interactive smoke check.
+
+## References
 
 - Mastra custom gateway documentation:
   https://mastra.ai/models/gateways/custom-gateways

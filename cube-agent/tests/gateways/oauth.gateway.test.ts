@@ -2,7 +2,80 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { GatewayLanguageModel } from "@mastra/core/llm";
 import { OAuthGateway } from "../../src/gateways/oauth.gateway.js";
-import { buildModelConfig } from "../../src/agents/main.agent.js";
+import { buildModelConfig } from "../../src/agents/default.agent.js";
+
+test("Google native adapter preserves tools, signatures, reasoning and usage across Code Assist envelopes", async () => {
+  let token: string | undefined = "first";
+  let rejectRequest = false;
+  const requests: Array<{ url: string; headers: Headers; body: any }> = [];
+  const gateway = new OAuthGateway({
+    openai: { getValidCredential: async () => { throw new Error("wrong credential"); } },
+    google: { getValidCredential: async () => {
+      if (!token) throw new Error("Google logged out");
+      return { access_token: token, refresh_token: "refresh", project_id: `${token}-project`, expires_at: Date.now() + 3600000 };
+    } },
+  }, undefined, async (input, init) => {
+    requests.push({ url: String(input), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+    if (rejectRequest) return Response.json({ error: { code: 429, message: "Google quota reached", status: "RESOURCE_EXHAUSTED" } }, { status: 429 });
+    const envelope = { traceId: "trace", response: {
+      candidates: [{ index: 0, content: { role: "model", parts: [
+        { text: "reason", thought: true }, { text: "answer" },
+        { functionCall: { name: "read_file", args: { path: "test.ts" } }, thoughtSignature: "signature" },
+      ] }, finishReason: "STOP" }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 2, totalTokenCount: 17 },
+    } };
+    if (!String(input).includes("streamGenerateContent")) return Response.json(envelope);
+    const bytes = new TextEncoder().encode(`: heartbeat\r\ndata: ${JSON.stringify(envelope)}\r\n\r\n`);
+    return new Response(new ReadableStream({ start(controller) {
+      for (let index = 0; index < bytes.length; index += 7) controller.enqueue(bytes.slice(index, index + 7));
+      controller.close();
+    } }), { headers: { "content-type": "text/event-stream", "content-length": String(bytes.length) } });
+  });
+  const model = await gateway.resolveLanguageModel({ providerId: "google", modelId: "gemini-2.5-pro", apiKey: "bootstrap-token" });
+  const prompt = [
+    { role: "system" as const, content: "Cube instructions" },
+    { role: "user" as const, content: [{ type: "text" as const, text: "read file" }] },
+    { role: "assistant" as const, content: [{ type: "tool-call" as const, toolCallId: "call_1", toolName: "read_file", input: { path: "test.ts" }, providerOptions: { google: { thoughtSignature: "prior-signature" } } }] },
+    { role: "tool" as const, content: [{ type: "tool-result" as const, toolCallId: "call_1", toolName: "read_file", output: { type: "text" as const, value: "contents" } }] },
+  ];
+  const options = { prompt, tools: [{ type: "function" as const, name: "read_file", inputSchema: { type: "object" } }],
+    toolChoice: { type: "tool" as const, toolName: "read_file" },
+    providerOptions: { google: { thinkingConfig: { thinkingBudget: 2048, includeThoughts: true } } },
+  };
+  const streamed = await model.doStream(options);
+  const events: any[] = [];
+  for await (const event of streamed.stream) events.push(event);
+  assert.ok(events.some(event => event.type === "reasoning-delta" && event.delta === "reason"));
+  assert.ok(events.some(event => event.type === "text-delta" && event.delta === "answer"));
+  const call = events.find(event => event.type === "tool-call");
+  assert.equal(call.toolName, "read_file");
+  assert.equal(call.providerMetadata.google.thoughtSignature, "signature");
+  assert.equal(events.find(event => event.type === "finish").usage.inputTokens.total, 10);
+  token = "replacement";
+  const generated = await model.doGenerate(options);
+  assert.ok(generated.content.some(part => part.type === "text" && part.text === "answer"));
+  assert.deepEqual(requests.map(request => request.headers.get("authorization")), ["Bearer first", "Bearer replacement"]);
+  assert.deepEqual(requests.map(request => request.body.project), ["first-project", "replacement-project"]);
+  assert.ok(requests[0]!.url.endsWith(":streamGenerateContent?alt=sse"));
+  assert.ok(requests[1]!.url.endsWith(":generateContent"));
+  for (const request of requests) {
+    assert.equal(request.headers.get("x-goog-api-key"), null);
+    assert.equal(request.body.model, "gemini-2.5-pro");
+    assert.equal(request.body.request.systemInstruction.parts[0].text, "Cube instructions");
+    assert.equal(request.body.request.tools[0].functionDeclarations[0].name, "read_file");
+    assert.equal(request.body.request.toolConfig.functionCallingConfig.allowedFunctionNames[0], "read_file");
+    assert.equal(request.body.request.generationConfig.thinkingConfig.includeThoughts, true);
+    assert.ok(JSON.stringify(request.body.request.contents).includes("prior-signature"));
+    assert.ok(JSON.stringify(request.body.request.contents).includes("functionResponse"));
+    assert.equal(request.body.enabled_credit_types, undefined);
+  }
+  rejectRequest = true;
+  await assert.rejects(model.doStream(options), /Google quota reached/);
+  token = undefined;
+  await assert.rejects(model.doStream(options), /Google logged out/);
+  assert.equal(requests.length, 3);
+  assert.equal(prompt.length, 4);
+});
 
 const credential = {
   access_token: "oauth-token",

@@ -253,6 +253,7 @@ export class ChatScreen {
     gatewayId: GatewayId,
     catalog: ModelCatalog,
     current: ModelState,
+    initialStep?: "model" | "reasoning",
   ): Promise<ModelSelection | null> {
     return this.showOverlay<ModelSelection | null>(
       (finish) =>
@@ -261,6 +262,7 @@ export class ChatScreen {
           catalog,
           currentModelId: current.modelId,
           currentReasoningEffort: current.reasoningEffort,
+          initialStep,
           onSelect: finish,
           onCancel: () => finish(null),
         }),
@@ -271,16 +273,17 @@ export class ChatScreen {
     gateway: GatewaySetupOptions["gateway"],
     request: GatewaySetupRequest,
   ): Promise<GatewaySelection | null> {
-    return this.showOverlay<GatewaySelection | null | Error>((finish) =>
-      new GatewaySetupComponent({
-      onNotice: (notice) => this.showNotice(notice),
-        tui: this.options.tui,
-        gateway,
-        request,
-        onSelect: finish,
-        onCancel: () => finish(null),
-        onError: (error) => finish(error instanceof Error ? error : new Error(String(error))),
-      }),
+    return this.showOverlay<GatewaySelection | null | Error>(
+      (finish) =>
+        new GatewaySetupComponent({
+          onNotice: (notice) => this.showNotice(notice),
+          tui: this.options.tui,
+          gateway,
+          request,
+          onSelect: finish,
+          onCancel: () => finish(null),
+          onError: (error) => finish(error instanceof Error ? error : new Error(String(error))),
+        }),
     ).then((result) => {
       if (result instanceof Error) throw result;
       return result;

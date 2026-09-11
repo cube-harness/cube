@@ -10,12 +10,9 @@ export {
   updateCubeAgentSoul,
   reloadCubeAgentSoul,
   buildModelConfig,
-} from "./agents/main.agent.js";
+} from "./agents/default.agent.js";
 export { createCubeController } from "./agents/controller.js";
-export {
-  configureCubePermissions,
-  resolveCubeToolCategory,
-} from "./permission.js";
+export { configureCubePermissions, resolveCubeToolCategory } from "./permission.js";
 export {
   createCubeLogger,
   runWithCubeLogContext,
@@ -45,5 +42,7 @@ export {
   GROK_BUILD_HEADERS,
   ANTHROPIC_BASE_URL,
   ANTHROPIC_OAUTH_HEADERS,
+  GOOGLE_CODE_ASSIST_BASE_URL,
+  GOOGLE_CODE_ASSIST_HEADERS,
 } from "./gateways/oauth.gateway.js";
 export * from "./gateways/types.js";

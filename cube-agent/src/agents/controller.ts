@@ -20,7 +20,7 @@ export const createCubeController = async (
     id: "cube-controller",
     agent,
     memory: createMemory(config, home),
-    modes: [{ id: "build", name: "Build", metadata: { default: true } }],
+    modes: [{ id: "default", name: "Default", metadata: { default: true } }],
     tools: { ask_user: cubeAskUserTool },
     disableBuiltinTools: [
       "ask_user",

@@ -24,7 +24,7 @@ import {
 import { CubeRuntime } from "./runtime.js";
 import { slashCommandSuggestions, type SlashCommandContext } from "./slash-commands.js";
 import { MemoryService } from "./services/memory.service.js";
-import { AnthropicAuthManager, GrokAuthManager, OpenAIAuthManager } from "./auth/auth-manager.js";
+import { AnthropicAuthManager, GoogleAuthManager, GrokAuthManager, OpenAIAuthManager } from "./auth/auth-manager.js";
 import { GatewayService, type GatewayServiceDependencies } from "./services/gateway.service.js";
 import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
@@ -56,6 +56,7 @@ export type CubeBootstrap = {
     | "beginOpenAILogin"
     | "beginGrokLogin"
     | "beginAnthropicLogin"
+    | "beginGoogleLogin"
     | "discardDraft"
     | "commitInitial"
     | "removeCredential"
@@ -94,6 +95,7 @@ export const prepareCubeRuntime = async (
   const openAIAuth = new OpenAIAuthManager(authStore);
   const grokAuth = new GrokAuthManager(authStore, { fetch: options.fetch });
   const anthropicAuth = new AnthropicAuthManager(authStore, { fetch: options.fetch });
+  const googleAuth = new GoogleAuthManager(authStore, { fetch: options.fetch });
   const gatewayDependencies: GatewayServiceDependencies = {
     config: configStore,
     auth: authStore,
@@ -103,6 +105,7 @@ export const prepareCubeRuntime = async (
     openAIAuth,
     grokAuth,
     anthropicAuth,
+    googleAuth,
     fetch: options.fetch,
   };
   const gateway = new GatewayService(gatewayDependencies);
@@ -131,7 +134,7 @@ export const prepareCubeRuntime = async (
       try {
         const gateways = createCubeGateways({
           auth: authStore,
-          oauth: { openai: openAIAuth, xai: grokAuth, anthropic: anthropicAuth },
+          oauth: { openai: openAIAuth, xai: grokAuth, anthropic: anthropicAuth, google: googleAuth },
           gatewayOptions: config.gateway_options,
           fetch: options.fetch,
         });

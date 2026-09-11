@@ -7,22 +7,24 @@ import { GatewayPickerComponent, GatewaySetupComponent, type GatewaySetupOptions
 const choices = [
   { gatewayId: "api_key/google" as const, group: "api_key" as const, provider: "google", configured: true },
   { gatewayId: "api_key/openrouter" as const, group: "api_key" as const, provider: "openrouter", configured: false },
-  { gatewayId: "oauth/openai" as const, group: "oauth" as const, provider: "openai", configured: true },
+  { gatewayId: "oauth/openai" as const, group: "oauth" as const, provider: "openai", configured: false },
 ];
 
-test("Anthropic risk is an inline picker note, not a confirmation step or chat message", () => {
+test("OAuth risk is an inline picker note, not a confirmation step or chat message", () => {
+  for (const provider of ["anthropic", "google"] as const) {
   let selected: unknown;
   const picker = new GatewayPickerComponent({
-    choices: [{ gatewayId: "oauth/anthropic", provider: "anthropic", group: "oauth", configured: false }],
+    choices: [{ gatewayId: `oauth/${provider}`, provider, group: "oauth", configured: false }],
     onSelect: value => { selected = value; }, onCancel: () => undefined,
   });
   picker.handleInput("\r");
   const text = stripTerminalSequences(picker.render(50).join("\n"));
-  assert.match(text, /Note: Anthropic/);
+  assert.match(text, /Risk Notice:/);
   assert.match(text, /own risk/);
   assert.equal(picker.render(25).every(line => visibleWidth(line) <= 25), true);
   picker.handleInput("\r");
-  assert.deepEqual(selected, { gatewayId: "oauth/anthropic", replace: true });
+  assert.deepEqual(selected, { gatewayId: `oauth/${provider}`, replace: true });
+  }
 });
 
 test("Grok Build starts device login, displays its code, then opens models without extra Enter", async () => {
@@ -32,7 +34,7 @@ test("Grok Build starts device login, displays its code, then opens models witho
   const picker = new GatewaySetupComponent({
     onNotice: () => undefined,
     tui: { requestRender: () => undefined } as unknown as TUI,
-    request: { choices: [{ gatewayId: "oauth/xai", group: "oauth", provider: "xai", configured: true }] },
+    request: { choices: [{ gatewayId: "oauth/xai", group: "oauth", provider: "xai", configured: false }] },
     gateway: { discardDraft: () => undefined, beginGrokLogin: async () => {
       logins++;
       return { authorizationUrl: "https://auth.x.ai/activate", userCode: "ABCD-EFGH", completion, expiresAt: Date.now() + 1800000, cancel: async () => undefined };
@@ -175,7 +177,7 @@ test("successful account login replaces the URL with the model picker without ex
   const loginView = stripTerminalSequences(picker.render(80).join("\n"));
   complete(draft);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(logins, 1); // Configured oauth still starts fresh account login.
+  assert.equal(logins, 1);
   assert.match(loginView, /https:\/\/auth.openai.com\/authorize/);
   assert.doesNotMatch(picker.render(80).join("\n"), /auth.openai.com/);
   assert.match(picker.render(80).join("\n"), /openai\/gpt-5\.5/);
@@ -184,11 +186,11 @@ test("successful account login replaces the URL with the model picker without ex
   picker.handleInput("\r");
   assert.deepEqual(selected, { draftId: "signed-in", model: { modelId: "openai/gpt-5.5" } });
 });
-test("credential removal requires explicit confirmation; Cancel is focused and OAuth Enter still signs in", () => {
+test("configured OAuth is used directly; switching accounts requires logout before login", () => {
   const removed: string[] = [];
   const selected: unknown[] = [];
   const picker = new GatewayPickerComponent({
-    choices, initialGroup: "oauth", onRemove: id => removed.push(id),
+    choices: choices.map(choice => ({ ...choice, configured: true })), initialGroup: "oauth", onRemove: id => removed.push(id),
     onSelect: value => selected.push(value), onCancel: () => undefined,
   });
   picker.handleInput("\x04");
@@ -199,10 +201,18 @@ test("credential removal requires explicit confirmation; Cancel is focused and O
   picker.handleInput("\x1b[B");
   picker.handleInput("\r");
   assert.deepEqual(removed, ["oauth/openai"]);
+  for (const provider of ["openai", "xai", "anthropic", "google"] as const) {
+    const configured = new GatewayPickerComponent({
+      choices: [{ gatewayId: `oauth/${provider}`, group: "oauth", provider, configured: true }],
+      initialGroup: "oauth", onSelect: value => selected.push(value), onCancel: () => undefined,
+    });
+    configured.handleInput("\r");
+    assert.deepEqual(selected.at(-1), { gatewayId: `oauth/${provider}`, replace: false });
+  }
   const login = new GatewayPickerComponent({
     choices, initialGroup: "oauth", onRemove: id => removed.push(id),
     onSelect: value => selected.push(value), onCancel: () => undefined,
   });
   login.handleInput("\r");
-  assert.deepEqual(selected, [{ gatewayId: "oauth/openai", replace: true }]);
+  assert.deepEqual(selected.at(-1), { gatewayId: "oauth/openai", replace: true });
 });

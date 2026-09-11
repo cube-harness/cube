@@ -10,7 +10,6 @@ import {
 import { appTheme } from "../themes/app.theme.js";
 import { createEditorTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
-import { KeyHint } from "./key-hint.js";
 import { Card } from "./card.js";
 import type { SlashCommandSuggestion } from "@cube/runtime";
 
@@ -26,7 +25,6 @@ export class PromptEditor implements Component, Focusable {
   private readonly editor: Editor;
   private readonly card: Card;
   private readonly tui: TUI;
-  private readonly autocompleteHint: KeyHint;
   private readonly queuedPrompts: string[] = [];
   private readonly history: string[] = [];
   private historyIndex: number = -1;
@@ -39,16 +37,24 @@ export class PromptEditor implements Component, Focusable {
   constructor(options: PromptEditorOptions) {
     this.tui = options.tui;
     const theme = createEditorTheme();
-    this.editor = new Editor(options.tui, { ...theme, borderColor: () => "" }, { paddingX: 0 });
+    this.editor = new Editor(
+      options.tui,
+      {
+        ...theme,
+        borderColor: () => "",
+        selectList: {
+          ...theme.selectList,
+          selectedPrefix: (s) => appTheme.ui.primary.bold(s.replace(/^→ /, "/")),
+          selectedText: (s) => appTheme.ui.primary.bold(s.replace(/^→ /, "/")),
+          scrollInfo: () => "",
+        },
+      },
+      { paddingX: 0, autocompleteMaxVisible: 8 },
+    );
     this.card = new Card({
       render: (width) => this.renderEditor(width),
       invalidate: () => this.editor.invalidate(),
     });
-    this.autocompleteHint = new KeyHint([
-      { key: "↑/↓", label: "Navigate" },
-      { key: "Enter", label: "Select" },
-      { key: "Tab", label: "Complete" },
-    ]);
 
     if (options.initialHistory && options.initialHistory.length > 0) {
       this.history.push(...options.initialHistory);
@@ -165,12 +171,31 @@ export class PromptEditor implements Component, Focusable {
       );
     }
 
-    lines = lines.map((line, index) =>
-      truncateToWidth(`${index === 0 ? appTheme.ui.primary("❯ ") : "  "}${line}`, width),
-    );
     if (this.editor.isShowingAutocomplete()) {
-      lines.push(...this.autocompleteHint.render(width));
+      const editorLineCount = Math.max(1, this.editor.getLines().length);
+      lines = lines
+        .filter((line, index) => {
+          if (index >= editorLineCount && (line.trim() === "" || /\(\d+\/\d+\)/.test(line))) {
+            return false;
+          }
+          return true;
+        })
+        .map((line, index) => {
+          if (index >= editorLineCount) {
+            return line.replace(/^(\x1b\[[0-9;]*m)? {2}/, "$1/");
+          }
+          return line;
+        });
+
+      if (lines.length > editorLineCount) {
+        lines.splice(editorLineCount, 0, "");
+      }
     }
+
+    lines = lines.map((line, index) => {
+      if (!line) return "";
+      return truncateToWidth(`${index === 0 ? appTheme.ui.primary("❯ ") : "  "}${line}`, width);
+    });
     return lines;
   }
 
@@ -187,7 +212,7 @@ export class PromptEditor implements Component, Focusable {
     for (const prompt of this.queuedPrompts) {
       queueLines.push(
         ...wrapTextWithAnsi(
-          `${appTheme.ui.secondary("  ↳")} ${appTheme.role.assistant(prompt.replace(/\r?\n/g, " "))}`,
+          `${appTheme.ui.primary("  ↳")} ${appTheme.role.assistant(prompt.replace(/\r?\n/g, " "))}`,
           width,
         ),
       );

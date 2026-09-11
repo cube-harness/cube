@@ -34,13 +34,16 @@ export type ModelPickerOptions = {
   catalog: ModelCatalog;
   currentModelId?: string;
   currentReasoningEffort?: ReasoningEffort;
+  initialStep?: "model" | "reasoning";
   onSelect(result: ModelSelectionResult): void;
   onCancel(): void;
 };
 
 export class ModelPickerComponent implements Component, Focusable {
   private hasFocus = true;
-  get focused(): boolean { return this.hasFocus; }
+  get focused(): boolean {
+    return this.hasFocus;
+  }
   set focused(value: boolean) {
     this.hasFocus = value;
     this.searchBar.focused = value && this.step === "model";
@@ -86,6 +89,12 @@ export class ModelPickerComponent implements Component, Focusable {
       { key: formatBinding("tui.select.confirm"), label: "Select" },
       { key: formatBinding("tui.select.cancel"), label: "Cancel" },
     ]);
+    if (options.initialStep === "reasoning" && options.currentModelId) {
+      const model = this.models.find((item) => item.modelId === options.currentModelId);
+      if (model?.reasoning_efforts?.length) {
+        this.showReasoning(model.modelId, model.reasoning_efforts);
+      }
+    }
   }
 
   private showReasoning(modelId: string, efforts: string[]): void {
@@ -113,6 +122,10 @@ export class ModelPickerComponent implements Component, Focusable {
   }
 
   private cancel(): void {
+    if (this.options.initialStep === "reasoning") {
+      this.options.onCancel();
+      return;
+    }
     if (this.searchBar.getQuery()) {
       this.searchBar.clear();
       this.modelList.setFilter("");

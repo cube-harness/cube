@@ -6,6 +6,7 @@ import {
   type OpenAIOAuthCredential,
   type GrokOAuthCredential,
   type AnthropicOAuthCredential,
+  type GoogleOAuthCredential,
 } from "@cube/workspace";
 
 export type GatewayGroup = "api_key" | "oauth" | "local";
@@ -41,6 +42,11 @@ export const gatewayDescriptors = {
     internalId: "cube-oauth",
     group: "oauth",
     providerId: "anthropic",
+  },
+  "oauth/google": {
+    internalId: "cube-oauth",
+    group: "oauth",
+    providerId: "google",
   },
   "local/ollama": {
     internalId: "cube-local",
@@ -88,6 +94,7 @@ export type OAuthCredentialProviders = {
   openai: OpenAIOAuthCredentialProvider;
   xai?: { getValidCredential(): Promise<GrokOAuthCredential> };
   anthropic?: { getValidCredential(): Promise<AnthropicOAuthCredential> };
+  google?: { getValidCredential(): Promise<GoogleOAuthCredential> };
 };
 
 export type { ApiKeyGatewayId };
