@@ -59,7 +59,7 @@ const parseModelSelection = (argument: string) => {
 const definitions: SlashCommandDefinition[] = [
   {
     name: "/reload",
-    description: "Reload SOUL and known project instructions",
+    description: "Reload project instructions",
     execute: async (_argument, context) => {
       await context.thread.reload();
       return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
