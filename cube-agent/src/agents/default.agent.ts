@@ -2,7 +2,7 @@ import { createCodingAgent } from "@mastra/core/coding-agent";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { type CubeConfig, type HomeManager, type WorkspaceManager } from "@cube/workspace";
 import { createMastraWorkspace } from "../workspace.js";
-import { webFetchTool } from "@mastra/core/tools";
+import { webFetchTool, webSearchTool } from "@mastra/core/tools";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
 import { getCanonicalModelId } from "../gateways/types.js";
 import {
@@ -167,6 +167,7 @@ export const createCubeAgent = async (
     tools: () => ({
       ...cubeTools.forModel(activeModel),
       fetch: webFetchTool,
+      search: webSearchTool
     }),
     defaultOptions: ({ requestContext }) => {
       const controller = requestContext.get("controller") as { threadId?: string } | undefined;

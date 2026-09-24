@@ -76,8 +76,10 @@ try {
     if (($env:PATH -split ';') -notcontains $bin) { $env:PATH = "$bin;$env:PATH" }
   }
   Write-Host ""
-  Write-Host "Congratulations on successfully installing Cube! 🎉" -ForegroundColor Green
-  Write-Host "Run "cube" to start your project. " -ForegroundColor Yellow
+  Write-Host "Congratulations on successfully installing Cube!" -ForegroundColor Green
+  Write-Host "Run " -NoNewline -ForegroundColor White
+  Write-Host "cube" -NoNewline -ForegroundColor Yellow
+  Write-Host " in your project directory." -ForegroundColor White
   Write-Host ""
 } finally {
   $resolvedStage = [IO.Path]::GetFullPath($staging)

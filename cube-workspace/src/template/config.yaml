@@ -115,7 +115,7 @@ memory:
       # inherit follows the model active in the current session. A concrete
       # provider/model ID can be configured instead.
       model: inherit
-      message_tokens: 30000
+      message_tokens: 60000
       # false disables asynchronous buffering. 0.2 runs the Observer every
       # 20% of message_tokens, approximately every 6k raw-message tokens.
       buffer_tokens: 0.2
@@ -137,7 +137,7 @@ memory:
       # inherit follows the model active in the current session. A concrete
       # provider/model ID can be configured instead.
       model: inherit
-      observation_tokens: 40000
+      observation_tokens: 80000
       # Start background Reflection at 50% of observation_tokens.
       buffer_activation: 0.5
       # 1-<100 is a multiplier; >=100 is an absolute token count.
