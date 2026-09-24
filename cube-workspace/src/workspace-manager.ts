@@ -34,24 +34,7 @@ export class WorkspaceManager {
   ) {}
 
   async resolveRoot(): Promise<string> {
-    let dir = this.cwd;
-    while (true) {
-      if (await this.hasAnyMarker(dir)) return dir;
-      const parent = path.dirname(dir);
-      if (parent === dir) return this.cwd;
-      dir = parent;
-    }
-  }
-
-  private async hasAnyMarker(dir: string): Promise<boolean> {
-    if (await this.exists(path.join(dir, WORKSPACE_FILES.CONTEXT))) return true;
-    for (const toolDir of WORKSPACE_PATHS.ROOT) {
-      if (await this.exists(path.join(dir, toolDir))) return true;
-    }
-    for (const skillsDir of WORKSPACE_PATHS.SKILLS) {
-      if (await this.exists(path.join(dir, skillsDir))) return true;
-    }
-    return false;
+    return this.cwd
   }
 
   private async exists(p: string): Promise<boolean> {

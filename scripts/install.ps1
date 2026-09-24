@@ -7,6 +7,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
   throw 'This installer supports Windows x64 only. Run it in 64-bit PowerShell.'
 }
@@ -27,17 +30,25 @@ try {
     }
     $Sha256 = $manifest.sha256
     $ArchivePath = Join-Path $staging 'cube.zip'
+    Write-Host "[1/3] Downloading Cube Windows x64 package..." -ForegroundColor Cyan
     Invoke-WebRequest "$base/$($manifest.file)" -OutFile $ArchivePath -UseBasicParsing
   }
   if ($Sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'A valid SHA-256 is required.' }
+  Write-Host "[2/3] Verifying package integrity (SHA-256)..." -ForegroundColor Cyan
   if ((Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash -ne $Sha256) { throw 'Package checksum mismatch. Existing installation is unchanged.' }
   $versionKey = $Sha256.ToLowerInvariant().Substring(0, 16)
   $expanded = Join-Path $staging 'package'
-  Expand-Archive -LiteralPath $ArchivePath -DestinationPath $expanded
+  Write-Host "[3/3] Extracting runtime and tools..." -ForegroundColor Cyan
+  if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
+    New-Item -ItemType Directory -Path $expanded -Force | Out-Null
+    tar.exe -xf $ArchivePath -C $expanded
+  } else {
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $expanded
+  }
   foreach ($required in @('runtime/node.exe', 'cube.cmd', 'app/dist/main.js', 'app/package.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $expanded $required) -PathType Leaf)) { throw "Incomplete package: $required" }
   }
-  & (Join-Path $expanded 'runtime/node.exe') --version
+  & (Join-Path $expanded 'runtime/node.exe') --version | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'The bundled Node runtime cannot start.' }
   $versions = Join-Path $installRoot 'versions'
   $destination = Join-Path $versions $versionKey
@@ -48,6 +59,11 @@ try {
   } elseif (-not (Test-Path -LiteralPath (Join-Path $destination 'app/dist/main.js'))) {
     throw "Incomplete existing installation at $destination; it has not been overwritten."
   }
+  # Clean up older versions to prevent disk accumulation
+  Get-ChildItem -Directory -LiteralPath $versions -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne $versionKey } |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+
   $launcher = "@echo off`r`nsetlocal`r`nset `"PATH=%~dp0..\versions\$versionKey\runtime;%PATH%`"`r`n`"%~dp0..\versions\$versionKey\runtime\node.exe`" `"%~dp0..\versions\$versionKey\app\dist\main.js`" %*`r`nexit /b %errorlevel%`r`n"
   $launcherTemp = Join-Path $bin ('cube-' + [guid]::NewGuid().ToString('N') + '.tmp')
   [IO.File]::WriteAllText($launcherTemp, $launcher, [Text.Encoding]::ASCII)
@@ -59,8 +75,10 @@ try {
     }
     if (($env:PATH -split ';') -notcontains $bin) { $env:PATH = "$bin;$env:PATH" }
   }
-  Write-Host "Cube installed: $bin\cube.cmd"
-  Write-Host 'Run cube from your project directory. Existing ~/.cube data was not changed.'
+  Write-Host ""
+  Write-Host "Congratulations on successfully installing Cube! 🎉" -ForegroundColor Green
+  Write-Host "Run "cube" to start your project. " -ForegroundColor Yellow
+  Write-Host ""
 } finally {
   $resolvedStage = [IO.Path]::GetFullPath($staging)
   if ($resolvedStage.StartsWith($installRoot.TrimEnd('\') + '\.install-', [StringComparison]::OrdinalIgnoreCase)) {
