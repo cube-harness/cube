@@ -101,9 +101,11 @@ export const reloadCubeAgentInstructions = async (
   includeDiscovered = false,
 ): Promise<void> => {
   const base = await loadInstructionSnapshot(home, workspace);
-  agent.installInstructions(includeDiscovered
-    ? await refreshInstructionSnapshot(workspace, base, agent.readInstructions())
-    : base);
+  agent.installInstructions(
+    includeDiscovered
+      ? await refreshInstructionSnapshot(workspace, base, agent.readInstructions())
+      : base,
+  );
 };
 
 export const createCubeAgent = async (
@@ -140,16 +142,25 @@ export const createCubeAgent = async (
       { role: "system", content: snapshot.soul },
       { role: "system", content: executionInstructions },
     ],
-    inputProcessors: [createAgentsMdProcessor(() => context, async (targets) => {
-      const explored = new Set(snapshot.explored);
-      const discovered = await workspace.discoverContextFiles(targets, explored, paths.root);
-      if (explored.size === snapshot.explored.length) return;
-      const next = { ...snapshot, sources: [...discovered, ...snapshot.sources], explored: [...explored] };
-      await result.onInstructionsDiscovered?.(next);
-      snapshot = next;
-      context = formatAgentsContext(snapshot.sources);
-      result.instructionInfo = instructionInfo(snapshot);
-    })],
+    inputProcessors: [
+      createAgentsMdProcessor(
+        () => context,
+        async (targets) => {
+          const explored = new Set(snapshot.explored);
+          const discovered = await workspace.discoverContextFiles(targets, explored, paths.root);
+          if (explored.size === snapshot.explored.length) return;
+          const next = {
+            ...snapshot,
+            sources: [...discovered, ...snapshot.sources],
+            explored: [...explored],
+          };
+          await result.onInstructionsDiscovered?.(next);
+          snapshot = next;
+          context = formatAgentsContext(snapshot.sources);
+          result.instructionInfo = instructionInfo(snapshot);
+        },
+      ),
+    ],
     workspace: mastraWorkspace,
     skills: [home.getSkillDir()],
     basePath: paths.root,
@@ -200,7 +211,9 @@ export const createCubeAgent = async (
     },
     disposeTools: cubeTools.dispose,
     instructionInfo: instructionInfo(snapshot),
-    onInstructionsDiscovered: undefined as ((snapshot: InstructionSnapshot) => Promise<void>) | undefined,
+    onInstructionsDiscovered: undefined as
+      | ((snapshot: InstructionSnapshot) => Promise<void>)
+      | undefined,
     readInstructions: (): InstructionSnapshot => structuredClone(snapshot),
     installInstructions: (next: InstructionSnapshot): void => {
       const replacement = structuredClone(next);
