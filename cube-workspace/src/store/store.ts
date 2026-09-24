@@ -1,4 +1,4 @@
-import { readFile, appendFile } from "node:fs/promises";
+import { readFile, appendFile, access } from "node:fs/promises";
 import YAML from "yaml";
 import { ZodType } from "zod";
 import { atomicWriteFile } from "./atomic-write.js";
@@ -54,10 +54,10 @@ export const ModelCatalogStore = (home: HomeManager) =>
 export const WorkspaceRegistryStore = (home: HomeManager) =>
   new Store<WorkspaceRegistry>(home.getWorkspacePath(), "json", WorkspaceRegistrySchema);
 
-export const AgentsStore = (home: HomeManager) =>
-  new Store<string>(home.getAgentsPath(), "text");
+export const AgentsStore = (home: HomeManager) => new Store<string>(home.getAgentsPath(), "text");
 
 export const SoulStore = (home: HomeManager) => {
+  const soulPath = home.getSoulPath();
   const store = new Store<string>(home.getSoulPath(), "text");
   const maxCharacters = home.getSoulMaxCharacters();
 
@@ -77,6 +77,14 @@ export const SoulStore = (home: HomeManager) => {
     write: async (content: string): Promise<void> => {
       validateCharacters(content);
       await store.write(content);
+    },
+    exists: async (): Promise<boolean> => {
+      try {
+        await access(soulPath);
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 };

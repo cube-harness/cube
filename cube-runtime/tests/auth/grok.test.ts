@@ -2,6 +2,77 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as authManagers from "../../src/auth/auth-manager.js";
 import { toRuntimeNotice } from "../../src/types.js";
+import { getGrokSubscriptionUsage } from "../../src/auth/grok.js";
+
+test("xAI status keeps subscription, spending cap and balance separate; malformed/failed reads retain available data", async () => {
+  const credential = { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000 };
+  let config: object = { monthlyLimit: { val: 200 }, includedUsed: { val: 50 },
+    onDemandCap: { val: 100 }, onDemandUsed: { val: 0 }, prepaidBalance: { val: 25 },
+    creditUsagePercent: 36, currentPeriod: { end: "2026-09-17T10:54:00Z" },
+  };
+  let profileFails = false;
+  const fetchUsage: typeof fetch = async (url, init) => {
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access");
+    assert.equal(init?.redirect, "error");
+    assert.ok(init?.signal);
+    if (String(url).endsWith("/user?include=subscription")) return profileFails
+      ? Response.json({ message: "profile unavailable" }, { status: 403 })
+      : Response.json({ subscriptionTier: "SUPER_GROK" });
+    assert.equal(String(url), "https://cli-chat-proxy.grok.com/v1/billing?format=credits");
+    return Response.json({ config });
+  };
+  const result = await getGrokSubscriptionUsage(credential, fetchUsage);
+  assert.equal(result.plan, "SUPER_GROK");
+  assert.deepEqual(result.limits.map(limit => limit.name), ["Monthly included", "On-demand", "Grok Build", "Prepaid balance"]);
+  assert.deepEqual(result.limits.map(limit => limit.windows[0]!.usedPercent), [25, 0, 36, undefined]);
+  assert.equal(result.limits[3]!.windows[0]!.remaining, 25);
+  profileFails = true;
+  const partial = await getGrokSubscriptionUsage(credential, fetchUsage);
+  assert.equal(partial.plan, undefined);
+  assert.deepEqual(partial.limits, result.limits);
+  assert.match(partial.notice!, /403.*profile unavailable/);
+  profileFails = false;
+  for (config of [{ onDemandCap: { val: "bad" } }, { currentPeriod: { end: "bad" } }, []]) {
+    const invalid = await getGrokSubscriptionUsage(credential, fetchUsage);
+    assert.equal(invalid.plan, "SUPER_GROK");
+    assert.deepEqual(invalid.limits, []);
+    assert.match(invalid.notice!, /Invalid xAI/);
+  }
+});
+
+test("xAI weekly gRPC quota validates framing/trailers and never treats zero spending cap as unlimited", async () => {
+  const frame = (flag: number, bytes: Buffer) => {
+    const header = Buffer.alloc(5); header[0] = flag; header.writeUInt32BE(bytes.length, 1);
+    return Buffer.concat([header, bytes]);
+  };
+  const ratio = Buffer.alloc(4); ratio.writeFloatLE(0.36);
+  const timestamp = Buffer.from([8, 128, 164, 167, 218, 6]); // seconds = 1800000000
+  const info = Buffer.concat([Buffer.from([13]), ratio, Buffer.from([42, timestamp.length]), timestamp]);
+  let wire = frame(0, Buffer.concat([Buffer.from([10, info.length]), info]));
+  const credential = { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000 };
+  const fetchUsage: typeof fetch = async (url, init) => {
+    if (String(url).includes("/user?")) return Response.json({ subscription: { tier: "SuperGrok" } });
+    if (String(url).includes("/billing?")) return Response.json({ config: { onDemandCap: { val: 0 }, onDemandUsed: { val: 0 } } });
+    assert.equal(String(url), "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig");
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(init?.body, new Uint8Array(5));
+    return new Response(wire, { headers: { "content-type": "application/grpc-web+proto" } });
+  };
+  const result = await getGrokSubscriptionUsage(credential, fetchUsage);
+  assert.equal(result.limits[0]!.windows[0]!.usedPercent, 36);
+  assert.equal(result.limits[0]!.windows[0]!.resetsAt, 1800000000);
+  assert.equal(result.limits[1]!.windows[0]!.usedPercent, undefined);
+  assert.equal(result.limits[1]!.windows[0]!.remaining, 0);
+  const valid = wire;
+  for (wire of [Buffer.from([0, 0]), frame(1, info), Buffer.concat([valid, frame(128, Buffer.from("grpc-status: 7\r\n"))])]) {
+    const invalid = await getGrokSubscriptionUsage(credential, fetchUsage);
+    assert.equal(invalid.plan, "SuperGrok");
+    assert.deepEqual(invalid.limits.map(limit => limit.name), ["On-demand"]);
+    assert.match(invalid.notice!, /Invalid xAI|gRPC 7/);
+  }
+  wire = frame(0, Buffer.from([10, 0])); // proto3 scalar default inside an actual credits envelope
+  assert.equal((await getGrokSubscriptionUsage(credential, fetchUsage)).limits[0]!.windows[0]!.usedPercent, 0);
+});
 
 // The real device endpoint returns accounts.x.ai, not the token endpoint's auth.x.ai host.
 const device = { device_code: "private-device", user_code: "ABCD-EFGH", verification_uri: "https://accounts.x.ai/activate", verification_uri_complete: "https://accounts.x.ai/activate?user_code=ABCD-EFGH", expires_in: 60, interval: 1 };

@@ -505,26 +505,85 @@ were skipped. Completion cannot be claimed from unit tests alone.
 - Add `oauth/google` to the existing OAuth strategy and shared picker; keep
   `api_key/google` independent. Reuse the passive risk note, clickable URL,
   countdown, cancellation, staged commit, account replacement and logout flow.
-- Use Gemini CLI / Code Assist authorization code + PKCE, an offline refresh
+- Use Antigravity's Google OAuth client with authorization code + PKCE, an offline refresh
   token and an explicit account chooser. The local sign-in window is five minutes.
 - Store access/refresh tokens, expiry and the provider-managed `project_id` in
   `auth.json`; never read Google credentials or project IDs from `.env`.
 - Resolve the managed project through `loadCodeAssist`; if needed, onboard only
-  the offered default free tier and poll its operation. Do not create billable
+  the offered default provider-managed tier and poll its operation. Do not create billable
   Cloud projects or enable paid overages. Accounts requiring a user-supplied
   Cloud project receive an actionable system error, not a silent fallback.
-- Discover model IDs from account quota buckets (`retrieveUserQuota`), deduplicate,
-  and join exact IDs against models.dev. Exhausted models remain visible; quota
+- Discover Gemini chat model IDs from Antigravity `fetchAvailableModels`, exclude
+  internal/image-generation models, and join exact IDs against models.dev. Use
+  backend display names and explicitly reported capabilities without guessing
+  aliases or limits. Exhausted models remain visible; quota
   is not a capability. Empty/invalid discovery fails without replacing saved
   configuration. Do not substitute a static model list.
 - Use `@ai-sdk/google` inside `OAuthGateway` with a custom fetch that wraps
-  `{ model, project, request }` and unwraps Code Assist responses. The native SDK
+  `{ model, project, request, userAgent, requestType, requestId }` and unwraps Antigravity responses. The native SDK
   retains tools, thought signatures, reasoning and usage. Never send an API key
-  or forward OAuth credentials outside the fixed Code Assist endpoint.
+  or forward OAuth credentials outside the fixed Antigravity endpoint
+  (`daily-cloudcode-pa.googleapis.com/v1internal`). Project setup retains the
+  `cloudcode-pa.googleapis.com/v1internal` endpoint with Antigravity client metadata.
+- `/status` uses returned per-model `quotaInfo.remainingFraction` and `resetTime`;
+  absent quota stays unknown. Do not invent capacities, window durations or weekly limits.
+- Existing Gemini CLI credentials must be removed with Ctrl+D in `/gateway` and
+  authenticated again; they cannot be refreshed under Antigravity's client ID.
 - Refresh before expiry with the existing concurrent-refresh/logout guards.
   Catalog identity includes project ID; logout prunes only `oauth.google`.
 - Focused mocked HTTP tests verify the protocol and lifecycle; real Google
   account login and inference require a separate interactive smoke check.
+
+## OpenAI subscription status (2026-09-11)
+
+- Extend the existing `/status` (`/usage` alias) result and status box with
+  OpenAI subscription data. API-key, local and other OAuth providers retain
+  their existing session/context status in this increment.
+- On command execution, reuse `OpenAIAuthManager.getValidCredential()` and GET
+  `https://chatgpt.com/backend-api/wham/usage` with Bearer authentication and
+  `ChatGPT-Account-Id`. Reject redirects and bound the request with a timeout.
+- Read `plan_type`, primary/secondary windows and `additional_rate_limits`.
+  Display backend window durations, used/remaining percentages and local reset
+  timestamps. Missing data stays unknown, not zero or unlimited; do not infer
+  allowances from plan names or model capabilities.
+- Do not poll, invoke inference, add dependencies, or persist quota in config or
+  model catalog. Credential refresh continues to use the existing auth store.
+  Discard responses if the active gateway or credential identity changed.
+- Usage request errors preserve session metrics and render through the existing
+  system notice path; never dump response bodies or credentials to the terminal.
+- Protocol reference: OpenAI Codex `codex-rs/backend-client/src/client/rate_limit_resets.rs`
+  and `codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_payload.rs`.
+  This is the subscription backend protocol, not the public API billing endpoint.
+
+## Remaining OAuth subscription status (2026-09-12)
+
+- Extend the same `/status` and `/usage` flow to Anthropic, Google and xAI.
+  Reuse each provider's refresh manager and reject results after account or
+  gateway changes. No catalog/config writes, inference calls, polling or SDKs.
+- Anthropic: read `/api/oauth/profile` and `/api/oauth/usage`; display the
+  returned organization plan, five-hour, seven-day and model-scoped windows.
+- Google: read Code Assist `loadCodeAssist` (prefer paid tier) and
+  `retrieveUserQuota`; preserve model/token buckets, remaining fractions and
+  reset timestamps. Do not onboard accounts while reading status, infer a
+  daily window from a reset timestamp, or default missing tiers to Free.
+- xAI: read Grok Build `/v1/user?include=subscription` and
+  `/v1/billing?format=credits`. When REST omits the shared weekly pool, read
+  `grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` using gRPC-web. Validate
+  frame lengths, wire fields and error trailers before displaying that quota.
+  Keep included allowance, on-demand spending and prepaid balances separate.
+  A zero cap or a remaining balance without a total is not an unlimited quota
+  and must not produce a fabricated percentage. A null tier stays unknown.
+- Preserve successful plan/quota reads when the other request fails; render
+  errors through the existing system notice path, never raw console logging.
+  Reuse remaining-percentage bars; balances without a total use actual units.
+  Unknown-duration reset timestamps include the local date as well as time.
+- Verification uses focused mocked protocol/lifecycle tests and the existing
+  shared status renderer test. xAI billing and weekly quota were also read
+  successfully with the saved account; its subscription tier was null.
+  Anthropic and Google still need interactive account smoke checks because
+  neither credential was available locally during this increment.
+- Protocol references: 9router `open-sse/services/usage/{claude,grok-cli}.js`
+  and `grokCliQuotaFrame.js`; Gemini CLI `packages/core/src/code_assist/types.ts`.
 
 ## References
 

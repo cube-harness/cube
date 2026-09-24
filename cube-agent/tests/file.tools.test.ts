@@ -1,0 +1,101 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promises as fs } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { createFileTools, resolveWorkspacePath } from "../src/tools/file.tools.js";
+
+test("file tools preserve bytes, reject stale approvals and never partially apply an invalid patch", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-files-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const files = createFileTools(root);
+  const call = (name: keyof typeof files.tools, input: unknown, id = "test") => files.tools[name].execute!(input as never, { agent: { toolCallId: id } } as never) as Promise<any>;
+  await writeFile(join(root, "a.txt"), "\uFEFFone\r\ntwo\r\n");
+  const args = { path: "a.txt", old_string: "one\ntwo", new_string: "one\nthree", replace_all: false };
+  const approve = files.tools.edit_file.transform!.display!.approval!;
+  const preview = await approve({ toolCallId: "edit", input: args } as never) as any;
+  assert.equal(files.hasPreview("edit"), true);
+  assert.equal(preview.preview.status, "proposed");
+  assert.match(preview.preview.changes[0].diff, /\+three/);
+  assert.equal(await readFile(join(root, "a.txt"), "utf8"), "\uFEFFone\r\ntwo\r\n");
+  await writeFile(join(root, "a.txt"), "external\r\n");
+  const stale = await call("edit_file", args, "edit");
+  assert.equal(stale.status, "failed");
+  assert.match(stale.summary, /changed since preparation/);
+  assert.equal(await readFile(join(root, "a.txt"), "utf8"), "external\r\n");
+  assert.equal(files.hasPreview("edit"), false);
+  await writeFile(join(root, "a.txt"), "\uFEFFone\r\ntwo\r\n");
+  const applied = await call("edit_file", args);
+  assert.equal(applied.status, "applied");
+  assert.equal(await readFile(join(root, "a.txt"), "utf8"), "\uFEFFone\r\nthree\r\n");
+  assert.equal((await call("write_file", { path: "a.txt", content: "bad" })).status, "failed");
+  assert.equal((await call("edit_file", { path: "a.txt", old_string: "", new_string: "bad" })).status, "failed");
+  assert.equal((await call("edit_file", { path: "new.txt", old_string: "", new_string: "created" })).status, "applied");
+  const patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n-one\n+changed\n*** Update File: missing.txt\n@@\n-no\n+yes\n*** End Patch";
+  assert.equal((await call("apply_patch", { patch })).status, "failed");
+  assert.equal(await readFile(join(root, "a.txt"), "utf8"), "\uFEFFone\r\nthree\r\n");
+  const move = await call("apply_patch", { patch: "*** Begin Patch\n*** Update File: a.txt\n*** Move to: nested/moved.txt\n@@\n-three\n+four\n*** Delete File: new.txt\n*** Add File: added.txt\n+hello\n*** End Patch" });
+  assert.equal(move.status, "applied");
+  assert.equal(await readFile(join(root, "nested/moved.txt"), "utf8"), "\uFEFFone\r\nfour\r\n");
+  await assert.rejects(readFile(join(root, "a.txt")));
+  assert.equal(await readFile(join(root, "added.txt"), "utf8"), "hello\n");
+  const large = await call("write_file", { path: "large.txt", content: "é".repeat(1024 * 1024 + 1) });
+  assert.equal(large.status, "failed");
+  await writeFile(join(root, "binary"), Buffer.from([0, 1, 255]));
+  assert.equal((await call("edit_file", { path: "binary", old_string: "x", new_string: "y" })).status, "failed");
+  const previewLarge = await files.tools.write_file.transform!.display!.approval!({ toolCallId: "large-preview", input: { path: "proposal.txt", content: "x".repeat(70_000) } } as never) as any;
+  assert.equal(previewLarge.preview.status, "failed");
+  assert.equal(files.hasPreview("large-preview"), false);
+  const competing = await Promise.all([1, 2].map((n) => call("write_file", { path: "race.txt", content: String(n) }, String(n))));
+  assert.deepEqual(competing.map((r) => r.status).sort(), ["applied", "failed"]);
+  const big = "x".repeat(1_500_000) + "\n";
+  for (const name of ["big1", "big2", "big3"]) await writeFile(join(root, name), big);
+  const overBudget = await call("apply_patch", { patch: "*** Begin Patch\n" + ["big1", "big2", "big3"].map((name) => `*** Update File: ${name}\n@@\n+tail\n`).join("") + "*** End Patch" });
+  assert.equal(overBudget.status, "failed");
+  assert.match(overBudget.summary, /8 MiB/);
+  assert.equal(await readFile(join(root, "big1"), "utf8"), big);
+  await writeFile(join(root, "replace.txt"), "x x");
+  assert.equal((await call("edit_file", { path: "replace.txt", old_string: "x", new_string: "y", replace_all: true })).status, "applied");
+  assert.equal(await readFile(join(root, "replace.txt"), "utf8"), "y y");
+  assert.equal((await call("write_file", { path: "replace.txt", content: "replaced", overwrite: true })).status, "applied");
+  assert.equal(await readFile(join(root, "replace.txt"), "utf8"), "replaced");
+});
+
+test("a failed source unlink reports the created move destination and untouched later files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-partial-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  await writeFile(join(root, "source.txt"), "before\n");
+  const original = fs.unlink;
+  const unlinkMock = t.mock.method(fs, "unlink", async (path: Parameters<typeof fs.unlink>[0]) => {
+    if (path === join(root, "source.txt")) throw new Error("Simulated source removal failure");
+    return original(path);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await createFileTools(root).tools.apply_patch.execute!({ patch: "*** Begin Patch\n*** Update File: source.txt\n*** Move to: destination.txt\n@@\n-before\n+after\n*** Add File: later.txt\n+later\n*** End Patch" }, {} as never) as any;
+    assert.equal(result.status, "partial");
+    assert.equal(result.changes[0].path, "destination.txt");
+    assert.equal(result.changes[0].operation, "add");
+    assert.equal(result.changes[0].status, "applied");
+    assert.equal(result.changes[0].added, 1);
+    assert.equal(result.changes[0].removed, 0);
+    assert.match(result.changes[0].error, /source still present/);
+    assert.equal(result.changes[1].status, "not_applied");
+    assert.equal(await readFile(join(root, "source.txt"), "utf8"), "before\n");
+    assert.equal(await readFile(join(root, "destination.txt"), "utf8"), "after\n");
+    await assert.rejects(readFile(join(root, "later.txt")));
+  } finally { unlinkMock.mock.restore(); syncBuiltinESMExports(); }
+});
+
+test("mutation path boundary rejects traversal, ADS and outside junctions", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "cube-boundary-"));
+  t.after(() => rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const root = join(parent, "workspace"), outside = join(parent, "outside");
+  await mkdir(root); await mkdir(outside);
+  await assert.rejects(resolveWorkspacePath(root, "../outside"), /outside/);
+  await assert.rejects(resolveWorkspacePath(root, "file:stream"), /stream/);
+  await symlink(outside, join(root, "link"), process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(resolveWorkspacePath(root, "link/secret.txt"), /outside/);
+});

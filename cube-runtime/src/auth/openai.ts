@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import http, { type Server } from "node:http";
 import { spawn } from "node:child_process";
 import { OpenAIOAuthCredentialSchema, type OpenAIOAuthCredential } from "@cube/workspace";
+import type { SubscriptionUsage } from "../types.js";
 
 export const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const OPENAI_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
@@ -11,6 +12,83 @@ export const OPENAI_SCOPE =
   "openid profile email offline_access api.connectors.read api.connectors.invoke";
 export const OPENAI_JWT_CLAIM_PATH = "https://api.openai.com/auth";
 export const OPENAI_CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+
+// Codex backend-client: client/rate_limit_resets.rs (ChatGptApi usage path).
+export const getOpenAISubscriptionUsage = async (
+  credential: OpenAIOAuthCredential,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  signal: AbortSignal = AbortSignal.timeout(5_000),
+): Promise<SubscriptionUsage> => {
+  const response = await fetchImpl("https://chatgpt.com/backend-api/wham/usage", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${credential.access_token}`,
+      "ChatGPT-Account-Id": credential.account_id,
+      "User-Agent": "codex-cli",
+      Accept: "application/json",
+    },
+    redirect: "error",
+    signal,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined);
+    const message = body?.error?.message ?? body?.detail ?? body?.message;
+    throw new Error(`OpenAI usage (HTTP ${response.status})${typeof message === "string" ? `: ${message}` : ""}`);
+  }
+
+  const object = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid OpenAI usage response.");
+    return value as Record<string, unknown>;
+  };
+  const number = (value: unknown): number | undefined => {
+    if (value == null) return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+      throw new Error("Invalid OpenAI usage window.");
+    return value;
+  };
+  const string = (value: unknown): string | undefined => {
+    if (value == null) return undefined;
+    if (typeof value !== "string") throw new Error("Invalid OpenAI usage label.");
+    return value.trim() || undefined;
+  };
+  const limit = (name: string, value: unknown): SubscriptionUsage["limits"][number] => {
+    const data = value == null ? {} : object(value);
+    for (const key of ["allowed", "limit_reached"]) {
+      if (data[key] != null && typeof data[key] !== "boolean")
+        throw new Error("Invalid OpenAI usage limit.");
+    }
+    return {
+      name,
+      allowed: data.allowed == null ? undefined : data.allowed as boolean,
+      limitReached: data.limit_reached == null ? undefined : data.limit_reached as boolean,
+      windows: (["primary_window", "secondary_window"] as const).flatMap((key) => {
+        if (data[key] == null) return [];
+        const window = object(data[key]);
+        const resetsAt = number(window.reset_at);
+        if (resetsAt !== undefined && !Number.isFinite(new Date(resetsAt * 1000).getTime()))
+          throw new Error("Invalid OpenAI usage reset time.");
+        return [{
+          name: key === "primary_window" ? "Primary" : "Secondary",
+          usedPercent: number(window.used_percent),
+          windowSeconds: number(window.limit_window_seconds),
+          resetsAt,
+        }];
+      }),
+    };
+  };
+  const payload = object(await response.json());
+  const additional = payload.additional_rate_limits ?? [];
+  if (!Array.isArray(additional)) throw new Error("Invalid OpenAI usage limits.");
+  return {
+    provider: "OpenAI",
+    plan: string(payload.plan_type),
+    limits: [limit("Codex", payload.rate_limit), ...additional.map((value) => {
+      const data = object(value);
+      return limit(string(data.limit_name) ?? string(data.metered_feature) ?? "Additional", data.rate_limit);
+    })],
+  };
+};
 
 export type OpenAIPkce = {
   verifier: string;

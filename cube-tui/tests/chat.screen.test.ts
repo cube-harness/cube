@@ -4,6 +4,65 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { RuntimeDisplayState } from "@cube/runtime";
 import { ChatScreen } from "../src/screens/chat.screen.js";
 import { renderUsageBoxToString } from "../src/components/usage-box.js";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+
+test("subscription status renders provider windows and keeps missing quota distinct from zero", () => {
+  const metrics = {
+    model: "openai/account-model", promptTokens: 42, completionTokens: 5, totalTokens: 47, threadId: "test",
+    subscription: { provider: "OpenAI", plan: "pro", limits: [
+      { name: "Codex", windows: [
+        { name: "Primary", usedPercent: 36, windowSeconds: 18000, resetsAt: 1800000000 },
+        { name: "Secondary", usedPercent: 100, windowSeconds: 604800, resetsAt: 1800604800 },
+      ] },
+      { name: "Account model", windows: [{ name: "Primary" }] },
+      { name: "Unavailable quota", windows: [] },
+    ] },
+  };
+  const text = stripTerminalSequences(renderUsageBoxToString(metrics));
+  assert.match(text, /5h limit\s+: \[█{13}░{7}\] 64% left/);
+  assert.match(text, /Weekly limit\s+: \[░{20}\] 0% left/);
+  const reset = new Date(1800000000 * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  assert.ok(text.includes(`(resets ${reset})`));
+  const weeklyDate = new Date(1800604800 * 1000);
+  const weeklyReset = weeklyDate.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) +
+    ` on ${weeklyDate.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" })}`;
+  assert.ok(text.split("\n").find(line => line.includes("Weekly limit"))?.includes(`(resets ${weeklyReset})`));
+  assert.match(text, /Primary limit\s+: No usage data/);
+  assert.match(text, /Quota\s+: No data/);
+  assert.match(text, /\(resets unknown\)/);
+  const rows = ["Thread ID", "Cache", "Context Window", "5h limit", "Weekly limit"];
+  assert.deepEqual([...rows].sort((a, b) => text.indexOf(a) - text.indexOf(b)), rows);
+  metrics.subscription.limits[0]!.windows[0]!.usedPercent = 0;
+  assert.match(stripTerminalSequences(renderUsageBoxToString(metrics)), /5h limit\s+: \[█{20}\] 100% left/);
+  assert.match(text, /unknown \(42 tokens used\)/);
+  for (const width of [40, 80, 120]) {
+    assert.ok(renderUsageBoxToString(metrics, width).split("\n").every(line => visibleWidth(line) <= width));
+  }
+  const google = stripTerminalSequences(renderUsageBoxToString({ ...metrics, subscription: {
+    provider: "Google", plan: "AI Pro", limits: [{ name: "gemini-test", windows: [{
+      name: "Requests", usedPercent: 35.9999999, resetsAt: 1800604800,
+    }] }],
+  } }, 120));
+  assert.match(google, /gemini-test/);
+  assert.match(google, /64% left/);
+  assert.ok(google.includes(`on ${weeklyDate.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" })}`));
+  const balance = stripTerminalSequences(renderUsageBoxToString({ ...metrics, subscription: {
+    provider: "xAI", limits: [{ name: "Prepaid balance", windows: [{ name: "Balance", remaining: 25, unit: "credits" }] }],
+  } }));
+  assert.match(balance, /Prepaid balance\s+: 25 credits left/);
+  assert.doesNotMatch(balance, /100% left|█/);
+  assert.doesNotMatch(balance, /resets unknown/);
+  const fullWeekly = stripTerminalSequences(renderUsageBoxToString({ ...metrics, subscription: {
+    provider: "xAI", limits: [
+      { name: "Grok Build", windows: [{ name: "Weekly", windowSeconds: 604800, usedPercent: 0, resetsAt: 1800604800 }] },
+      { name: "On-demand", windows: [{ name: "Credits", remaining: 0, unit: "credits", resetsAt: 1800604800 }] },
+    ],
+  } }));
+  assert.ok(fullWeekly.split("\n").find(line => line.includes("Weekly limit"))?.includes(`(resets ${weeklyReset})`));
+  assert.match(fullWeekly, /On-demand\s+: 0 credits left/);
+  assert.doesNotMatch(fullWeekly, /SuperGrok|Grok Build|Credits\s+:/);
+  assert.match(stripTerminalSequences(renderUsageBoxToString({ ...metrics, subscription: { provider: "Anthropic", limits: [] } })), /Quota\s+: No data/);
+});
 
 test("unknown model limits show token usage without invented capacity or percentage", () => {
   const rendered = renderUsageBoxToString({

@@ -1,9 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   ApprovalPicker,
   extractCommandPrefix,
 } from "../src/components/approval-picker.js";
+
+test("approval shows the proposed diff, strips terminal controls and refuses failed preparation", () => {
+  let decision: string | undefined;
+  const picker = new ApprovalPicker({ toolName: "edit_file", args: { preview: {
+    kind: "file_changes", status: "proposed", summary: "Proposed", changes: [{
+      path: "a.txt", operation: "update", diff: "@@ -1 +1 @@\n-before\n+after\x1b[2J", added: 1, removed: 1, status: "proposed", truncated: false,
+    }],
+  } }, onDecision: (value) => { decision = value; } });
+  const rows = picker.render(30);
+  assert.ok(rows.every((row) => visibleWidth(row) <= 30));
+  assert.match(rows.join("\n"), /-before/);
+  assert.match(rows.join("\n"), /\+after/);
+  assert.doesNotMatch(rows.join("\n"), /\x1b\[2J/);
+  const failed = new ApprovalPicker({ toolName: "edit_file", args: { preview: {
+    kind: "file_changes", status: "failed", summary: "File changed", changes: [],
+  } }, onDecision: (value) => { decision = value; } });
+  failed.handleInput("y");
+  assert.equal(decision, undefined);
+  failed.handleInput("\r");
+  assert.equal(decision, "decline");
+});
 
 test("ApprovalPicker approves the selected tool with Enter", () => {
   let decision: string | undefined;

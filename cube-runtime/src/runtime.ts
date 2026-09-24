@@ -1,4 +1,4 @@
-import type { Session } from "@cube/agent";
+import type { Session, InstructionInfo, CubeTools } from "@cube/agent";
 import type { MemoryService } from "./services/memory.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
@@ -15,6 +15,8 @@ import type {
 
 type CubeRuntimeDependencies = {
   session: Session;
+  tools?: Pick<CubeTools, "hasPreview" | "discardPreview">;
+  notices?: string[];
   prompt: PromptService;
   thread: ThreadService;
   model: ModelService;
@@ -24,6 +26,7 @@ type CubeRuntimeDependencies = {
   suggestions: SlashCommandSuggestion[];
   workspaceRoot: string;
   readHistory: () => Promise<string[]>;
+  readInstructionInfo: () => InstructionInfo;
   shutdownResources: () => Promise<void>;
 };
 
@@ -36,6 +39,8 @@ export class CubeRuntime {
   readonly gateway: GatewayService;
 
   private shutdownPromise?: Promise<void>;
+  private unsubscribeTools?: () => void;
+  private noticesDelivered = false;
 
   constructor(private readonly dependencies: CubeRuntimeDependencies) {
     this.prompt = dependencies.prompt;
@@ -44,6 +49,14 @@ export class CubeRuntime {
     this.preference = dependencies.preference;
     this.memory = dependencies.memory;
     this.gateway = dependencies.gateway;
+    if (dependencies.tools) {
+      this.unsubscribeTools = dependencies.session.subscribe((event) => {
+        if (event.type === "tool_end") dependencies.tools!.discardPreview(event.toolCallId);
+        if (event.type === "agent_end" && (event.reason === "aborted" || event.reason === "error" || (event.reason === "complete" && !dependencies.session.approval.isArmed()))) {
+          dependencies.tools!.discardPreview();
+        }
+      });
+    }
   }
 
   get suggestions(): SlashCommandSuggestion[] {
@@ -58,8 +71,17 @@ export class CubeRuntime {
     return this.dependencies.session.displayState.get();
   }
 
+  getInstructionInfo(): InstructionInfo {
+    return { ...this.dependencies.readInstructionInfo() };
+  }
+
   subscribe(listener: RuntimeEventListener): () => void {
-    return this.dependencies.session.subscribe(listener);
+    const unsubscribe = this.dependencies.session.subscribe(listener);
+    if (!this.noticesDelivered) {
+      this.noticesDelivered = true;
+      for (const message of this.dependencies.notices ?? []) listener({ type: "info", message });
+    }
+    return unsubscribe;
   }
 
   isApprovalPending(): boolean {
@@ -77,6 +99,14 @@ export class CubeRuntime {
   }
 
   respondToApproval(input: ToolApprovalResponse): void {
+    const { tools, session } = this.dependencies;
+    if (input.decision !== "decline" && tools && ["edit_file", "write_file", "apply_patch"].includes(input.toolName) && !tools.hasPreview(input.toolCallId)) {
+      const reason = "This file approval has no valid live preview. Request a fresh tool call before approving.";
+      session.respondToToolApproval({ decision: "decline", toolCallId: input.toolCallId, declineContext: { reason } });
+      tools.discardPreview(input.toolCallId);
+      throw new Error(reason);
+    }
+    if (input.decision === "decline") tools?.discardPreview(input.toolCallId);
     if (input.decision === "approve_prefix") {
       this.dependencies.session.grantTool(input.toolName);
     }
@@ -100,7 +130,9 @@ export class CubeRuntime {
   shutdown(): Promise<void> {
     this.shutdownPromise ??= (async () => {
       const session = this.dependencies.session;
-      if (session.run.isRunning()) session.abort();
+      this.unsubscribeTools?.();
+      this.dependencies.tools?.discardPreview();
+      if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) session.abort();
       if (session.thread.getId() !== null) {
         await session.thread.clearAndReleaseLock().catch(() => undefined);
       }

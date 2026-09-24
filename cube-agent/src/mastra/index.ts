@@ -16,3 +16,5 @@ const config = RunnableConfigSchema.parse(await ConfigStore(home).read());
 const composition = await createCubeMastra(home, workspace, config);
 
 export const mastra = composition.mastra;
+// Studio owns this exported instance; use the same tool cleanup as the CLI.
+mastra.shutdown = composition.shutdown;

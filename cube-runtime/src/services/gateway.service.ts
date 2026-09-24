@@ -4,8 +4,6 @@ import {
   GROK_BUILD_HEADERS,
   ANTHROPIC_BASE_URL,
   ANTHROPIC_OAUTH_HEADERS,
-  GOOGLE_CODE_ASSIST_BASE_URL,
-  GOOGLE_CODE_ASSIST_HEADERS,
   gatewayDescriptors,
   normalizeLMStudioBaseUrl,
   normalizeOllamaBaseUrl,
@@ -27,7 +25,10 @@ import {
   type AnthropicOAuthCredential,
   type GoogleOAuthCredential,
 } from "@cube/workspace";
-import type { OpenAILoginHandle } from "../auth/openai.js";
+import { getOpenAISubscriptionUsage, type OpenAILoginHandle } from "../auth/openai.js";
+import { getAnthropicSubscriptionUsage } from "../auth/anthropic.js";
+import { fetchGoogleModels, getGoogleSubscriptionUsage } from "../auth/google.js";
+import { getGrokSubscriptionUsage } from "../auth/grok.js";
 import type {
   AnthropicAuthManager,
   GoogleAuthManager,
@@ -42,6 +43,7 @@ import type {
   GatewaySelection,
   GatewayState,
   ModelSelection,
+  SubscriptionUsage,
 } from "../types.js";
 
 type UpdatingStore<T> = {
@@ -159,6 +161,52 @@ export class GatewayService {
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.fetchImpl = dependencies.fetch ?? globalThis.fetch;
     this.requestTimeoutMs = dependencies.requestTimeoutMs ?? 5_000;
+  }
+
+  async getSubscriptionUsage(): Promise<SubscriptionUsage | undefined> {
+    const config = await this.dependencies.config.read();
+    const gatewayId = config.gateway;
+    let account: CubeAuth["oauth"];
+    let readUsage: () => Promise<SubscriptionUsage>;
+    // Keep each reader paired with the credential returned by its refresh manager.
+    const fetchUsage = this.fetchImpl;
+    switch (gatewayId) {
+      case "oauth/openai": {
+        const credential = await this.dependencies.openAIAuth?.getValidCredential?.();
+        if (!credential) throw new Error("OpenAI OAuth is not configured. Run /gateway to sign in.");
+        account = { openai: credential };
+        readUsage = () => getOpenAISubscriptionUsage(credential, fetchUsage, AbortSignal.timeout(this.requestTimeoutMs));
+        break;
+      }
+      case "oauth/anthropic": {
+        const credential = await this.dependencies.anthropicAuth?.getValidCredential();
+        if (!credential) throw new Error("Anthropic OAuth is not configured. Run /gateway to sign in.");
+        account = { anthropic: credential };
+        readUsage = () => getAnthropicSubscriptionUsage(credential, fetchUsage, AbortSignal.timeout(this.requestTimeoutMs));
+        break;
+      }
+      case "oauth/google": {
+        const credential = await this.dependencies.googleAuth?.getValidCredential();
+        if (!credential) throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
+        account = { google: credential };
+        readUsage = () => getGoogleSubscriptionUsage(credential, fetchUsage, AbortSignal.timeout(this.requestTimeoutMs));
+        break;
+      }
+      case "oauth/xai": {
+        const credential = await this.dependencies.grokAuth?.getValidCredential();
+        if (!credential) throw new Error("xAI OAuth is not configured. Run /gateway to sign in.");
+        account = { xai: credential };
+        readUsage = () => getGrokSubscriptionUsage(credential, fetchUsage, AbortSignal.timeout(this.requestTimeoutMs));
+        break;
+      }
+      default: return undefined;
+    }
+    const sourceKey = ModelManager.sourceKey(gatewayId, { config, auth: { api_keys: {}, oauth: account } });
+    const usage = await readUsage();
+    if ((await this.dependencies.config.read()).gateway !== gatewayId ||
+        !sourceKey || sourceKey !== await this.sourceKey(gatewayId))
+      throw new Error("Gateway or account changed. Run /status again.");
+    return usage;
   }
 
   async readiness(): Promise<GatewayReadiness> {
@@ -519,7 +567,10 @@ export class GatewayService {
     const sourceKey = ModelManager.sourceKey(gatewayId, { auth, config });
     if (candidate.kind === "stored") {
       const cached = await this.dependencies.catalog.getCatalog(gatewayId);
-      if (cached) return cached;
+      // Refresh incomplete OpenAI metadata; an empty map means the provider supplied no descriptions.
+      if (cached && !(gatewayId === "oauth/openai" && cached.providers.openai?.models.some(
+        model => model.reasoning_efforts?.length && model.reasoning_effort_descriptions === undefined,
+      ))) return cached;
     }
     let canonicalModelIds: string[] | undefined;
     let available: CatalogModel[] | undefined;
@@ -560,13 +611,18 @@ export class GatewayService {
       const rows = (payload as { models: Array<Record<string, unknown>> }).models;
       available = ids.map((id) => {
         const row = rows.find((item) => item.slug === id)!;
+        const descriptions: Array<[string, string]> = [];
         const efforts = Array.isArray(row.supported_reasoning_levels)
           ? row.supported_reasoning_levels.flatMap((value) => {
               const effort =
                 typeof value === "object" && value !== null
                   ? (value as Record<string, unknown>).effort
                   : value;
-              return typeof effort === "string" ? [effort] : [];
+              if (typeof effort !== "string") return [];
+              const description = typeof value === "object" && value !== null
+                ? (value as Record<string, unknown>).description : undefined;
+              if (typeof description === "string") descriptions.push([effort, description]);
+              return [effort];
             })
           : undefined;
         return {
@@ -576,6 +632,7 @@ export class GatewayService {
             ? { limit: { context: row.context_window } }
             : {}),
           ...(efforts ? { reasoning_efforts: efforts } : {}),
+          reasoning_effort_descriptions: Object.fromEntries(descriptions),
           ...(Array.isArray(row.input_modalities) &&
           row.input_modalities.every((value) => typeof value === "string")
             ? { modalities: { input: row.input_modalities as string[] } }
@@ -589,34 +646,17 @@ export class GatewayService {
           : auth.oauth.google;
       if (!credential || credential.expires_at <= Date.now())
         throw new Error("Google session is unavailable or expired. Run /gateway to sign in.");
-      const payload = await this.fetchJson(
-        `${GOOGLE_CODE_ASSIST_BASE_URL}:retrieveUserQuota`,
-        {
-          method: "POST",
-          headers: {
-            ...GOOGLE_CODE_ASSIST_HEADERS,
-            "content-type": "application/json",
-            authorization: `Bearer ${credential.access_token}`,
-          },
-          body: JSON.stringify({ project: credential.project_id }),
-        },
-        "Google OAuth",
-        signal,
-      );
-      // Quota buckets identify account models, not capabilities. Keep models with exhausted quota visible.
-      const buckets = (payload as { buckets?: Array<{ modelId?: unknown }> } | null)?.buckets;
-      if (!Array.isArray(buckets))
-        throw new Error("Google did not return an account model catalog.");
-      canonicalModelIds = [
-        ...new Set(
-          buckets.flatMap((bucket) =>
-            typeof bucket?.modelId === "string" && bucket.modelId.trim()
-              ? [`google/${bucket.modelId.replace(/^models\//, "")}`]
-              : [],
-          ),
-        ),
-      ];
-      if (!canonicalModelIds.length)
+      const timeout = AbortSignal.timeout(this.requestTimeoutMs);
+      const models = await fetchGoogleModels(credential, this.fetchImpl,
+        signal ? AbortSignal.any([signal, timeout]) : timeout);
+      // Provider metadata overrides exact models.dev matches; missing capabilities stay unknown.
+      available = models.map(([id, model]) => ({
+        modelId: `google/${id}`, name: model.displayName || id,
+        ...(model.supportsThinking === undefined ? {} : { reasoning: model.supportsThinking }),
+        ...(model.supportsImages === undefined ? {} : { attachment: model.supportsImages }),
+        ...(model.maxOutputTokens === undefined ? {} : { limit: { output: model.maxOutputTokens } }),
+      }));
+      if (!available.length)
         throw new Error("Google did not return any models for this account.");
     } else if (gatewayId === "oauth/anthropic") {
       const credential =

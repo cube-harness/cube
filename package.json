@@ -5,6 +5,7 @@
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
   "type": "module",
   "scripts": {
+    "package:windows": "node scripts/build-binary.mjs",
     "bench:internal": "tsx benchmarks/internal-latency.ts",
     "dev": "pnpm --filter @cube/tui dev",
     "dev:factory": "pnpm --filter @cube/factory-ui dev",

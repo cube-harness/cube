@@ -95,7 +95,7 @@ export class GoogleAuthManager {
     if (!current) throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
     if (current.expires_at > (this.options.now ?? Date.now)() + 5 * 60_000) return current;
     const refreshed = await refreshGoogleCredential(current, this.options);
-    const saved = await this.store.update(auth => {
+    const saved = await this.store.update((auth) => {
       if (JSON.stringify(auth.oauth.google) !== JSON.stringify(current))
         throw new Error("Google credential changed. Run /gateway again.");
       return { ...auth, oauth: { ...auth.oauth, google: refreshed } };

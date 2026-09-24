@@ -143,7 +143,27 @@ export type PreferenceState = {
   statusLine: string[];
 };
 
+export type SubscriptionUsage = {
+  provider: string;
+  plan?: string;
+  notice?: string;
+  limits: {
+    name: string;
+    allowed?: boolean;
+    limitReached?: boolean;
+    windows: {
+      name: string;
+      usedPercent?: number;
+      remaining?: number;
+      unit?: string;
+      windowSeconds?: number;
+      resetsAt?: number;
+    }[];
+  }[];
+};
+
 export type UsageMetrics = {
+  subscription?: SubscriptionUsage;
   model: string;
   reasoningEffort?: string;
   capabilities: string[];
@@ -188,7 +208,7 @@ export type PromptResult =
   | { kind: "thread-reset" }
   | { kind: "preferences"; request: PreferenceRequest }
   | { kind: "preference"; preference: PreferenceState }
-  | { kind: "usage"; metrics: UsageMetrics }
+  | { kind: "usage"; metrics: UsageMetrics; notice?: RuntimeNotice }
   | { kind: "command-catalog"; commands: SlashCommandSuggestion[] }
   | { kind: "copy-content"; content: string }
   | { kind: "exit-requested" };

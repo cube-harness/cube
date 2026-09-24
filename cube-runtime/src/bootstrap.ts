@@ -3,7 +3,7 @@ import {
   createCubeGateways,
   configureCubePermissions,
   finalizeCubeAgentMemory,
-  reloadCubeAgentSoul,
+  reloadCubeAgentInstructions,
   runWithCubeLogContext,
   updateCubeAgentModel,
   toMastraRouterId,
@@ -24,13 +24,18 @@ import {
 import { CubeRuntime } from "./runtime.js";
 import { slashCommandSuggestions, type SlashCommandContext } from "./slash-commands.js";
 import { MemoryService } from "./services/memory.service.js";
-import { AnthropicAuthManager, GoogleAuthManager, GrokAuthManager, OpenAIAuthManager } from "./auth/auth-manager.js";
+import {
+  AnthropicAuthManager,
+  GoogleAuthManager,
+  GrokAuthManager,
+  OpenAIAuthManager,
+} from "./auth/auth-manager.js";
 import { GatewayService, type GatewayServiceDependencies } from "./services/gateway.service.js";
 import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ThreadService } from "./services/thread.service.js";
-import type { GatewayReadiness, PreferenceState, SlashCommandSuggestion } from "./types.js";
+import type { GatewayReadiness, ModelSelection, PreferenceState, SlashCommandSuggestion } from "./types.js";
 
 export type CreateCubeRuntimeOptions = {
   workspacePath?: string;
@@ -134,7 +139,12 @@ export const prepareCubeRuntime = async (
       try {
         const gateways = createCubeGateways({
           auth: authStore,
-          oauth: { openai: openAIAuth, xai: grokAuth, anthropic: anthropicAuth, google: googleAuth },
+          oauth: {
+            openai: openAIAuth,
+            xai: grokAuth,
+            anthropic: anthropicAuth,
+            google: googleAuth,
+          },
           gatewayOptions: config.gateway_options,
           fetch: options.fetch,
         });
@@ -145,22 +155,38 @@ export const prepareCubeRuntime = async (
         });
 
         gatewayDependencies.onActiveCredentialRemoved = async () => {
-          while (session.followUps.dequeue()) { /* Drop prompts queued for the removed credential. */ }
+          while (session.followUps.dequeue()) {
+            /* Drop prompts queued for the removed credential. */
+          }
           await session.abort();
         };
-        await configureCubePermissions(session, config.permissions);
+        const permissionNotices = await configureCubePermissions(session, config.permissions);
         await normalizeStartupSession(session);
 
-        const thread = new ThreadService(session, async () => {
-          await reloadCubeAgentSoul(composition!.agent, home);
+        const thread = new ThreadService(session, {
+          read: composition.agent.readInstructions,
+          install: composition.agent.installInstructions,
+          refresh: composition.agent.refreshInstructions,
+          reload: (includeDiscovered) => reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
         });
+        composition.agent.onInstructionsDiscovered = async (snapshot) => {
+          if (thread.current()) await thread.saveInstructions(snapshot);
+        };
         let model!: ModelService;
+        let liveModelId = toMastraRouterId(config.gateway, config.model);
+        let liveEffort = config.model_config.reasoning_effort;
+        const applyLiveModel = (modelId: string, selection: ModelSelection) => {
+          // Rollback of a rejected switch is a no-op, even during an active turn.
+          if (modelId === liveModelId && selection.reasoningEffort === liveEffort) return;
+          if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) {
+            throw new Error("Finish or cancel the current turn before changing the model or gateway.");
+          }
+          updateCubeAgentModel(composition!.agent, modelId, selection.reasoningEffort);
+          liveModelId = modelId;
+          liveEffort = selection.reasoningEffort;
+        };
         gatewayDependencies.applyLiveSelection = (gatewayId, selection) => {
-          updateCubeAgentModel(
-            composition!.agent,
-            toMastraRouterId(gatewayId, selection.modelId),
-            selection.reasoningEffort,
-          );
+          applyLiveModel(toMastraRouterId(gatewayId, selection.modelId), selection);
           model.adopt(selection);
         };
         model = new ModelService(
@@ -172,11 +198,7 @@ export const prepareCubeRuntime = async (
           },
           async (selection) => {
             const current = RunnableConfigSchema.parse(await configStore.read());
-            updateCubeAgentModel(
-              composition!.agent,
-              toMastraRouterId(current.gateway, selection.modelId),
-              selection.reasoningEffort,
-            );
+            applyLiveModel(toMastraRouterId(current.gateway, selection.modelId), selection);
           },
           gateway,
         );
@@ -202,6 +224,8 @@ export const prepareCubeRuntime = async (
 
         return new CubeRuntime({
           session,
+          tools: composition.tools,
+          notices: permissionNotices,
           prompt,
           thread,
           model,
@@ -210,6 +234,7 @@ export const prepareCubeRuntime = async (
           gateway,
           suggestions: slashCommandSuggestions,
           workspaceRoot: workspacePaths.root,
+          readInstructionInfo: () => composition!.agent.instructionInfo,
           readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
           shutdownResources: () => composition!.shutdown(),
         });

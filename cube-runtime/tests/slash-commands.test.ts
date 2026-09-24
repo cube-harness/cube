@@ -128,6 +128,10 @@ const createContext = () => {
       },
     },
     gateway: {
+      getSubscriptionUsage: async () => {
+        calls.push(["gateway.getSubscriptionUsage"]);
+        return undefined;
+      },
       readiness: async () => {
         calls.push(["gateway.readiness"]);
         return {
@@ -246,7 +250,34 @@ test("slash command router delegates thread and model use cases", async () => {
       },
     ],
     ["model.getUsage"],
+    ["gateway.getSubscriptionUsage"],
   ]);
+});
+
+test("status and usage include subscription limits and preserve session status on quota errors", async () => {
+  const { context } = createContext();
+  const subscription = { provider: "OpenAI", plan: "pro", limits: [] };
+  context.gateway.getSubscriptionUsage = async () => subscription;
+  for (const command of ["/status", "/usage"] as const) {
+    const result = await executeSlashCommand(command, "", context);
+    assert.equal(result.kind, "usage");
+    if (result.kind !== "usage") assert.fail("Expected usage");
+    assert.deepEqual(result.metrics.subscription, subscription);
+    assert.equal(result.metrics.promptTokens, 1);
+  }
+  context.gateway.getSubscriptionUsage = async () => ({ ...subscription, notice: "Anthropic profile (HTTP 403): unavailable" });
+  const partial = await executeSlashCommand("/status", "", context);
+  assert.equal(partial.kind, "usage");
+  if (partial.kind !== "usage") assert.fail("Expected usage");
+  assert.equal(partial.metrics.subscription?.plan, "pro");
+  assert.match(partial.notice?.message ?? "", /Anthropic profile.*403/);
+  context.gateway.getSubscriptionUsage = async () => { throw new Error("OpenAI usage (HTTP 429): retry later"); };
+  const result = await executeSlashCommand("/status", "", context);
+  assert.equal(result.kind, "usage");
+  if (result.kind !== "usage") assert.fail("Expected usage");
+  assert.equal(result.metrics.promptTokens, 1);
+  assert.equal(result.metrics.subscription, undefined);
+  assert.deepEqual(result.notice, { level: "error", message: "OpenAI usage (HTTP 429): retry later" });
 });
 
 test("model command cannot select a model from another gateway", async () => {

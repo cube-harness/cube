@@ -9,6 +9,7 @@ import type {
   ToolApprovalResponse,
 } from "@cube/runtime";
 import { CubeApp, startPreparedCube } from "../src/app.js";
+import { PromptService } from "../../cube-runtime/src/services/prompt.service.js";
 import type { ChatScreen } from "../src/screens/chat.screen.js";
 
 const displayState = (text: string, queuedFollowUps = 0) => ({
@@ -142,6 +143,7 @@ const createRuntime = (initial = displayState("initial")) => {
     suggestions: [],
     workspaceRoot: "D:\\cube",
     getDisplayState: () => initial,
+    getInstructionInfo: () => ({ soulCharacters: 6837, agentsFiles: 2, agentsCharacters: 4120 }),
     isApprovalPending: () => approvalPending,
     subscribe: (value: RuntimeEventListener) => {
       listener = value;
@@ -195,6 +197,12 @@ test("CubeApp forwards every native display snapshot without a second queue", ()
       }).parts[0]?.text
     );
   assert.deepEqual(rendered, ["one", "two"]);
+  assert.ok(calls.some(([name, value]) => name === "setInfo" &&
+    (value as any).soul === "Loaded · 6,837 chars" &&
+    (value as any).agentMd === "Loaded · 2 files · 4,120 chars"));
+  runtime.getInstructionInfo = () => ({ soulCharacters: 10, agentsFiles: 0, agentsCharacters: 0 });
+  app.handleRuntimeEvent({ type: "display_state_changed", displayState: displayState("next") } as never);
+  assert.ok(calls.some(([name, value]) => name === "setInfo" && (value as any).agentMd === "None"));
 });
 
 test("CubeApp maps domain results to client interactions without raw Session access", async () => {
@@ -232,6 +240,10 @@ test("CubeApp maps domain results to client interactions without raw Session acc
   });
   await app.handlePromptResult({ kind: "thread", snapshot });
   await app.handlePromptResult({ kind: "thread-reset" });
+  const metrics = { model: "openai/test", capabilities: [], promptTokens: 1, completionTokens: 0, cachedTokens: 0, totalTokens: 1, threadId: "test" };
+  const notice = { level: "error" as const, message: "OpenAI usage (HTTP 429): retry later" };
+  await app.handlePromptResult({ kind: "usage", metrics, notice });
+  assert.deepEqual(calls.slice(-2), [["showUsage", metrics], ["showNotice", notice]]);
   await app.handlePromptResult({
     kind: "preference",
     preference: {
@@ -388,10 +400,12 @@ test("CubeApp renders submitted user input before runtime submission settles", a
   let resolveSubmit: ((result: PromptResult) => void) | undefined;
   const idle = { ...displayState("idle"), isRunning: false } as RuntimeDisplayState;
   const { runtime } = createRuntime(idle);
-  runtime.prompt.submit = () =>
-    new Promise<PromptResult>((resolve) => {
+  runtime.prompt.submit = (_content, onDispatch) => {
+    onDispatch?.(false);
+    return new Promise<PromptResult>((resolve) => {
       resolveSubmit = resolve;
     });
+  };
   const { screen, calls } = createScreen();
   const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
 
@@ -693,16 +707,66 @@ test("CubeApp renders an upstream runtime error as one readable system notice", 
   );
 });
 
+test("CubeApp displays a prompt sent after the previous turn ends during history persistence", async () => {
+  let state = displayState("previous reply");
+  const { runtime } = createRuntime(state);
+  const { screen, queued, calls } = createScreen();
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+  let releaseHistory!: () => void;
+  let historyStarted!: () => void;
+  const history = new Promise<void>((resolve) => { releaseHistory = resolve; });
+  const entered = new Promise<void>((resolve) => { historyStarted = resolve; });
+  let submissions = 0;
+  const promptService = new PromptService(
+    {} as never,
+    {
+      run: { isRunning: () => state.isRunning },
+      followUp: async () => {
+        submissions++;
+        assert.equal(state.isRunning, false);
+        state = {
+          ...displayState("reply to ok"),
+          isRunning: false,
+        };
+        app.handleRuntimeEvent({ type: "display_state_changed", displayState: state });
+      },
+    } as never,
+    { ensureForPrompt: async () => "thread-1" } as never,
+    { gateway: { readiness: async () => ({ ready: true }) } } as never,
+    (callback) => callback(),
+    async () => { historyStarted(); await history; },
+  );
+  runtime.prompt.submit = promptService.submit.bind(promptService);
+
+  const pending = app.submitPrompt("ok");
+  await entered;
+  state = { ...state, isRunning: false };
+  app.handleRuntimeEvent({ type: "display_state_changed", displayState: state });
+  releaseHistory();
+  await pending;
+
+  assert.equal(submissions, 1);
+  assert.deepEqual(queued, []);
+  assert.deepEqual(calls.filter(([name]) => name === "addUserMessage"), [["addUserMessage", "ok"]]);
+  assert.deepEqual(calls.filter(([name]) => name === "renderDisplayState").at(-1), ["renderDisplayState", state, false]);
+});
+
 test("CubeApp cancels queued prompts newest first before interrupting the active turn", async () => {
   const running = displayState("running");
   const { runtime, calls } = createRuntime(running);
   const nativeQueue: string[] = [];
-  runtime.prompt.submit = async (content) => {
+  runtime.prompt.submit = async (content, onDispatch) => {
+    onDispatch?.(true);
     nativeQueue.push(content);
+    app.handleRuntimeEvent({ type: "display_state_changed", displayState: displayState("running", nativeQueue.length) });
     return { kind: "submitted" };
   };
-  runtime.prompt.cancelLatestQueued = () => nativeQueue.pop() ?? null;
-  const { screen, queued } = createScreen();
+  runtime.prompt.cancelLatestQueued = () => {
+    const cancelled = nativeQueue.pop() ?? null;
+    if (cancelled !== null) app.handleRuntimeEvent({ type: "display_state_changed", displayState: displayState("running", nativeQueue.length) });
+    return cancelled;
+  };
+  const { screen, queued, calls: screenCalls } = createScreen();
   const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
 
   await app.submitPrompt("first");
@@ -710,6 +774,7 @@ test("CubeApp cancels queued prompts newest first before interrupting the active
   assert.deepEqual(queued, ["first", "second"]);
   assert.equal(app.handleInterrupt(), true);
   assert.deepEqual(queued, ["first"]);
+  assert.equal(screenCalls.some(([name]) => name === "addUserMessage"), false);
   assert.equal(app.handleInterrupt(), true);
   assert.deepEqual(queued, []);
   assert.equal(calls.some((call) => call[0] === "interrupt"), false);

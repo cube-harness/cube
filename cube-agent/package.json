@@ -2,6 +2,7 @@
   "name": "@cube/agent",
   "version": "1.0.0",
   "type": "module",
+  "files": ["dist"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -29,6 +30,7 @@
     "@mastra/memory": "1.28.1",
     "@mastra/observability": "1.17.4",
     "ai": "6.0.241",
+    "diff": "8.0.4",
     "eventsource-parser": "3.1.0",
     "ollama-ai-provider-v2": "^3.6.0",
     "zod": "4.4.3"

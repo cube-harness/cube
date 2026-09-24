@@ -6,6 +6,28 @@ import { MessageList } from "../src/components/message-list.js";
 import { appTheme } from "../src/themes/app.theme.js";
 import { createMarkdownTheme } from "../src/themes/pi-tui.theme.js";
 
+test("stored mutation diffs and command reasons render identically live and after restore", () => {
+  const tool = {
+    toolCallId: "edit", toolName: "edit_file", state: "result", args: { path: "文件.txt" },
+    result: { kind: "file_changes", status: "applied", summary: "Changed", changes: [{
+      path: "文件.txt", operation: "update", diff: "@@ -1 +1 @@\n-before\n+after\x1b[2J", added: 1, removed: 1, status: "applied", truncated: false,
+    }] },
+  };
+  const message = { id: "message", role: "assistant", content: { parts: [{ type: "tool-invocation", toolInvocation: tool }] } };
+  const live = new MessageList(), restored = new MessageList();
+  live.applySessionMessage(message, false);
+  restored.setSessionMessages([message]);
+  assert.deepEqual(restored.render(28), live.render(28));
+  assert.ok(restored.render(28).every((row) => visibleWidth(row) <= 28));
+  assert.match(restored.render(28).join("\n"), /\+after/);
+  assert.doesNotMatch(restored.render(28).join("\n"), /\x1b\[2J/);
+  restored.upsertTool({ id: "cmd", name: "execute_command", args: { command: "echo ok" }, status: "completed", result: {
+    kind: "command", command: "echo ok", reason: "Verify change", cwd: "D:/project", process_id: "owned", status: "completed", output: "one\ntwo\nthree", exit_code: 0, truncated: false,
+  } });
+  assert.match(restored.render(80).join("\n"), /Reason: Verify change/);
+  assert.match(restored.render(80).join("\n"), /Directory: D:\/project/);
+});
+
 test("renders streaming assistant text literally and final Markdown once", () => {
   const list = new MessageList();
 
@@ -153,7 +175,7 @@ test("tool output shows two lines and Ctrl+T expands every transcript", () => {
   const collapsed = list.render(100).join("\n");
   assert.match(collapsed, /line 2/);
   assert.doesNotMatch(collapsed, /line 3/);
-  assert.match(collapsed, /… \+118 lines \(Ctrl\+T to view transcript\)/);
+  assert.match(collapsed, /… \+118 lines \(Ctrl\+T to view transcript\)/i);
   assert.doesNotMatch(collapsed, /line 100/);
   assert.doesNotMatch(collapsed, /```json|Completed\.|Running\.\.\.|Reading input/);
 
@@ -260,7 +282,7 @@ test("tool output collapses by rendered terminal rows even when JSON contains on
 
   const collapsed = list.render(50).join("\n");
   assert.match(collapsed, /server:GOOGLE_SEARCH_WEB/);
-  assert.match(collapsed, /… \+\d+ lines \(Ctrl\+T to view transcript\)/);
+  assert.match(collapsed, /… \+\d+ lines \(Ctrl\+T to view transcript\)/i);
   assert.doesNotMatch(collapsed, /selector-29/);
 
   list.toggleTranscript();

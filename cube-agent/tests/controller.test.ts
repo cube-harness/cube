@@ -6,26 +6,27 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core";
 import { LibSQLStore } from "@mastra/libsql";
-import type { WorkspaceManager } from "@cube/workspace";
+import { CubeHome, CubeWorkspace, RunnableConfigSchema, createBootstrap, ConfigStore } from "@cube/workspace";
 import { createCubeController } from "../src/agents/controller.js";
 import { cubeAskUserTool } from "../src/tools/ask-user.tool.js";
 
 test("registered Controller inherits the single storage owned by Mastra", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cube-controller-test-"));
+  const home = CubeHome({ cubeHome: path.join(root, ".cube") });
+  await createBootstrap(home).run();
   const agent = new Agent({
     id: "cube-agent",
     name: "Cube Agent",
     instructions: "Test agent",
     model: "openai/gpt-4o-mini",
   });
-  const workspace = {
-    getPaths: async () => ({ root }),
-  } as unknown as WorkspaceManager;
+  const workspace = CubeWorkspace(home, root);
   const storage = new LibSQLStore({ id: "cube-storage", url: ":memory:" });
   let mastra: Mastra | undefined;
 
   try {
-    const controller = await createCubeController(agent, workspace);
+    const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/openai", model: "openai/gpt-4o-mini" });
+    const controller = await createCubeController(home, workspace, config, agent);
     mastra = new Mastra({
       storage,
       agentControllers: { cubeController: controller },

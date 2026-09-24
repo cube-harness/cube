@@ -8,25 +8,29 @@ export const resolveCubeToolCategory = (_toolName: string): ToolCategory =>
 export const configureCubePermissions = async (
   session: Session,
   permissions: CubeConfig["permissions"],
-): Promise<void> => {
+): Promise<string[]> => {
   await session.permissions.setForCategory({
     category: "other",
     policy: "allow",
   });
 
-  for (const configuredName of permissions.require_approval_for) {
-    const exposedName = configuredName.startsWith("mastra_workspace_")
-      ? configuredName
-      : `mastra_workspace_${configuredName}`;
+  const mutations = ["edit_file", "write_file", "apply_patch"];
+  const names = new Set(permissions.require_approval_for);
+  const retired = [...names].filter((name) => name.startsWith("mastra_workspace_") || ["list_file", "create_file", "delete_file", "file_stat"].includes(name));
+  if (mutations.some((name) => names.has(name))) mutations.forEach((name) => names.add(name));
+  // config.yaml owns these rules. Clear a previous fail-closed block after correction.
+  for (const toolName of [...mutations, "execute_command"]) {
+    if (!names.has(toolName)) await session.permissions.setForTool({ toolName, policy: "allow" });
+  }
+  for (const configuredName of names) {
     await session.permissions.setForTool({
       toolName: configuredName,
       policy: "ask",
     });
-    if (exposedName !== configuredName) {
-      await session.permissions.setForTool({
-        toolName: exposedName,
-        policy: "ask",
-      });
-    }
   }
+  if (!retired.length) return [];
+  for (const toolName of [...mutations, "execute_command"]) {
+    await session.permissions.setForTool({ toolName, policy: "deny" });
+  }
+  return [`Unknown retired tool names in permissions.require_approval_for: ${retired.join(", ")}. File mutations and commands are blocked. Update config.yaml to current tool names and restart Cube.`];
 };

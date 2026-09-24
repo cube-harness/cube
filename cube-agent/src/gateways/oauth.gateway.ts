@@ -15,9 +15,12 @@ export const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 export const GROK_BUILD_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 export const GOOGLE_CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com/v1internal";
-export const GOOGLE_CODE_ASSIST_HEADERS = {
-  "user-agent": "GeminiCLI/0.34.0",
-  "x-goog-api-client": "google-genai-sdk/1.41.0 gl-node/v22.19.0",
+export const ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal";
+export const ANTIGRAVITY_HEADERS = {
+  "user-agent": "antigravity/ide/2.11.0 darwin/arm64",
+  "x-client-name": "antigravity",
+  "x-client-version": "2.11.0",
+  "x-request-source": "local",
 };
 // Experimental subscription compatibility; isolated from the native API-key gateway.
 export const ANTHROPIC_OAUTH_HEADERS = {
@@ -50,7 +53,7 @@ export class OAuthGateway implements MastraModelGatewayInterface {
         ["openai", "OpenAI", OPENAI_CODEX_BASE_URL],
         ["xai", "xAI", GROK_BUILD_BASE_URL],
         ["anthropic", "Anthropic", ANTHROPIC_BASE_URL],
-        ["google", "Google", GOOGLE_CODE_ASSIST_BASE_URL],
+        ["google", "Google (Antigravity)", ANTIGRAVITY_BASE_URL],
       ] as const
     ).map(([provider, name, url]) => [
       provider,
@@ -59,7 +62,12 @@ export class OAuthGateway implements MastraModelGatewayInterface {
         url,
         apiKeyEnvVar: [],
         gateway: this.id,
-        npm: provider === "google" ? "@ai-sdk/google" : provider === "anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai",
+        npm:
+          provider === "google"
+            ? "@ai-sdk/google"
+            : provider === "anthropic"
+              ? "@ai-sdk/anthropic"
+              : "@ai-sdk/openai",
         models: [],
       },
     ]),
@@ -84,8 +92,12 @@ export class OAuthGateway implements MastraModelGatewayInterface {
       if (!this.credentials.google)
         throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
       const credential = await this.credentials.google.getValidCredential();
-      return { bearerToken: credential.access_token, apiKey: credential.access_token,
-        headers: { ...GOOGLE_CODE_ASSIST_HEADERS }, source: "gateway" };
+      return {
+        bearerToken: credential.access_token,
+        apiKey: credential.access_token,
+        headers: { ...ANTIGRAVITY_HEADERS },
+        source: "gateway",
+      };
     }
     if (request.providerId === "anthropic") {
       if (!this.credentials.anthropic)
@@ -134,10 +146,13 @@ export class OAuthGateway implements MastraModelGatewayInterface {
     const provider = this.providers[args.providerId];
     if (!provider) throw new Error("Unsupported OAuth provider.");
     if (args.providerId === "google") {
-      // Keep the native SDK's tools/thought signatures/usage. Only adapt the Code Assist envelope.
+      // Keep the native SDK's tools/thought signatures/usage. Only adapt the Antigravity envelope.
+      const sessionId = crypto.randomUUID();
+      const trajectoryId = crypto.randomUUID();
+      let step = 0;
       return createGoogleGenerativeAI({
         apiKey: args.apiKey,
-        baseURL: GOOGLE_CODE_ASSIST_BASE_URL,
+        baseURL: ANTIGRAVITY_BASE_URL,
         fetch: async (input, init) => {
           if (!this.credentials.google)
             throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
@@ -147,38 +162,55 @@ export class OAuthGateway implements MastraModelGatewayInterface {
           const headers = new Headers(init?.headers);
           headers.delete("x-goog-api-key");
           headers.set("authorization", `Bearer ${credential.access_token}`);
-          for (const [name, value] of Object.entries(GOOGLE_CODE_ASSIST_HEADERS)) headers.set(name, value);
+          for (const [name, value] of Object.entries(ANTIGRAVITY_HEADERS)) headers.set(name, value);
           const response = await this.fetchImpl(
-            `${GOOGLE_CODE_ASSIST_BASE_URL}:${stream ? "streamGenerateContent?alt=sse" : "generateContent"}`,
-            { ...init, headers, redirect: "error", body: JSON.stringify({
-              project: credential.project_id, model: args.modelId,
-              user_prompt_id: crypto.randomUUID(), request: JSON.parse(String(init?.body)),
-            }) },
+            `${ANTIGRAVITY_BASE_URL}:${stream ? "streamGenerateContent?alt=sse" : "generateContent"}`,
+            {
+              ...init,
+              headers,
+              redirect: "error",
+              body: JSON.stringify({
+                project: credential.project_id,
+                model: args.modelId,
+                userAgent: "antigravity",
+                requestType: "agent",
+                requestId: `agent/${sessionId}/${Date.now()}/${trajectoryId}/${++step}`,
+                request: { ...JSON.parse(String(init?.body)), sessionId },
+              }),
+            },
           );
           if (!response.ok || !response.body) return response;
           const unwrap = (value: unknown) => {
-            if (!value || typeof value !== "object") throw new Error("Invalid Google Code Assist response.");
+            if (!value || typeof value !== "object")
+              throw new Error("Invalid Antigravity response.");
             const data = value as Record<string, unknown>;
             if (data.error) {
               const error = data.error as { message?: unknown };
-              throw new Error(typeof error.message === "string" ? error.message : "Google Code Assist request failed.");
+              throw new Error(
+                typeof error.message === "string" ? error.message : "Antigravity request failed.",
+              );
             }
             if (!data.response || typeof data.response !== "object" || Array.isArray(data.response))
-              throw new Error("Invalid Google Code Assist response.");
+              throw new Error("Invalid Antigravity response.");
             return { responseId: data.traceId, ...data.response };
           };
           const responseHeaders = new Headers(response.headers);
           responseHeaders.delete("content-length");
           responseHeaders.delete("content-encoding");
-          if (!stream) return Response.json(unwrap(await response.json()), { headers: responseHeaders });
-          const body = response.body.pipeThrough(new TextDecoderStream())
+          if (!stream)
+            return Response.json(unwrap(await response.json()), { headers: responseHeaders });
+          const body = response.body
+            .pipeThrough(new TextDecoderStream())
             .pipeThrough(new EventSourceParserStream())
-            .pipeThrough(new TransformStream({
-              transform(event, controller) {
-                if (event.data === "[DONE]") return;
-                controller.enqueue(`data: ${JSON.stringify(unwrap(JSON.parse(event.data)))}\n\n`);
-              },
-            })).pipeThrough(new TextEncoderStream());
+            .pipeThrough(
+              new TransformStream({
+                transform(event, controller) {
+                  if (event.data === "[DONE]") return;
+                  controller.enqueue(`data: ${JSON.stringify(unwrap(JSON.parse(event.data)))}\n\n`);
+                },
+              }),
+            )
+            .pipeThrough(new TextEncoderStream());
           return new Response(body, { headers: responseHeaders });
         },
       }).chat(args.modelId);
@@ -189,7 +221,9 @@ export class OAuthGateway implements MastraModelGatewayInterface {
         [args.providerId]: {
           ...provider,
           models: [args.modelId],
-          ...(args.providerId === "anthropic" ? {} : { modelOverrides: { [args.modelId]: { shape: "responses" as const } } }),
+          ...(args.providerId === "anthropic"
+            ? {}
+            : { modelOverrides: { [args.modelId]: { shape: "responses" as const } } }),
         },
       });
     const model = await delegate.resolveLanguageModel(args);
@@ -212,7 +246,13 @@ export class OAuthGateway implements MastraModelGatewayInterface {
                 authorization: `Bearer ${credential.access_token}`,
               },
               // The subscription endpoint requires this preamble. Cube's instructions/tools remain intact.
-              prompt: [{ role: "system", content: "You are Claude Code, Anthropic's official CLI for Claude." }, ...params.prompt],
+              prompt: [
+                {
+                  role: "system",
+                  content: "You are Claude Code, Anthropic's official CLI for Claude.",
+                },
+                ...params.prompt,
+              ],
             };
           },
         },

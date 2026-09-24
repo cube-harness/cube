@@ -133,9 +133,6 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
           bufferActivation: om.observation.buffer_activation,
           blockAfter: om.observation.block_after,
           previousObserverTokens: om.observation.previous_observer_tokens,
-          ...(om.observation.instruction === null
-            ? {}
-            : { instruction: om.observation.instruction }),
           manageWorkingMemory: om.observation.manage_working_memory,
           threadTitle: om.observation.thread_title,
           observeAttachments: om.observation.observe_attachments,
@@ -145,7 +142,6 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
           observationTokens: om.reflection.observation_tokens,
           bufferActivation: om.reflection.buffer_activation,
           blockAfter: om.reflection.block_after,
-          ...(om.reflection.instruction === null ? {} : { instruction: om.reflection.instruction }),
         },
       };
 

@@ -3,6 +3,18 @@ import test from "node:test";
 import type { Session } from "@cube/agent";
 import { CubeRuntime } from "../src/runtime.js";
 
+test("restored file approval without a live proposal is declined, never re-prepared silently", () => {
+  const decisions: unknown[] = [];
+  const cleared: string[] = [];
+  const runtime = new CubeRuntime({ session: {
+    subscribe: () => () => {},
+    respondToToolApproval: (input: unknown) => decisions.push(input),
+  }, tools: { hasPreview: () => false, discardPreview: (id: string) => cleared.push(id) } } as never);
+  assert.throws(() => runtime.respondToApproval({ toolName: "apply_patch", toolCallId: "restored", decision: "approve" }), /no valid live preview/);
+  assert.equal((decisions[0] as { decision: string }).decision, "decline");
+  assert.deepEqual(cleared, ["restored"]);
+});
+
 test("CubeRuntime exposes ready services while keeping the native Session private", async () => {
   const displayState = { isRunning: true, messages: [] };
   const events: unknown[] = [];
@@ -57,6 +69,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
     suggestions: [{ name: "/help", description: "Help" }],
     workspaceRoot: "D:\\cube",
     readHistory: async () => ["one", "two"],
+    readInstructionInfo: () => ({ soulCharacters: 12, agentsFiles: 0, agentsCharacters: 0 }),
     shutdownResources: async () => {
       shutdownCalls += 1;
     },

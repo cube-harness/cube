@@ -1,0 +1,58 @@
+name: Windows package
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the verified build to R2
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-distribution
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm package:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cube-windows-x64
+          path: |
+            build/windows/cube-windows-x64.zip
+            build/windows/cube-windows-x64.zip.sha256
+            build/windows/install.ps1
+            build/windows/latest.json
+      - name: Publish to R2 (manual opt-in)
+        if: inputs.publish
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          if (-not $env:AWS_ACCESS_KEY_ID -or -not $env:AWS_SECRET_ACCESS_KEY -or -not $env:R2_ENDPOINT -or -not $env:R2_BUCKET) { throw 'Missing R2 configuration.' }
+          $manifest = Get-Content build/windows/latest.json -Raw | ConvertFrom-Json
+          $manifest.file = "releases/$($manifest.sha256.Substring(0,16))/cube-windows-x64.zip"
+          $manifest | ConvertTo-Json | Set-Content build/windows/latest.json -Encoding utf8
+          aws s3 cp build/windows/cube-windows-x64.zip "s3://$env:R2_BUCKET/$($manifest.file)" --endpoint-url $env:R2_ENDPOINT --cache-control 'public,max-age=31536000,immutable'
+          if ($LASTEXITCODE) { throw 'Archive upload failed.' }
+          aws s3 cp build/windows/install.ps1 "s3://$env:R2_BUCKET/install.ps1" --endpoint-url $env:R2_ENDPOINT --cache-control 'no-cache'
+          if ($LASTEXITCODE) { throw 'Installer upload failed.' }
+          aws s3 cp build/windows/latest.json "s3://$env:R2_BUCKET/latest.json" --endpoint-url $env:R2_ENDPOINT --cache-control 'no-cache' --content-type 'application/json'
+          if ($LASTEXITCODE) { throw 'Manifest upload failed.' }

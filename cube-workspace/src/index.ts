@@ -18,6 +18,7 @@ export {
 } from "./store/store.js";
 export { Bootstrap, createBootstrap } from "./bootstrap.js";
 export { AuthStore } from "./store/auth.store.js";
+export { atomicWriteFile } from "./store/atomic-write.js";
 
 // Export Model Manager
 export { ModelManager, type CatalogContext, type ModelManagerOptions } from "./model-manager.js";

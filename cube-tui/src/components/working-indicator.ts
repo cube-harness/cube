@@ -51,10 +51,7 @@ interface SessionDisplayStateLike {
   activeTools: Map<string, { name: string; status: string }>;
   pendingApproval: { toolName?: string } | null;
   pendingSuspensions: Map<string, unknown>;
-  activeSubagents: Map<
-    string,
-    { agentType: string; displayName?: string; status: string }
-  >;
+  activeSubagents: Map<string, { agentType: string; displayName?: string; status: string }>;
   omProgress: { status: string };
   bufferingMessages: boolean;
   bufferingObservations: boolean;
@@ -69,7 +66,12 @@ export const deriveWorkingIndicatorState = (
 ): WorkingIndicatorState => {
   if (approvalPending && state.pendingApproval) {
     const suffix = state.pendingApproval.toolName ? `: ${state.pendingApproval.toolName}` : "";
-    return { visible: true, spinning: false, phase: "approval", message: `Waiting for approval${suffix}` };
+    return {
+      visible: true,
+      spinning: false,
+      phase: "approval",
+      message: `Waiting for approval${suffix}`,
+    };
   }
   if (state.pendingSuspensions.size > 0) {
     return { visible: true, spinning: true, phase: "input", message: "Waiting for input" };
@@ -118,14 +120,16 @@ export const deriveWorkingIndicatorState = (
 
   const parts = state.currentMessage?.content?.parts ?? [];
   const hasText = parts.some(
-    (part) => isRecord(part) && part.type === "text" && typeof part.text === "string" && part.text.length > 0,
+    (part) =>
+      isRecord(part) &&
+      part.type === "text" &&
+      typeof part.text === "string" &&
+      part.text.length > 0,
   );
   if (hasText) {
-    return { visible: false, spinning: false, phase: "streaming", message: "Responding" };
+    return { visible: true, spinning: true, phase: "streaming", message: "Responding" };
   }
-  const hasReasoning = parts.some(
-    (part) => isRecord(part) && part.type === "reasoning",
-  );
+  const hasReasoning = parts.some((part) => isRecord(part) && part.type === "reasoning");
   if (hasReasoning) {
     return { visible: true, spinning: true, phase: "thinking", message: "Thinking" };
   }
@@ -164,8 +168,7 @@ export class WorkingIndicator implements Component {
   ) {
     this.now = options.now ?? Date.now;
     this.schedule =
-      options.schedule ??
-      ((callback, intervalMs) => setInterval(callback, intervalMs));
+      options.schedule ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
     this.cancelSchedule = options.cancelSchedule ?? clearInterval;
     this.spinnerStyle = options.spinnerStyle ?? appTheme.ui.primary;
     this.messageStyle =
@@ -178,7 +181,11 @@ export class WorkingIndicator implements Component {
   }
 
   private show(message: string, spinning: boolean, phase: WorkingPhase): void {
-    const phaseChanged = !this.visible || this.message !== message || this.spinning !== spinning || this.phase !== phase;
+    const phaseChanged =
+      !this.visible ||
+      this.message !== message ||
+      this.spinning !== spinning ||
+      this.phase !== phase;
     this.message = message;
     this.phase = phase;
     if (phaseChanged) {
@@ -205,10 +212,7 @@ export class WorkingIndicator implements Component {
     this.tui.requestRender();
   }
 
-  sync(
-    displayState: SessionDisplayStateLike,
-    approvalPending: boolean,
-  ): WorkingIndicatorState {
+  sync(displayState: SessionDisplayStateLike, approvalPending: boolean): WorkingIndicatorState {
     const next = deriveWorkingIndicatorState(displayState, approvalPending);
     if (next.visible) {
       this.show(next.message, next.spinning, next.phase);
@@ -237,7 +241,9 @@ export class WorkingIndicator implements Component {
     if (!this.visible) return [];
 
     if (!this.spinning) {
-      return [truncateToWidth(`  ${this.spinnerStyle("•")} ${this.messageStyle(this.message)}`, width)];
+      return [
+        truncateToWidth(`  ${this.spinnerStyle("•")} ${this.messageStyle(this.message)}`, width),
+      ];
     }
 
     const elapsedSeconds = Math.floor((this.now() - this.startedAt) / 1000);
@@ -245,15 +251,16 @@ export class WorkingIndicator implements Component {
 
     const spinner = this.spinnerStyle(frame);
     const text = this.messageStyle(this.message);
-    const suffix = this.phase === "input"
-      ? ` • ${formatBinding("cube.turn.interrupt")} to cancel`
-      : this.phase === "memory" && this.message.startsWith("Buffering")
-        ? ""
-        : ` • ${formatBinding("cube.turn.interrupt")} to interrupt`;
+    const suffix =
+      this.phase === "input"
+        ? ` • ${formatBinding("cube.turn.interrupt")} to cancel`
+        : this.phase === "memory" && this.message.startsWith("Buffering")
+          ? ""
+          : ` • ${formatBinding("cube.turn.interrupt")} to interrupt`;
     const timer = this.timerStyle(`(${elapsedSeconds}s${suffix})`);
 
     const line = `  ${spinner} ${text} ${timer}`;
-    return [truncateToWidth(line, width)];
+    return [truncateToWidth(line, width), ""];
   }
 
   invalidate(): void {}

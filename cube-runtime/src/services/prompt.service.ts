@@ -26,7 +26,7 @@ export class PromptService {
     },
   ) {}
 
-  async submit(content: string): Promise<PromptResult> {
+  async submit(content: string, onDispatch?: (queued: boolean) => void): Promise<PromptResult> {
     const trimmed = content.trim();
     if (!trimmed) return { kind: "ignored" };
 
@@ -49,7 +49,10 @@ export class PromptService {
       // ponytail: process-global during one queued turn; add a logger bridge if runtimes become concurrent.
       console.warn = () => undefined;
       try {
-        await this.runWithThreadLogContext(() => this.session.followUp({ content: trimmed }));
+        await this.runWithThreadLogContext(() => {
+          onDispatch?.(this.session.run.isRunning());
+          return this.session.followUp({ content: trimmed });
+        });
       } finally {
         console.warn = warn;
       }

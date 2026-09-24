@@ -48,24 +48,31 @@ const fixture = async (t: TestContext) => {
 };
 
 test("catalog joins exact IDs, preserves backend-only models and unknown/false/zero, without invented OAuth costs", async t => {
-  const { manager, home } = await fixture(t);
+  const { manager, home, key } = await fixture(t);
   const before = await readFile(home.getModelCatalogPath(), "utf8");
   const preview = await manager.preview("oauth/openai", [
-    { modelId: "openai/test", name: "test", limit: { context: 200 }, tool_call: true },
+    { modelId: "openai/test", name: "test", limit: { context: 200 }, tool_call: true,
+      reasoning_efforts: ["high", "ultra"], reasoning_effort_descriptions: { ultra: "Provider ultra description" } },
     { modelId: "openai/new-account-model", name: "New account model" },
   ]);
   const [known, unknown] = preview.providers.openai!.models;
   assert.deepEqual(known!.limit, { context: 200, output: 0 });
   assert.equal(known!.tool_call, true);
   assert.equal(known!.cost, undefined);
-  assert.deepEqual(known!.reasoning_efforts, ["none", "high"]);
+  assert.deepEqual(known!.reasoning_efforts, ["high", "ultra"]);
+  assert.deepEqual(known!.reasoning_effort_descriptions, { ultra: "Provider ultra description" });
   assert.deepEqual(unknown, { modelId: "openai/new-account-model", name: "New account model" });
   const api = await manager.preview("api_key/openai");
   assert.equal(api.providers.openai!.models[0]!.tool_call, false);
+  assert.deepEqual(api.providers.openai!.models[0]!.reasoning_efforts, ["none", "high"]);
+  assert.equal(api.providers.openai!.models[0]!.reasoning_effort_descriptions, undefined);
   assert.deepEqual(api.providers.openai!.models[0]!.cost, { input: 1, output: 2 });
   const google = await manager.preview("api_key/google");
   assert.equal(google.providers.google!.models[0]!.reasoning_efforts, undefined);
   assert.equal(await readFile(home.getModelCatalogPath(), "utf8"), before, "preview must not write");
+  assert.equal(await manager.publish("oauth/openai", await key("oauth/openai"), preview), true);
+  assert.deepEqual((await manager.getCatalog("oauth/openai"))?.providers.openai?.models[0]?.reasoning_effort_descriptions,
+    { ultra: "Provider ultra description" });
 });
 
 test("Anthropic logout prunes only its OAuth catalog, including after a manual auth.json deletion", async t => {

@@ -10,12 +10,66 @@ import {
   createOpenAICallback,
   parseOpenAICallback,
   tokenResponseToCredential,
+  getOpenAISubscriptionUsage,
 } from "../../src/auth/openai.js";
 
 const jwt = (payload: object) => {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none" })}.${encode(payload)}.`;
 };
+
+test("subscription usage reads WHAM windows without deriving limits from the plan", async () => {
+  const credential = { access_token: "access", refresh_token: "refresh", account_id: "account", expires_at: Date.now() + 3600000 };
+  const window = { used_percent: 25, limit_window_seconds: 18000, reset_after_seconds: 90, reset_at: 1800000000 };
+  const quota = { allowed: true, limit_reached: false, primary_window: window, secondary_window: { ...window, used_percent: 100, limit_window_seconds: 604800 } };
+  const usage = await getOpenAISubscriptionUsage(credential, async (input, init) => {
+    assert.equal(String(input), "https://chatgpt.com/backend-api/wham/usage");
+    assert.equal(init?.method, "GET");
+    assert.equal(init?.redirect, "error");
+    assert.ok(init?.signal);
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get("authorization"), "Bearer access");
+    assert.equal(headers.get("chatgpt-account-id"), "account");
+    return Response.json({ plan_type: "pro", rate_limit: quota,
+      additional_rate_limits: [{ limit_name: "Account model", metered_feature: "model-bucket", rate_limit: { ...quota, primary_window: { ...window, used_percent: 0 }, secondary_window: null } }],
+      user_id: "do-not-expose", credits: { balance: "irrelevant" },
+    });
+  });
+  assert.deepEqual(usage, { provider: "OpenAI", plan: "pro", limits: [
+    { name: "Codex", allowed: true, limitReached: false, windows: [
+      { name: "Primary", usedPercent: 25, windowSeconds: 18000, resetsAt: 1800000000 },
+      { name: "Secondary", usedPercent: 100, windowSeconds: 604800, resetsAt: 1800000000 },
+    ] },
+    { name: "Account model", allowed: true, limitReached: false, windows: [
+      { name: "Primary", usedPercent: 0, windowSeconds: 18000, resetsAt: 1800000000 },
+    ] },
+  ] });
+  const missing = await getOpenAISubscriptionUsage(credential, async () => Response.json({ rate_limit: null }));
+  assert.equal(missing.plan, undefined);
+  assert.deepEqual(missing.limits[0]?.windows, []);
+  const partial = await getOpenAISubscriptionUsage(credential, async () => Response.json({
+    plan_type: "future-plan", rate_limit: { primary_window: { used_percent: 0 } },
+  }));
+  assert.equal(partial.plan, "future-plan");
+  assert.deepEqual(partial.limits[0]?.windows[0], { name: "Primary", usedPercent: 0, windowSeconds: undefined, resetsAt: undefined });
+
+  for (const payload of [[], { additional_rate_limits: {} }, { rate_limit: { primary_window: { used_percent: "25" } } }, { rate_limit: { primary_window: { reset_at: 1e30 } } }]) {
+    await assert.rejects(getOpenAISubscriptionUsage(credential, async () => Response.json(payload)), /Invalid OpenAI usage/);
+  }
+  for (const status of [401, 403, 429, 500]) {
+    await assert.rejects(getOpenAISubscriptionUsage(credential, async () => Response.json({
+      error: { message: "Provider detail" }, access_token: "must-not-leak",
+    }, { status })), { message: `OpenAI usage (HTTP ${status}): Provider detail` });
+  }
+  await assert.rejects(getOpenAISubscriptionUsage(credential, async () => new Response("<html>private payload</html>", { status: 502 })), { message: "OpenAI usage (HTTP 502)" });
+  await assert.rejects(getOpenAISubscriptionUsage(credential, async () => { throw new TypeError("fetch failed"); }), /fetch failed/);
+  const controller = new AbortController();
+  controller.abort(new Error("request timed out"));
+  await assert.rejects(getOpenAISubscriptionUsage(credential, async (_input, init) => {
+    init?.signal?.throwIfAborted();
+    throw new Error("unreachable");
+  }, controller.signal), /request timed out/);
+});
 
 test("creates S256 PKCE values and the Codex authorization URL", () => {
   const pkce = createOpenAIPkce((size) => Buffer.alloc(size, 7));
