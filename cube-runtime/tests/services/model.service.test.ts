@@ -7,7 +7,7 @@ import type { Session } from "@cube/agent";
 import {
   ConfigStore,
   createBootstrap,
-  Home,
+  HomeManager,
   type ModelCatalog,
 } from "@cube/workspace";
 import { ModelService } from "../../src/services/model.service.js";
@@ -62,19 +62,19 @@ const createSession = (): Session =>
       ],
     },
     getTokenUsage: () => ({
-      promptTokens: 40_016,
-      completionTokens: 1_840,
-      reasoningTokens: 538,
-      totalTokens: 41_856,
-      cachedInputTokens: 4_096,
+      promptTokens: 1_107_982,
+      completionTokens: 20_730,
+      reasoningTokens: 10_231,
+      totalTokens: 1_128_712,
+      cachedInputTokens: 728_514,
       cacheCreationInputTokens: 1_024,
-      raw: { inputTokens: { total: 6_127 } },
+      raw: { inputTokens: { total: 18_825, cacheRead: 8_640, cacheWrite: 128 } },
     }),
   }) as unknown as Session;
 
 test("ModelService delegates catalog reads, persists a valid selection, and applies it live", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-model-service-"));
-  const home = new Home({ cubeHome: directory });
+  const home = new HomeManager({ cubeHome: directory });
   await createBootstrap(home).run();
   const listed: string[] = [];
   const applied: ModelSelection[] = [];
@@ -84,7 +84,7 @@ test("ModelService delegates catalog reads, persists a valid selection, and appl
     { modelId: "google/gemini-3.7-flash" },
     (value) => applied.push(value),
     {
-      getCatalog: async () => {
+      listModels: async () => {
         listed.push("catalog");
         return catalog;
       },
@@ -111,7 +111,7 @@ test("ModelService delegates catalog reads, persists a valid selection, and appl
 
 test("ModelService persists an explicit reasoning disable when none is selected", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-model-service-"));
-  const home = new Home({ cubeHome: directory });
+  const home = new HomeManager({ cubeHome: directory });
   await createBootstrap(home).run();
   await ConfigStore(home).update((config) => ({
     ...config,
@@ -122,7 +122,7 @@ test("ModelService persists an explicit reasoning disable when none is selected"
     createSession(),
     { modelId: reasoningModelId, reasoningEffort: "high" },
     () => undefined,
-    { getCatalog: async () => catalog },
+    { listModels: async () => catalog },
   );
 
   try {
@@ -142,15 +142,16 @@ test("ModelService persists an explicit reasoning disable when none is selected"
 
 test("ModelService rejects unknown and unsupported model selections before persistence", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-model-service-"));
-  const home = new Home({ cubeHome: directory });
+  const home = new HomeManager({ cubeHome: directory });
   await createBootstrap(home).run();
+  const previousConfig = await ConfigStore(home).read();
   const applied: ModelSelection[] = [];
   const service = new ModelService(
     home,
     createSession(),
     { modelId: "google/gemini-3.7-flash" },
     (value) => applied.push(value),
-    { getCatalog: async () => catalog },
+    { listModels: async () => catalog },
   );
 
   try {
@@ -167,22 +168,23 @@ test("ModelService rejects unknown and unsupported model selections before persi
       /does not support reasoning effort: medium/,
     );
     assert.deepEqual(applied, []);
-    assert.equal((await ConfigStore(home).read()).model, "google/gemini-3.7-flash");
+    assert.deepEqual(await ConfigStore(home).read(), previousConfig);
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
-test("ModelService derives runtime-neutral usage metrics from Session and catalog state", async () => {
+test("ModelService reports cache from the latest request, not thread totals", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-model-service-"));
-  const home = new Home({ cubeHome: directory });
+  const home = new HomeManager({ cubeHome: directory });
   await createBootstrap(home).run();
+  const session = createSession();
   const service = new ModelService(
     home,
-    createSession(),
+    session,
     { modelId: reasoningModelId, reasoningEffort: "high" },
     () => undefined,
-    { getCatalog: async () => catalog },
+    { listModels: async () => catalog },
   );
 
   try {
@@ -190,20 +192,32 @@ test("ModelService derives runtime-neutral usage metrics from Session and catalo
       model: reasoningModelId,
       reasoningEffort: "high",
       capabilities: ["tools", "reasoning"],
+      capabilitiesComplete: true,
       directory: "/workspace/cube",
       sessionId: "session-test-id",
       contextLimit: 128_000,
       maxOutput: 8_192,
-      activeTurnTokens: 6_127,
-      promptTokens: 40_016,
-      completionTokens: 1_840,
-      reasoningTokens: 538,
-      cachedTokens: 4_096,
-      cacheCreationTokens: 1_024,
-      totalTokens: 41_856,
+      activeTurnTokens: 18_825,
+      promptTokens: 1_107_982,
+      completionTokens: 20_730,
+      reasoningTokens: 10_231,
+      cachedTokens: 8_640,
+      cacheCreationTokens: 128,
+      totalTokens: 1_128_712,
       threadTitle: "Runtime Refactor",
       threadId: "thread-usage-123",
     });
+    const usage = session.getTokenUsage();
+    for (const raw of [
+      { inputTokens: { total: 18_825, cacheRead: 0, cacheWrite: 0 } },
+      { inputTokens: { total: 18_825 } },
+      undefined,
+    ]) {
+      session.getTokenUsage = () => ({ ...usage, raw });
+      const metrics = await service.getUsage();
+      assert.equal(metrics.cachedTokens, 0);
+      assert.equal(metrics.cacheCreationTokens, 0);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

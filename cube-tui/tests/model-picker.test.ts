@@ -70,10 +70,36 @@ test("model picker selects model then reasoning effort without a provider step",
 
   picker.handleInput("\r");
   assert.match(picker.render(80).join("\n"), /Select Reasoning Effort/);
+  assert.match(picker.render(80).join("\n"), /Deep multi-step analysis/);
   picker.handleInput("\x1b[B");
   picker.handleInput("\r");
 
   assert.deepEqual(result, { modelId: "google/gemini-test", reasoningEffort: "high" });
+});
+
+test("OAuth reasoning uses provider descriptions in both picker entry paths without Cube fallbacks", () => {
+  const oauthCatalog: ModelCatalog = { updatedAt: catalog.updatedAt, providers: {
+    openai: { name: "OpenAI", models: [{ modelId: "openai/test", name: "Test",
+      reasoning_efforts: ["high", "ultra", "low"],
+      reasoning_effort_descriptions: { high: "Provider high description", ultra: "Provider ultra description" },
+    }] },
+  } };
+  for (const initialStep of ["model", "reasoning"] as const) {
+    let selected: ModelSelectionResult | undefined;
+    const picker = new ModelPickerComponent({
+      gatewayId: "oauth/openai", catalog: oauthCatalog, initialStep,
+      currentModelId: "openai/test", currentReasoningEffort: "high",
+      onSelect: result => { selected = result; }, onCancel: () => undefined,
+    });
+    if (initialStep === "model") picker.handleInput("\r");
+    const rendered = picker.render(120).join("\n");
+    assert.match(rendered, /Provider high description/);
+    assert.match(rendered, /Provider ultra description/);
+    assert.doesNotMatch(rendered, /Deep multi-step analysis|Light thinking pass|ultra level|low level/);
+    picker.handleInput("\x1b[B");
+    picker.handleInput("\r");
+    assert.deepEqual(selected, { modelId: "openai/test", reasoningEffort: "ultra" });
+  }
 });
 
 test("model picker Escape returns from reasoning then cancels", () => {

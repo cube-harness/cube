@@ -127,8 +127,6 @@ memory:
       block_after: 1.2
       # false means unlimited previous observations, not disabled.
       previous_observer_tokens: 2000
-      # Optional instruction appended to Mastra's default Observer prompt.
-      instruction: null
       # Uses Mastra's built-in WorkingMemoryExtractor.
       manage_working_memory: true
       thread_title: false
@@ -144,9 +142,10 @@ memory:
       buffer_activation: 0.5
       # 1-<100 is a multiplier; >=100 is an absolute token count.
       block_after: 1.2
-      # Optional instruction appended to Mastra's default Reflector prompt.
-      instruction: null
 
 permissions:
   require_approval_for:
     - execute_command
+    - edit_file
+    - write_file
+    - apply_patch

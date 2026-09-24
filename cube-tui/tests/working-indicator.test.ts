@@ -64,18 +64,26 @@ test("indicator distinguishes approval, tools, memory, and reasoning", () => {
   );
 });
 
-test("indicator hides once assistant text is visibly streaming", () => {
+test("assistant text does not hide an unfinished turn, including before tool input arrives", () => {
+  const snapshot = state({
+    currentMessage: {
+      content: { parts: [{ type: "text", text: "I will create the file." }] },
+    },
+  });
   assert.deepEqual(
-    deriveWorkingIndicatorState(
-      state({
-        currentMessage: {
-          role: "assistant",
-          content: { parts: [{ type: "text", text: "answer" }] },
-        },
-      }) as never,
-      false,
-    ),
-    { visible: false, spinning: false, phase: "streaming", message: "Responding" },
+    deriveWorkingIndicatorState(snapshot as never, false),
+    { visible: true, spinning: true, phase: "streaming", message: "Responding" },
+  );
+  snapshot.activeTools.set("write-1", { name: "write_file", status: "streaming_input" });
+  assert.deepEqual(
+    deriveWorkingIndicatorState(snapshot as never, false),
+    { visible: true, spinning: true, phase: "tool", message: "Preparing write_file" },
+  );
+  snapshot.activeTools.clear();
+  snapshot.isRunning = false;
+  assert.deepEqual(
+    deriveWorkingIndicatorState(snapshot as never, false),
+    { visible: false, spinning: false, phase: "idle", message: "Idle" },
   );
 });
 

@@ -10,6 +10,7 @@ import { appTheme } from "../themes/app.theme.js";
 import { createMarkdownTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding } from "../keybindings.js";
 import type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
+import { fileChanges, commandResult, renderToolDiff, toolText } from "./tool-diff.js";
 
 export type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 
@@ -414,7 +415,7 @@ export class MessageList implements Component {
   }
 
   private renderMessage(entry: CachedEntry, width: number): string[] {
-    const availableWidth = Math.max(width, 20);
+    const availableWidth = Math.max(width, 1);
     const msg = entry.message;
     const prefix = this.formatRolePrefix(msg);
     const prefixWidth = visibleWidth(prefix);
@@ -457,7 +458,7 @@ export class MessageList implements Component {
 
     if (msg.role === "tool") {
       const tool = msg.tool;
-      const header = tool ? formatToolHeader(tool.name, tool.args) : msg.content;
+      const header = toolText(tool ? formatToolHeader(tool.name, tool.args) : msg.content);
       const headerLines = wrapTextWithAnsi(header, contentWidth);
       if (headerLines.length === 0) {
         lines.push(truncateToWidth(prefix, availableWidth));
@@ -467,7 +468,22 @@ export class MessageList implements Component {
         });
       }
 
-      const output = tool ? toolOutput(tool) : "";
+      const changes = fileChanges(tool?.result);
+      if (changes) {
+        for (const line of renderToolDiff(changes, contentWidth, this.transcriptExpanded)) {
+          lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
+        }
+        lines.push("");
+        return lines;
+      }
+      const command = commandResult(tool?.result);
+      const args = asRecord(tool?.args);
+      const reason = command?.reason ?? (typeof args?.reason === "string" ? args.reason : undefined);
+      const cwd = command?.cwd ?? (typeof args?.cwd === "string" ? args.cwd : undefined);
+      for (const detail of [reason && `Reason: ${reason}`, cwd && `Directory: ${cwd}`, command && `${command.status}${command.exit_code === null ? "" : ` · exit ${command.exit_code}`}${command.truncated ? " · output truncated" : ""}`]) {
+        if (detail) for (const line of wrapTextWithAnsi(appTheme.ui.muted(toolText(detail)), contentWidth)) lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
+      }
+      const output = toolText(command ? command.output : tool ? toolOutput(tool) : "");
       if (output) {
         const outputLines = output.split(/\r?\n/).flatMap((line) => {
           const wrapped = wrapTextWithAnsi(appTheme.ui.muted(line), contentWidth);
@@ -558,7 +574,7 @@ export class MessageList implements Component {
       return [];
     }
 
-    const availableWidth = Math.max(width, 20);
+    const availableWidth = Math.max(width, 1);
     const allLines: string[] = [];
 
     for (const entry of this.entries) {

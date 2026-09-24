@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Session } from "@cube/agent";
+import type { Session, InstructionSnapshot } from "@cube/agent";
 import type { RuntimeMessage, ThreadSnapshot, ThreadSummary } from "../types.js";
 
 const activeRunError = (operation: string): Error =>
@@ -46,13 +46,24 @@ const extractAssistantText = (messages: RuntimeMessage[]): string | null => {
 
 export class ThreadService {
   private plannedThreadId: string;
+  private reloadBeforeCreate = false;
+  private creationSnapshot: InstructionSnapshot;
+  private readonly startupSnapshot: InstructionSnapshot;
+  private readonly snapshots = new Map<string, InstructionSnapshot>();
 
   constructor(
     private readonly session: Session,
-    private readonly reloadSoul: () => Promise<void>,
+    private readonly instructions: {
+      read: () => InstructionSnapshot;
+      install: (snapshot: InstructionSnapshot) => void;
+      reload: (includeDiscovered?: boolean) => Promise<void>;
+      refresh: (saved: unknown) => Promise<InstructionSnapshot>;
+    },
     private readonly createId: () => string = crypto.randomUUID,
   ) {
     this.plannedThreadId = createId();
+    this.startupSnapshot = instructions.read();
+    this.creationSnapshot = structuredClone(this.startupSnapshot);
   }
 
   current(): string | null {
@@ -71,32 +82,46 @@ export class ThreadService {
 
   async ensureForPrompt(content: string): Promise<string> {
     const activeId = this.current();
-    if (activeId) return activeId;
+    if (activeId) {
+      if (!this.snapshots.has(activeId)) await this.activateInstructions(activeId);
+      return activeId;
+    }
     if (this.session.run.isRunning()) throw activeRunError("create a thread");
 
-    await this.reloadSoul();
+    if (this.reloadBeforeCreate) {
+      await this.instructions.reload();
+      this.creationSnapshot = this.instructions.read();
+      this.reloadBeforeCreate = false;
+    }
     const title = content.trim().replace(/\s+/g, " ") || "New Thread";
     const thread = await this.session.thread.create({
       id: this.plannedThreadId,
       title,
     });
+    await this.saveInstructions(this.creationSnapshot);
+    this.instructions.install(this.creationSnapshot);
     return thread.id;
   }
 
   async create(): Promise<{ threadId: null }> {
     if (this.session.run.isRunning()) throw activeRunError("start a new thread");
 
-    await this.reloadSoul();
     this.session.thread.detachFromCurrent();
     await this.session.thread.clearAndReleaseLock();
     this.plannedThreadId = this.createId();
+    this.reloadBeforeCreate = true;
     return { threadId: null };
   }
 
   async resume(threadId: string): Promise<ThreadSnapshot> {
     if (this.session.run.isRunning()) throw activeRunError("switch threads");
 
+    const snapshot = await this.prepareInstructions(threadId);
     await this.session.thread.switch({ threadId });
+    this.instructions.install(snapshot);
+    this.snapshots.set(threadId, snapshot);
+    this.reloadBeforeCreate = false;
+    this.creationSnapshot = structuredClone(this.startupSnapshot);
     return this.loadSnapshot(threadId);
   }
 
@@ -115,6 +140,12 @@ export class ThreadService {
     if (this.session.run.isRunning()) throw activeRunError("delete a thread");
     const wasActive = this.current() === threadId;
     await this.session.thread.delete({ threadId });
+    this.snapshots.delete(threadId);
+    if (wasActive) {
+      this.reloadBeforeCreate = false;
+      this.creationSnapshot = structuredClone(this.startupSnapshot);
+      this.instructions.install(this.creationSnapshot);
+    }
     if (wasActive) this.plannedThreadId = this.createId();
     return { threadId, wasActive };
   }
@@ -128,7 +159,43 @@ export class ThreadService {
       sourceThreadId,
       title: normalizedTitle,
     });
+    const snapshot = structuredClone(this.snapshots.get(sourceThreadId) ?? this.instructions.read());
+    await this.saveInstructions(snapshot);
+    this.instructions.install(snapshot);
+    this.reloadBeforeCreate = false;
+    this.creationSnapshot = structuredClone(this.startupSnapshot);
     return this.loadSnapshot(clone.id);
+  }
+
+  async saveInstructions(snapshot: InstructionSnapshot): Promise<void> {
+    const threadId = this.current();
+    if (!threadId) throw new Error("Cannot save instructions without an active thread");
+    await this.session.thread.setSetting({ key: "cubeInstructions", value: snapshot });
+    this.snapshots.set(threadId, structuredClone(snapshot));
+  }
+
+  async reload(): Promise<void> {
+    if (this.session.run.isRunning()) throw activeRunError("reload project context");
+    await this.instructions.reload(true);
+    const snapshot = this.instructions.read();
+    if (this.current()) await this.saveInstructions(snapshot);
+    else this.creationSnapshot = snapshot;
+  }
+
+  private async prepareInstructions(threadId: string): Promise<InstructionSnapshot> {
+    const cached = this.snapshots.get(threadId);
+    if (cached) return cached;
+    const thread = await this.session.thread.getById({ threadId });
+    if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    const snapshot = await this.instructions.refresh(thread.metadata?.cubeInstructions);
+    await this.session.thread.setSettingOn({ threadId, key: "cubeInstructions", value: snapshot });
+    return snapshot;
+  }
+
+  private async activateInstructions(threadId: string): Promise<void> {
+    const snapshot = await this.prepareInstructions(threadId);
+    this.instructions.install(snapshot);
+    this.snapshots.set(threadId, snapshot);
   }
 
   async lastAssistantContent(): Promise<string | null> {

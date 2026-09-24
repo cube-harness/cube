@@ -90,7 +90,6 @@ const observation = z.object({
   ),
   block_after: blockAfter,
   previous_observer_tokens: z.union([z.literal(false), nonNegativeInteger]),
-  instruction: nullableString,
   manage_working_memory: z.boolean(),
   thread_title: z.boolean(),
   observe_attachments: z.union([
@@ -105,7 +104,6 @@ const reflection = z.object({
   observation_tokens: positiveInteger,
   buffer_activation: ratio,
   block_after: blockAfter,
-  instruction: nullableString,
 }).strict();
 
 const observationalMemory = z.object({

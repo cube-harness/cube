@@ -4,7 +4,7 @@ import type { GatewayLanguageModel } from "@mastra/core/llm";
 import { OAuthGateway } from "../../src/gateways/oauth.gateway.js";
 import { buildModelConfig } from "../../src/agents/default.agent.js";
 
-test("Google native adapter preserves tools, signatures, reasoning and usage across Code Assist envelopes", async () => {
+test("Google native adapter preserves tools, signatures, reasoning and usage across Antigravity envelopes", async () => {
   let token: string | undefined = "first";
   let rejectRequest = false;
   const requests: Array<{ url: string; headers: Headers; body: any }> = [];
@@ -59,6 +59,12 @@ test("Google native adapter preserves tools, signatures, reasoning and usage acr
   assert.ok(requests[0]!.url.endsWith(":streamGenerateContent?alt=sse"));
   assert.ok(requests[1]!.url.endsWith(":generateContent"));
   for (const request of requests) {
+    assert.equal(new URL(request.url).origin, "https://daily-cloudcode-pa.googleapis.com");
+    assert.match(request.headers.get("user-agent")!, /^antigravity\/ide\//);
+    assert.equal(request.body.userAgent, "antigravity");
+    assert.equal(request.body.requestType, "agent");
+    assert.match(request.body.requestId, /^agent\/[^/]+\/\d+\/[^/]+\/\d+$/);
+    assert.ok(request.body.request.sessionId);
     assert.equal(request.headers.get("x-goog-api-key"), null);
     assert.equal(request.body.model, "gemini-2.5-pro");
     assert.equal(request.body.request.systemInstruction.parts[0].text, "Cube instructions");
@@ -69,6 +75,7 @@ test("Google native adapter preserves tools, signatures, reasoning and usage acr
     assert.ok(JSON.stringify(request.body.request.contents).includes("functionResponse"));
     assert.equal(request.body.enabled_credit_types, undefined);
   }
+  assert.notEqual(requests[0]!.body.requestId, requests[1]!.body.requestId);
   rejectRequest = true;
   await assert.rejects(model.doStream(options), /Google quota reached/);
   token = undefined;

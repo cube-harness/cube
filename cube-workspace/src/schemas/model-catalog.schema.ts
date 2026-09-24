@@ -25,6 +25,7 @@ export const CatalogModelSchema = z.object({
   family: z.string().optional(),
   reasoning: z.boolean().optional(),
   reasoning_efforts: z.array(z.string()).optional(),
+  reasoning_effort_descriptions: z.record(z.string(), z.string()).optional(),
   tool_call: z.boolean().optional(),
   structured_output: z.boolean().optional(),
   attachment: z.boolean().optional(),

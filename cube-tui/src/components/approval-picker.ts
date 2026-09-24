@@ -7,6 +7,8 @@ import {
 import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
+import { fileChanges, renderToolDiff, toolText } from "./tool-diff.js";
+import type { FileMutationResult } from "@cube/runtime";
 
 export type ToolApprovalDecision = "approve" | "decline" | "approve_prefix";
 
@@ -23,6 +25,7 @@ export interface ParsedApprovalArgs {
   reason?: string;
   environment?: string;
   rawLines: string[];
+  preview?: FileMutationResult;
 }
 
 /**
@@ -57,6 +60,7 @@ export class ApprovalPicker implements Component, Focusable {
   focused = true;
   private readonly list: SelectList;
   private readonly parsed: ParsedApprovalArgs;
+  private expanded = false;
 
   constructor(private readonly options: ApprovalPickerOptions) {
     this.parsed = this.parseArgs(options.args);
@@ -65,7 +69,7 @@ export class ApprovalPicker implements Component, Focusable {
     const approvePrefixKey = formatBinding("cube.approval.approvePrefix");
     const declineKey = formatBinding("cube.approval.decline");
 
-    const items = [
+    const items = this.parsed.preview?.status === "failed" ? [] : [
       {
         value: "approve",
         label: `Yes, proceed (${approveKey})`,
@@ -105,8 +109,8 @@ export class ApprovalPicker implements Component, Focusable {
         return this.parseArgs(parsed);
       } catch {
         return {
-          command: args,
-          rawLines: [args],
+          command: toolText(args),
+          rawLines: [toolText(args)],
         };
       }
     }
@@ -138,24 +142,27 @@ export class ApprovalPicker implements Component, Focusable {
             ? obj.env
             : typeof obj.Cwd === "string"
               ? obj.Cwd
-              : undefined;
+              : typeof obj.cwd === "string" ? obj.cwd : undefined;
 
-      const rawLines = Object.entries(obj).map(
-        ([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`,
+      const rawLines = Object.entries(obj).filter(([key]) => key !== "preview").map(
+        ([k, v]) => toolText(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`),
       );
 
       return {
-        command,
-        reason,
-        environment,
+        command: command === undefined ? undefined : toolText(command),
+        reason: reason === undefined ? undefined : toolText(reason),
+        environment: environment === undefined ? undefined : toolText(environment),
+        preview: fileChanges(obj.preview),
         rawLines,
       };
     }
 
-    return { rawLines: [String(args)] };
+    return { rawLines: [toolText(String(args))] };
   }
 
   handleInput(data: string): void {
+    if (matchesBinding(data, "cube.transcript.toggle")) { this.expanded = !this.expanded; return; }
+    if (this.parsed.preview?.status === "failed" && (matchesBinding(data, "cube.approval.approve") || matchesBinding(data, "cube.approval.approvePrefix"))) return;
     if (matchesBinding(data, "cube.approval.approve")) {
       this.options.onDecision("approve");
       return;
@@ -188,7 +195,9 @@ export class ApprovalPicker implements Component, Focusable {
   render(width: number): string[] {
     const cardContentLines: string[] = [];
 
-    if (this.parsed.command) {
+    if (this.parsed.preview) {
+      cardContentLines.push(appTheme.ui.text.bold("Proposed file changes"), "", ...renderToolDiff(this.parsed.preview, width, this.expanded));
+    } else if (this.parsed.command) {
       cardContentLines.push(
         appTheme.ui.text.bold("Would you like to run the following command?"),
       );
@@ -239,7 +248,7 @@ export class ApprovalPicker implements Component, Focusable {
 
     cardContentLines.push("");
     return [
-      ...cardContentLines.flatMap((line) => wrapTextWithAnsi(line, width)),
+      ...cardContentLines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width))),
       ...this.list.render(width),
     ];
   }

@@ -61,8 +61,8 @@ const baseConfig = (): CubeConfigDocument => ({
       share_token_budget: false,
       temporal_markers: false,
       retrieval: { enabled: false, vector: false, scope: "resource" },
-      observation: { model: "google/gemini-test", message_tokens: 1000, buffer_tokens: false, buffer_on_idle: false, buffer_activation: 1, block_after: 1, previous_observer_tokens: false, instruction: null, manage_working_memory: false, thread_title: false, observe_attachments: false },
-      reflection: { model: "google/gemini-test", observation_tokens: 1000, buffer_activation: 1, block_after: 1, instruction: null },
+      observation: { model: "google/gemini-test", message_tokens: 1000, buffer_tokens: false, buffer_on_idle: false, buffer_activation: 1, block_after: 1, previous_observer_tokens: false, manage_working_memory: false, thread_title: false, observe_attachments: false },
+      reflection: { model: "google/gemini-test", observation_tokens: 1000, buffer_activation: 1, block_after: 1 },
     },
   },
   permissions: { require_approval_for: [] },
@@ -70,6 +70,7 @@ const baseConfig = (): CubeConfigDocument => ({
 
 const createHarness = (options: {
   catalog?: ModelCatalog;
+  getCatalog?: GatewayServiceDependencies["catalog"]["getCatalog"];
   beforeCatalog?: () => void | Promise<void>;
   removeCatalog?: () => Promise<void>;
   onRemoved?: () => void;
@@ -116,7 +117,7 @@ const createHarness = (options: {
       update: async (mutator) => (auth = structuredClone(mutator(auth))),
     },
     adapters: options.adapters ?? new Map(),
-    catalog: { getCatalog: async () => undefined,
+    catalog: { getCatalog: options.getCatalog ?? (async () => undefined),
       preview: async (gatewayId, available) => {
         await options.beforeCatalog?.();
         return manager.preview(gatewayId, available);
@@ -143,6 +144,90 @@ const createHarness = (options: {
   return { service, config: () => config, auth: () => auth };
 };
 
+test("subscription status uses refreshed credentials, leaves config/catalog alone and discards stale accounts", async () => {
+  for (const gateway of ["api_key/openai", "local/ollama"] as const) {
+    const { service } = createHarness({ config: { ...baseConfig(), gateway },
+      fetch: async () => { assert.fail("Status must not probe this provider"); },
+    });
+    assert.equal(await service.getSubscriptionUsage(), undefined);
+  }
+  let refreshes = 0;
+  let onRequest = () => {};
+  const credential = { access_token: "refreshed-access", refresh_token: "refreshed-refresh", account_id: "account", expires_at: Date.now() + 3600000 };
+  const harness = createHarness({
+    config: { ...baseConfig(), gateway: "oauth/openai", model: "openai/gpt-test" },
+    auth: { api_keys: {}, oauth: { openai: { ...credential, access_token: "expired", expires_at: 0 } } },
+    beforeCatalog: () => assert.fail("Status must not rediscover models"),
+    openAIAuth: {
+      beginLogin: async () => { throw new Error("Status must not open a browser"); },
+      getValidCredential: async () => { refreshes++; return credential; },
+    },
+    fetch: async (_input, init) => {
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer refreshed-access");
+      onRequest();
+      return Response.json({ plan_type: "pro" });
+    },
+  });
+  const config = structuredClone(harness.config());
+  assert.equal((await harness.service.getSubscriptionUsage())?.plan, "pro");
+  assert.equal(refreshes, 1);
+  assert.deepEqual(harness.config(), config);
+  assert.deepEqual(harness.auth().oauth.openai, credential);
+  for (const change of [
+    () => { delete harness.auth().oauth.openai; },
+    () => { harness.auth().oauth.openai = { ...credential, account_id: "other-account" }; },
+    () => { harness.config().gateway = "api_key/google"; },
+  ]) {
+    onRequest = change;
+    await assert.rejects(harness.service.getSubscriptionUsage(), /Gateway or account changed/);
+  }
+});
+
+test("remaining OAuth status routes refresh and rejects account changes without touching model catalog", async () => {
+  for (const [provider, managerName] of [["google", "googleAuth"], ["anthropic", "anthropicAuth"], ["xai", "grokAuth"]] as const) {
+    const gateway = `oauth/${provider}` as const;
+    const fresh = { access_token: "fresh", refresh_token: "fresh-refresh", expires_at: Date.now() + 3600000,
+      ...(provider === "google" ? { project_id: "project" } : {}),
+    };
+    let calls = 0, refreshes = 0, changeAccount = false;
+    const harness = createHarness({
+      config: { ...baseConfig(), gateway },
+      auth: { api_keys: {}, oauth: { [provider]: { ...fresh, access_token: "expired", expires_at: 0 } } },
+      beforeCatalog: () => assert.fail("Status must not rediscover models"),
+      [managerName]: {
+        beginLogin: async () => { throw new Error("Status must not open login"); },
+        getValidCredential: async () => {
+          refreshes++;
+          harness.auth().oauth[provider] = fresh;
+          return fresh;
+        },
+      },
+      fetch: async (url, init) => {
+        calls++;
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer fresh");
+        if (changeAccount) delete harness.auth().oauth[provider];
+        if (String(url).includes("loadCodeAssist")) return Response.json({ currentTier: { name: "Pro" } });
+        if (String(url).includes("fetchAvailableModels")) return Response.json({ models: { "gemini-test": { quotaInfo: { remainingFraction: 0.5 } } } });
+        if (String(url).endsWith("/profile")) return Response.json({ organization: { organization_type: "claude_pro" } });
+        if (String(url).endsWith("/usage")) return Response.json({ five_hour: { utilization: 50 } });
+        if (String(url).includes("/user?")) return Response.json({ subscriptionTier: "SuperGrok" });
+        if (String(url).includes("/billing?")) return Response.json({ config: { creditUsagePercent: 50 } });
+        throw new Error(`Unexpected endpoint: ${url}`);
+      },
+    });
+    const config = structuredClone(harness.config());
+    const usage = await harness.service.getSubscriptionUsage();
+    assert.ok(usage?.plan);
+    assert.equal(usage?.notice, undefined);
+    assert.equal(usage?.limits[0]?.windows[0]?.usedPercent, 50);
+    assert.equal(refreshes, 1);
+    assert.equal(calls, 2);
+    assert.deepEqual(harness.config(), config);
+    changeAccount = true;
+    await assert.rejects(harness.service.getSubscriptionUsage(), /Gateway or account changed/);
+  }
+});
+
 test("Google discovers account models, stages credentials, preserves capability ownership and logs out independently", async () => {
   const credential = { access_token: "google", refresh_token: "refresh", expires_at: Date.now() + 3600000, project_id: "managed-project" };
   let removed = false;
@@ -154,20 +239,25 @@ test("Google discovers account models, stages credentials, preserves capability 
       getValidCredential: async () => credential },
     removeCatalog: async () => { removed = true; },
     fetch: async (input, init) => {
-      assert.equal(String(input), "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota");
+      assert.equal(String(input), "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels");
       assert.equal(new Headers(init?.headers).get("authorization"), "Bearer google");
       assert.deepEqual(JSON.parse(String(init?.body)), { project: "managed-project" });
-      return Response.json({ buckets: empty ? [] : [
-        { modelId: "gemini-test", remainingFraction: 0 }, { modelId: "gemini-test", tokenType: "other" }, { modelId: "new-model" }, {},
-      ] });
+      return Response.json({ models: empty ? {} : {
+        "gemini-test": { displayName: "Gemini Test", quotaInfo: { remainingFraction: 0 } },
+        "gemini-new-model": { supportsThinking: true, maxOutputTokens: 8192 },
+        "gemini-hidden": { isInternal: true }, "gemini-image": {}, "claude-model": {},
+      } });
     },
   });
   const draft = await (await harness.service.beginGoogleLogin()).completion;
   assert.equal(harness.auth().oauth.google, undefined);
   const models = draft.catalog.providers.google!.models;
-  assert.deepEqual(models.map(model => model.modelId), ["google/gemini-test", "google/new-model"]);
+  assert.deepEqual(models.map(model => model.modelId), ["google/gemini-test", "google/gemini-new-model"]);
+  assert.equal(models[0]?.name, "Gemini Test");
   assert.equal(models[0]?.limit?.context, 128000);
-  assert.equal(models[1]?.limit, undefined);
+  assert.deepEqual(models[1]?.limit, { output: 8192 });
+  assert.equal(models[1]?.reasoning, true);
+  assert.equal(models[1]?.tool_call, undefined);
   await harness.service.set({ draftId: draft.draftId, model: { modelId: "google/gemini-test" } });
   assert.equal(harness.config().gateway, "oauth/google");
   assert.deepEqual(harness.auth().oauth.google, credential);
@@ -589,6 +679,30 @@ test("delayed discovery and failed switch cannot resurrect credentials after rem
   assert.equal(harness.auth().api_keys.google, undefined);
 });
 
+test("OpenAI refreshes cached reasoning metadata once, including when descriptions are absent", async () => {
+  for (const description of ["Provider high description", undefined]) {
+    let cached: ModelCatalog = { updatedAt: new Date().toISOString(), providers: {
+      openai: { name: "OpenAI", models: [model("openai/gpt-test")] },
+    } };
+    let requests = 0;
+    const harness = createHarness({
+      auth: { api_keys: {}, oauth: { openai: {
+        access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, account_id: "account",
+      } } },
+      getCatalog: async () => cached,
+      fetch: async () => {
+        requests++;
+        return Response.json({ models: [{ slug: "gpt-test", supported_reasoning_levels: [{ effort: "high", description }] }] });
+      },
+    });
+    cached = await harness.service.listModels("oauth/openai");
+    assert.deepEqual(cached.providers.openai!.models[0]!.reasoning_effort_descriptions,
+      description ? { high: description } : {});
+    assert.deepEqual(await harness.service.listModels("oauth/openai"), cached);
+    assert.equal(requests, 1);
+  }
+});
+
 test("account-only model stays selectable with explicit metadata and login does not mark it current", async () => {
   const credential = { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, account_id: "account" };
   const harness = createHarness({
@@ -597,7 +711,11 @@ test("account-only model stays selectable with explicit metadata and login does 
     }) },
     fetch: async () => Response.json({ models: [{
       slug: "new-account-model", display_name: "Account Model", context_window: 200000,
-      supported_reasoning_levels: [{ effort: "high" }], input_modalities: ["text", "image"],
+      supported_reasoning_levels: [
+        { effort: "high", description: "Provider high description" },
+        { effort: "ultra", description: "Provider ultra description" },
+        "low", { effort: "medium", description: 123 },
+      ], input_modalities: ["text", "image"],
     }] }),
   });
   const draft = await (await harness.service.beginOpenAILogin()).completion;
@@ -605,7 +723,8 @@ test("account-only model stays selectable with explicit metadata and login does 
   const item = draft.catalog.providers.openai!.models[0]!;
   assert.equal(item.modelId, "openai/new-account-model");
   assert.deepEqual(item.limit, { context: 200000 });
-  assert.deepEqual(item.reasoning_efforts, ["high"]);
+  assert.deepEqual(item.reasoning_efforts, ["high", "ultra", "low", "medium"]);
+  assert.deepEqual(item.reasoning_effort_descriptions, { high: "Provider high description", ultra: "Provider ultra description" });
   assert.equal(item.tool_call, undefined);
   await harness.service.set({ draftId: draft.draftId, model: { modelId: item.modelId, reasoningEffort: "high" } });
   assert.equal(harness.config().model, item.modelId);

@@ -58,6 +58,14 @@ const parseModelSelection = (argument: string) => {
 
 const definitions: SlashCommandDefinition[] = [
   {
+    name: "/reload",
+    description: "Reload SOUL and known project instructions",
+    execute: async (_argument, context) => {
+      await context.thread.reload();
+      return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
+    },
+  },
+  {
     name: "/resume",
     aliases: ["/threads"],
     description: "Switch to a previous conversation",
@@ -275,11 +283,18 @@ const definitions: SlashCommandDefinition[] = [
   {
     name: "/status",
     aliases: ["/usage"],
-    description: "Show session status & context window metrics",
-    execute: async (_argument, context) => ({
-      kind: "usage",
-      metrics: await context.model.getUsage(),
-    }),
+    description: "Show session status, context usage and subscription limits",
+    execute: async (_argument, context) => {
+      const metrics = await context.model.getUsage();
+      try {
+        const subscription = await context.gateway.getSubscriptionUsage();
+        return { kind: "usage", metrics: subscription ? { ...metrics, subscription } : metrics,
+          ...(subscription?.notice ? { notice: toRuntimeNotice(new Error(subscription.notice)) } : {}),
+        };
+      } catch (error) {
+        return { kind: "usage", metrics, notice: toRuntimeNotice(error) };
+      }
+    },
   },
   {
     name: "/theme",

@@ -1,17 +1,108 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { GOOGLE_CODE_ASSIST_BASE_URL, GOOGLE_CODE_ASSIST_HEADERS } from "@cube/agent";
+import { platform, arch } from "node:os";
+import { GOOGLE_CODE_ASSIST_BASE_URL, ANTIGRAVITY_BASE_URL, ANTIGRAVITY_HEADERS } from "@cube/agent";
 import { GoogleOAuthCredentialSchema, type GoogleOAuthCredential } from "@cube/workspace";
+import type { SubscriptionUsage } from "../types.js";
 import { createOpenAICallback, createOpenAIPkce, openExternalUrl, type OpenAIOAuthOptions } from "./openai.js";
 
-// Public installed-app credentials published by Gemini CLI, not a user's API key.
-const CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
-const CLIENT_SECRET = "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";
+// Public installed-app credentials used by Antigravity, not a user's API key.
+const CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+const CLIENT_SECRET = "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";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const REDIRECT_URI = "http://127.0.0.1:45289/oauth2callback";
-const SCOPES = ["cloud-platform", "userinfo.email", "userinfo.profile"]
+const SCOPES = ["cloud-platform", "userinfo.email", "userinfo.profile", "cclog", "experimentsandconfigs"]
   .map(scope => `https://www.googleapis.com/auth/${scope}`).join(" ");
+const CLIENT_METADATA = {
+  ideType: 9,
+  platform: platform() === "win32" ? 5 : platform() === "darwin" ? (arch() === "arm64" ? 2 : 1)
+    : platform() === "linux" ? (arch() === "arm64" ? 4 : 3) : 0,
+  pluginType: 2,
+};
+
+type GoogleModel = {
+  displayName?: string;
+  supportsThinking?: boolean;
+  supportsImages?: boolean;
+  maxOutputTokens?: number;
+  quotaInfo?: unknown;
+};
+
+export const fetchGoogleModels = async (
+  credential: GoogleOAuthCredential, fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  signal?: AbortSignal,
+) => {
+  const data = await requestJson(`${ANTIGRAVITY_BASE_URL}:fetchAvailableModels`, {
+    method: "POST",
+    headers: { ...ANTIGRAVITY_HEADERS, "content-type": "application/json", authorization: `Bearer ${credential.access_token}` },
+    body: JSON.stringify({ project: credential.project_id }),
+  }, { fetch: fetchImpl }, signal);
+  if (!data.models || typeof data.models !== "object" || Array.isArray(data.models))
+    throw new Error("Antigravity returned an invalid model catalog.");
+  // This gateway remains Google/Gemini chat; other vendors and image generation are outside its scope.
+  return Object.entries(data.models).flatMap(([id, model]): Array<[string, GoogleModel]> => {
+    if (!id.startsWith("gemini-") || id.includes("image") || model?.isInternal === true) return [];
+    if (!model || typeof model !== "object" || Array.isArray(model) ||
+        (model.displayName != null && typeof model.displayName !== "string") ||
+        ["supportsThinking", "supportsImages", "isInternal"].some(key => model[key] != null && typeof model[key] !== "boolean") ||
+        (model.maxOutputTokens != null && (!Number.isInteger(model.maxOutputTokens) || model.maxOutputTokens <= 0)))
+      throw new Error("Antigravity returned invalid model metadata.");
+    return [[id, {
+      displayName: model.displayName ?? undefined,
+      supportsThinking: model.supportsThinking ?? undefined,
+      supportsImages: model.supportsImages ?? undefined,
+      maxOutputTokens: model.maxOutputTokens ?? undefined,
+      quotaInfo: model.quotaInfo,
+    }]];
+  });
+};
 
 export type GoogleOAuthOptions = OpenAIOAuthOptions;
+
+export const getGoogleSubscriptionUsage = async (
+  credential: GoogleOAuthCredential,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  signal: AbortSignal = AbortSignal.timeout(5_000),
+): Promise<SubscriptionUsage> => {
+  const usage: SubscriptionUsage = { provider: "Google (Antigravity)", limits: [] };
+  const request = (method: string, body: object) => requestJson(`${GOOGLE_CODE_ASSIST_BASE_URL}:${method}`, {
+    method: "POST",
+    headers: { ...ANTIGRAVITY_HEADERS, "content-type": "application/json", authorization: `Bearer ${credential.access_token}` },
+    body: JSON.stringify(body),
+  }, { fetch: fetchImpl }, signal);
+  const results = await Promise.allSettled([
+    request("loadCodeAssist", { cloudaicompanionProject: credential.project_id,
+      metadata: CLIENT_METADATA,
+    }).then(data => {
+      const tier = data.paidTier ?? data.currentTier;
+      if (tier && typeof tier === "object" && !Array.isArray(tier)) {
+        const { name, id } = tier as { name?: unknown; id?: unknown };
+        usage.plan = typeof name === "string" ? name : typeof id === "string" ? id : undefined;
+      }
+    }),
+    fetchGoogleModels(credential, fetchImpl, signal).then(models => {
+      usage.limits = models.map(([modelId, model]) => {
+        const quota = model.quotaInfo ?? {};
+        if (typeof quota !== "object" || Array.isArray(quota)) throw new Error("Invalid Antigravity model quota.");
+        const { remainingFraction, resetTime } = quota as { remainingFraction?: unknown; resetTime?: unknown };
+        if (remainingFraction != null && (typeof remainingFraction !== "number" ||
+            !Number.isFinite(remainingFraction) || remainingFraction < 0 || remainingFraction > 1))
+          throw new Error("Invalid Antigravity quota fraction.");
+        const resetsAt = resetTime == null ? undefined : typeof resetTime === "string" ? Date.parse(resetTime) / 1000 : NaN;
+        if (resetsAt !== undefined && !Number.isFinite(resetsAt)) throw new Error("Invalid Antigravity quota reset time.");
+        return {
+          name: model.displayName || modelId,
+          windows: [{ name: "Quota",
+            usedPercent: remainingFraction == null ? undefined : (1 - remainingFraction) * 100,
+            resetsAt,
+          }],
+        };
+      });
+    }),
+  ]);
+  usage.notice = results.flatMap(result => result.status === "rejected"
+    ? [result.reason instanceof Error ? result.reason.message : "Google usage request failed."] : []).join("; ") || undefined;
+  return usage;
+};
 
 const requestJson = async (
   url: string, init: RequestInit, options: GoogleOAuthOptions, signal?: AbortSignal,
@@ -54,20 +145,24 @@ const requestToken = async (
 };
 
 const loadProject = async (accessToken: string, options: GoogleOAuthOptions, signal: AbortSignal): Promise<string> => {
-  const headers = { ...GOOGLE_CODE_ASSIST_HEADERS, "content-type": "application/json", authorization: `Bearer ${accessToken}` };
-  const metadata = { ideType: "IDE_UNSPECIFIED", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI" };
+  const headers = { ...ANTIGRAVITY_HEADERS, "content-type": "application/json", authorization: `Bearer ${accessToken}` };
+  const metadata = CLIENT_METADATA;
   const account = await requestJson(`${GOOGLE_CODE_ASSIST_BASE_URL}:loadCodeAssist`, {
     method: "POST", headers, body: JSON.stringify({ metadata }),
   }, options, signal);
-  if (typeof account.cloudaicompanionProject === "string" && account.cloudaicompanionProject)
-    return account.cloudaicompanionProject;
+  const projectId = (value: unknown) => {
+    const id = value && typeof value === "object" ? (value as { id?: unknown }).id : value;
+    return typeof id === "string" ? id.trim() : "";
+  };
+  const existing = projectId(account.cloudaicompanionProject);
+  if (existing) return existing;
   const tiers = Array.isArray(account.allowedTiers) ? account.allowedTiers : [];
   const tier = tiers.find(value => value?.isDefault === true);
   // Personal managed projects only: never create a billable Cloud project or enable paid overages.
-  if (account.currentTier || tier?.id !== "free-tier" || tier.userDefinedCloudaicompanionProject) {
+  if (typeof tier?.id !== "string" || !tier.id || tier.userDefinedCloudaicompanionProject) {
     const reasons = Array.isArray(account.ineligibleTiers)
       ? account.ineligibleTiers.flatMap(value => typeof value?.reasonMessage === "string" ? [value.reasonMessage] : []) : [];
-    throw new Error(reasons.join(" ") || "Google did not provide a managed Code Assist project. Finish Gemini CLI account setup or use Google API key; organization Cloud projects are not configured by Cube.");
+    throw new Error(reasons.join(" ") || "Google did not provide a managed Antigravity project. Finish account setup in Antigravity and try again; user-supplied Cloud projects are not configured by Cube.");
   }
   let operation = await requestJson(`${GOOGLE_CODE_ASSIST_BASE_URL}:onboardUser`, {
     method: "POST", headers, body: JSON.stringify({ tierId: tier.id, metadata }),
@@ -78,9 +173,9 @@ const loadProject = async (accessToken: string, options: GoogleOAuthOptions, sig
     await delay(5000, undefined, { signal });
     operation = await requestJson(`${GOOGLE_CODE_ASSIST_BASE_URL}/${operation.name}`, { headers }, options, signal);
   }
-  const result = operation.response as { cloudaicompanionProject?: { id?: unknown } } | undefined;
-  const project = result?.cloudaicompanionProject?.id;
-  if (typeof project !== "string" || !project) throw new Error("Google account setup did not return a Code Assist project.");
+  const result = operation.response as { cloudaicompanionProject?: unknown } | undefined;
+  const project = projectId(result?.cloudaicompanionProject);
+  if (!project) throw new Error("Google account setup did not return an Antigravity project.");
   return project;
 };
 

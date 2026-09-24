@@ -1,4 +1,6 @@
 import { AnthropicOAuthCredentialSchema, type AnthropicOAuthCredential } from "@cube/workspace";
+import { ANTHROPIC_OAUTH_HEADERS } from "@cube/agent";
+import type { SubscriptionUsage } from "../types.js";
 import { createOpenAICallback, createOpenAIPkce, openExternalUrl, type OpenAIOAuthOptions } from "./openai.js";
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -6,6 +8,75 @@ const AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
 const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
 const REDIRECT_URI = "http://localhost:53692/callback";
 const SCOPES = "org:create_api_key user:profile user:inference";
+
+export const getAnthropicSubscriptionUsage = async (
+  credential: AnthropicOAuthCredential,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  signal: AbortSignal = AbortSignal.timeout(5_000),
+): Promise<SubscriptionUsage> => {
+  const usage: SubscriptionUsage = { provider: "Anthropic", limits: [] };
+  const object = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid Anthropic usage response.");
+    return value as Record<string, unknown>;
+  };
+  const request = async (path: "profile" | "usage") => {
+    const response = await fetchImpl(`https://api.anthropic.com/api/oauth/${path}`, {
+      headers: { ...ANTHROPIC_OAUTH_HEADERS, authorization: `Bearer ${credential.access_token}`, accept: "application/json" },
+      signal, redirect: "error",
+    });
+    const data = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const message = data?.error?.message ?? data?.message;
+      throw new Error(`Anthropic ${path} (HTTP ${response.status})${typeof message === "string" ? `: ${message}` : ""}`);
+    }
+    return object(data);
+  };
+  const results = await Promise.allSettled([
+    request("profile").then(data => {
+      const organization = data.organization == null ? {} : object(data.organization);
+      const plan = organization.organization_type;
+      if (typeof plan === "string") usage.plan = plan.replace(/^claude_/, "");
+    }),
+    request("usage").then(data => {
+      const limits: SubscriptionUsage["limits"] = [];
+      const add = (name: string, seconds: number, value: unknown) => {
+        if (value == null) return;
+        const window = object(value);
+        const used = window.utilization;
+        if (used != null && (typeof used !== "number" || !Number.isFinite(used) || used < 0))
+          throw new Error("Invalid Anthropic usage percentage.");
+        const reset = window.resets_at;
+        const resetsAt = reset == null ? undefined : typeof reset === "string" ? Date.parse(reset) / 1000 : NaN;
+        if (resetsAt !== undefined && !Number.isFinite(resetsAt))
+          throw new Error("Invalid Anthropic usage reset time.");
+        let group = limits.find(limit => limit.name === name);
+        if (!group) limits.push(group = { name, windows: [] });
+        group.windows.push({ name, windowSeconds: seconds, usedPercent: used == null ? undefined : used as number, resetsAt });
+      };
+      add("Claude", 18_000, data.five_hour);
+      add("Claude", 604_800, data.seven_day);
+      for (const [key, value] of Object.entries(data)) {
+        if (key.startsWith("seven_day_")) add(key.slice(10).replaceAll("_", " "), 604_800, value);
+      }
+      if (data.limits != null) {
+        if (!Array.isArray(data.limits)) throw new Error("Invalid Anthropic usage limits.");
+        for (const value of data.limits) {
+          const limit = object(value);
+          if (limit.kind !== "weekly_scoped") continue;
+          const scope = object(limit.scope);
+          const model = object(scope.model);
+          if (typeof model.display_name === "string")
+            add(model.display_name, 604_800, { utilization: limit.percent, resets_at: limit.resets_at });
+        }
+      }
+      usage.limits = limits;
+    }),
+  ]);
+  usage.notice = results.flatMap(result => result.status === "rejected"
+    ? [result.reason instanceof Error ? result.reason.message : "Anthropic usage request failed."] : []).join("; ") || undefined;
+  return usage;
+};
 
 export type AnthropicOAuthOptions = OpenAIOAuthOptions;
 

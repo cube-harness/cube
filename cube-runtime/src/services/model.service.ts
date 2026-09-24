@@ -10,11 +10,9 @@ type TokenUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  cachedInputTokens?: number;
-  cacheCreationInputTokens?: number;
   reasoningTokens?: number;
   raw?: {
-    inputTokens?: { total?: number };
+    inputTokens?: { total?: number; cacheRead?: number; cacheWrite?: number };
     raw?: { promptTokenCount?: number };
   };
 };
@@ -126,8 +124,6 @@ export class ModelService {
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
-      cachedInputTokens: 0,
-      cacheCreationInputTokens: 0,
       reasoningTokens: 0,
     }) as TokenUsage;
     const threadId = this.session.thread.getId();
@@ -161,8 +157,8 @@ export class ModelService {
       promptTokens: effectiveUsage?.promptTokens ?? 0,
       completionTokens: effectiveUsage?.completionTokens ?? 0,
       reasoningTokens: effectiveUsage?.reasoningTokens ?? 0,
-      cachedTokens: effectiveUsage?.cachedInputTokens ?? 0,
-      cacheCreationTokens: effectiveUsage?.cacheCreationInputTokens ?? 0,
+      cachedTokens: effectiveUsage?.raw?.inputTokens?.cacheRead ?? 0,
+      cacheCreationTokens: effectiveUsage?.raw?.inputTokens?.cacheWrite ?? 0,
       totalTokens: effectiveUsage?.totalTokens ?? 0,
       threadTitle,
       threadId: threadId ?? "new thread",

@@ -23,8 +23,3 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/google@3.0.122'
   - '@ai-sdk/provider-utils@4.0.51'
   - '@ai-sdk/provider@3.0.16'
-
-patchedDependencies:
-  '@earendil-works/pi-tui@0.84.2': patches/@earendil-works__pi-tui@0.84.2.patch
-  '@mastra/core@1.63.2': patches/@mastra__core@1.63.2.patch
-  '@mastra/memory@1.28.1': patches/@mastra__memory@1.28.1.patch

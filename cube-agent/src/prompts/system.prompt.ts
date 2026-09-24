@@ -1,157 +1,101 @@
 import {
   AgentsStore,
-  ContextFile,
-  CubeHome,
-  CubeWorkspace,
-  HomeManager,
   SoulStore,
+  type HomeManager,
+  type WorkspaceManager,
+  type ContextFile,
 } from "@cube/workspace";
+import path from "node:path";
+import { z } from "zod";
 
-export interface MemoryListing {
-  path: string;
-  description: string;
-}
+const attribute = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 
-export interface BuildSystemPromptOptions {
-  selectedTools?: string[];
-  toolSnippets?: Record<string, string>;
-  promptGuidelines?: string[];
-  soul?: string;
-  cwd: string;
-  contextFiles?: ContextFile[];
-  memoryListing?: MemoryListing[];
-}
-
-// Một "part" tương ứng 1 system message block khi gửi API.
-// static=true => phần này gộp vào breakpoint cache, hiếm khi đổi.
-// static=false => phần cuối, đổi mỗi turn, KHÔNG cache.
-export interface SystemPromptPart {
-  content: string;
-  static: boolean;
-}
-
-const formatContextFiles = (files: ContextFile[]): string => {
-  if (files.length === 0) return "";
-  const blocks = files
-    .map((f) => `<project_instructions path="${f.path}">\n${f.content}\n</project_instructions>`)
-    .join("\n\n");
-  return `\n\n<project_context>\n\nProject-specific instructions and guidelines (if files conflict, project-root instructions take precedence over global ones, and nested per-tool instructions take precedence over project-root):\n\n${blocks}\n\n</project_context>\n`;
+export type InstructionInfo = {
+  soulCharacters: number;
+  agentsFiles: number;
+  agentsCharacters: number;
 };
 
-const formatMemoryListing = (items: MemoryListing[]): string => {
-  if (items.length === 0) return "";
-  const lines = items.map((m) => `- ${m.path}: ${m.description}`).join("\n");
-  return `\n\n<memory_listing>\nFiles in memory (call memory_read(path) for full content):\n${lines}\n</memory_listing>\n`;
+export type InstructionSnapshot = {
+  soul: string;
+  sources: ContextFile[];
+  explored: string[];
 };
 
-/**
- * Thứ tự PHẢI giữ nguyên vì ảnh hưởng prompt cache:
- * [1] tools + guidelines      — tĩnh tuyệt đối, không đổi giữa các turn
- * [2] soul                    — tĩnh, chỉ đổi khi user sửa SOUL.md
- * [3] contextFiles            — tĩnh trong 1 session, chỉ đổi khi mở project khác
- * [4] cwd                     — tĩnh trong 1 session
- * ---- breakpoint đặt NGAY SAU đây ----
- * [5] memoryListing           — ĐỘNG, đổi mỗi lần agent ghi memory → không cache
- *
- * Trả về mảng parts thay vì string để caller (nơi gọi Anthropic API qua Mastra/AI SDK)
- * tự set cacheControl cho phần static, không set cho phần cuối.
- */
-export const buildSystemPrompt = (options: BuildSystemPromptOptions): SystemPromptPart[] => {
-  const {
-    selectedTools = ["read", "edit", "write", "bash"],
-    toolSnippets = {},
-    promptGuidelines = [],
-    soul,
-    cwd,
-    contextFiles = [],
-    memoryListing = [],
-  } = options;
+const snapshotSchema = z.object({
+  soul: z.string(),
+  sources: z.array(z.object({ path: z.string(), scope: z.string(), content: z.string() })),
+  explored: z.array(z.string()),
+});
 
-  const visibleTools = selectedTools.filter((t) => toolSnippets[t]);
-  const toolsList = visibleTools.length
-    ? visibleTools.map((t) => `- ${t}: ${toolSnippets[t]}`).join("\n")
-    : "(none)";
+export const instructionInfo = (snapshot: InstructionSnapshot): InstructionInfo => ({
+  soulCharacters: snapshot.soul.length,
+  agentsFiles: snapshot.sources.length,
+  agentsCharacters: snapshot.sources.reduce((sum, source) => sum + source.content.length, 0),
+});
 
-  const guidelines = new Set<string>([
-    "Be concise in your responses",
-    "Show file paths clearly when working with files",
+export const formatAgentsContext = (sources: readonly ContextFile[]): string => {
+  if (!sources.length) return "";
+  return [
+    "<agents_instructions>",
+    "These are workspace instructions supplied by Cube, not a new user request.",
+    "Apply instructions only within their source scope. When instructions conflict, " +
+      "the project scope closest to the file or directory takes precedence over parent and global scopes. " +
+      "Keep all non-conflicting guidance. Equal-scope instructions are additive; ask about unresolved conflicts.",
+    ...sources.map((source) =>
+      `<instruction source="${attribute(source.path)}" scope="${attribute(source.scope)}">\n${source.content}\n</instruction>`,
+    ),
+    "</agents_instructions>",
+  ].join("\n");
+};
+
+export const loadInstructionSnapshot = async (
+  home: HomeManager,
+  workspace: WorkspaceManager,
+): Promise<InstructionSnapshot> => {
+  const explored = new Set<string>();
+  const [soul, projectFiles, global] = await Promise.all([
+    SoulStore(home).read(),
+    workspace.resolveContextFiles(explored),
+    AgentsStore(home).read().catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    }),
   ]);
-  for (const g of promptGuidelines) {
-    const trimmed = g.trim();
-    if (trimmed) guidelines.add(trimmed);
-  }
-
-  // [1] + [2] + [3] + [4]: gộp chung 1 part static — cache hit toàn bộ nếu
-  // không có gì trong các phần này đổi giữa 2 turn liên tiếp.
-  const base = `You are Cube, an autonomous coding agent operating in a terminal.
-
-Available tools:
-${toolsList}
-
-Guidelines:
-${[...guidelines].map((g) => `- ${g}`).join("\n")}`;
-
-  const soulSection = soul ? `\n\n${soul}` : "";
-  const contextSection = formatContextFiles(contextFiles);
-  const cwdLine = `\nCurrent working directory: ${cwd.replace(/\\/g, "/")}`;
-
-  const staticPart: SystemPromptPart = {
-    content: base + soulSection + contextSection + cwdLine,
-    static: true,
+  return {
+    soul,
+    sources: [
+      ...projectFiles,
+      ...(global.trim() ? [{ path: home.getAgentsPath(), scope: "global", content: global }] : []),
+    ],
+    explored: [...explored],
   };
-
-  // [5]: memory listing — part riêng, không static, đặt cuối cùng
-  const dynamicPart: SystemPromptPart = {
-    content: formatMemoryListing(memoryListing),
-    static: false,
-  };
-
-  return dynamicPart.content ? [staticPart, dynamicPart] : [staticPart];
 };
 
-export interface ComposeSystemPromptOptions {
-  home?: HomeManager;
-  cwd?: string;
-  toolSnippets: Record<string, string>;
-  selectedTools?: string[];
-  promptGuidelines?: string[];
-  memoryListing?: MemoryListing[];
-}
-
-export const composeSystemPrompt = async (
-  opts: ComposeSystemPromptOptions,
-): Promise<SystemPromptPart[]> => {
-  const home = opts.home ?? CubeHome();
-  const workspace = CubeWorkspace(home, opts.cwd);
-
-  const [projectFiles, globalFile, { root }, soul] = await Promise.all([
-    workspace.resolveContextFiles(),
-    AgentsStore(home)
-      .read()
-      .catch((err) => {
-        if (err.code === "ENOENT") return undefined;
-        throw err;
-      }),
-    workspace.getPaths(),
-    SoulStore(home)
-      .read()
-      .catch((err) => {
-        if (err.code === "ENOENT") return undefined;
-        throw err;
-      }),
-  ]);
-
-  const contextFiles: ContextFile[] = globalFile
-    ? [{ path: home.getAgentsPath(), content: globalFile }, ...projectFiles]
-    : projectFiles;
-
-  return buildSystemPrompt({
-    cwd: root,
-    contextFiles,
-    toolSnippets: opts.toolSnippets,
-    selectedTools: opts.selectedTools,
-    promptGuidelines: opts.promptGuidelines,
-    soul,
-    memoryListing: opts.memoryListing ?? [],
-  });
+export const refreshInstructionSnapshot = async (
+  workspace: WorkspaceManager,
+  base: InstructionSnapshot,
+  saved: unknown,
+): Promise<InstructionSnapshot> => {
+  if (saved === undefined) return structuredClone(base);
+  const previous = snapshotSchema.parse(saved);
+  const key = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
+  const loaded = new Set(base.explored.map(key));
+  const paths = previous.explored
+    .filter((scope) => !loaded.has(key(scope)))
+    .map((scope) => path.join(scope, "AGENTS.md"));
+  const sources = await workspace.readContextSources(paths);
+  return {
+    soul: base.soul,
+    sources: [
+      ...sources,
+      ...base.sources,
+    ],
+    explored: [...new Set([...base.explored, ...previous.explored])],
+  };
 };

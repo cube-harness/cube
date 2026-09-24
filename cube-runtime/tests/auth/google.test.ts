@@ -2,11 +2,53 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import crypto from "node:crypto";
 import { type CubeAuth } from "@cube/workspace";
-import { beginGoogleLogin, refreshGoogleCredential } from "../../src/auth/google.js";
+import { beginGoogleLogin, refreshGoogleCredential, getGoogleSubscriptionUsage } from "../../src/auth/google.js";
 import { GoogleAuthManager } from "../../src/auth/auth-manager.js";
 
-test("Google PKCE login waits for callback and managed project; cancellation/timeout never exchange tokens", async t => {
-  for (const outcome of ["existing", "onboard", "project-required", "cancel", "timeout"] as const) {
+test("Antigravity status uses per-model quota without inventing capacity or treating missing quota as zero", async () => {
+  const credential = { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, project_id: "project" };
+  let models: unknown = {
+    "gemini-test": { displayName: "Gemini Test", quotaInfo: { remainingFraction: 0.64, resetTime: "2026-09-17T10:54:00Z" } },
+    "gemini-empty": { quotaInfo: { remainingFraction: 0 } },
+    "gemini-unknown": {},
+    "gemini-internal": { isInternal: true, quotaInfo: { remainingFraction: 1 } },
+  };
+  let profileFails = false;
+  const fetchUsage: typeof fetch = async (url, init) => {
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access");
+    assert.equal(init?.method, "POST");
+    assert.equal(init?.redirect, "error");
+    assert.ok(init?.signal);
+    if (String(url).endsWith(":loadCodeAssist")) return profileFails
+      ? Response.json({ error: { message: "tier unavailable" } }, { status: 403 })
+      : Response.json({ currentTier: { name: "Standard" }, paidTier: { name: "Google AI Pro" } });
+    assert.equal(String(url), "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels");
+    assert.deepEqual(JSON.parse(String(init?.body)), { project: "project" });
+    return Response.json({ models });
+  };
+  const result = await getGoogleSubscriptionUsage(credential, fetchUsage);
+  assert.equal(result.plan, "Google AI Pro");
+  assert.equal(result.limits.length, 3);
+  assert.equal(result.limits[0]!.name, "Gemini Test");
+  assert.deepEqual(result.limits.map(limit => limit.windows[0]!.usedPercent), [36, 100, undefined]);
+  assert.equal(result.limits[0]!.windows[0]!.windowSeconds, undefined, "a reset date does not imply a fixed daily window");
+  assert.equal(result.limits[0]!.windows[0]!.resetsAt, 1789642440);
+  assert.equal(result.limits[0]!.windows[0]!.remaining, undefined);
+  profileFails = true;
+  const partial = await getGoogleSubscriptionUsage(credential, fetchUsage);
+  assert.equal(partial.plan, undefined);
+  assert.deepEqual(partial.limits, result.limits);
+  assert.match(partial.notice!, /tier unavailable/);
+  for (const quotaInfo of [{ remainingFraction: 2 }, { remainingFraction: "0.5" }, { resetTime: "bad" }, []]) {
+    models = { "gemini-test": { quotaInfo } };
+    const invalid = await getGoogleSubscriptionUsage(credential, fetchUsage);
+    assert.deepEqual(invalid.limits, []);
+    assert.match(invalid.notice!, /Invalid Antigravity/);
+  }
+});
+
+test("Antigravity PKCE login waits for callback and managed project; cancellation/timeout never exchange tokens", async t => {
+  for (const outcome of ["existing", "object-project", "onboard", "project-required", "ineligible", "cancel", "timeout"] as const) {
     let resolve!: (code: string) => void;
     let reject!: (error: Error) => void;
     let opened = "";
@@ -31,13 +73,19 @@ test("Google PKCE login waits for callback and managed project; cancellation/tim
           return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
         }
         assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access");
-        if (url.endsWith(":loadCodeAssist")) return Response.json(outcome === "existing"
-          ? { currentTier: { id: "standard-tier" }, cloudaicompanionProject: "managed-project" }
-          : { allowedTiers: [{ id: outcome === "onboard" ? "free-tier" : "standard-tier", isDefault: true }] });
+        assert.match(new Headers(init?.headers).get("user-agent")!, /^antigravity\/ide\//);
+        if (url.endsWith(":loadCodeAssist")) {
+          const metadata = JSON.parse(String(init?.body)).metadata;
+          assert.equal(metadata.ideType, 9);
+          assert.equal(metadata.pluginType, 2);
+          assert.equal(typeof metadata.platform, "number");
+          return Response.json(outcome === "existing" || outcome === "object-project"
+            ? { currentTier: { id: "standard-tier" }, cloudaicompanionProject: outcome === "existing" ? "managed-project" : { id: "managed-project" } }
+            : outcome === "ineligible" ? { ineligibleTiers: [{ reasonMessage: "Account is not eligible for Antigravity" }] }
+            : { allowedTiers: [{ id: "legacy-tier", isDefault: true, userDefinedCloudaicompanionProject: outcome === "project-required" }] });
+        }
         if (url.endsWith(":onboardUser")) {
-          assert.deepEqual(JSON.parse(String(init?.body)), { tierId: "free-tier", metadata: {
-            ideType: "IDE_UNSPECIFIED", platform: "PLATFORM_UNSPECIFIED", pluginType: "GEMINI",
-          } });
+          assert.equal(JSON.parse(String(init?.body)).tierId, "legacy-tier");
           return Response.json({ name: "operations/setup-1", done: false });
         }
         assert.ok(url.endsWith("/operations/setup-1"));
@@ -49,7 +97,9 @@ test("Google PKCE login waits for callback and managed project; cancellation/tim
       assert.equal(login.expiresAt, 301000);
       assert.equal(calls.length, 0);
       const url = new URL(opened);
-      assert.equal(url.searchParams.get("client_id"), "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com");
+      assert.equal(url.searchParams.get("client_id"), "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com");
+      assert.ok(url.searchParams.get("scope")!.includes("https://www.googleapis.com/auth/cclog"));
+      assert.ok(url.searchParams.get("scope")!.includes("https://www.googleapis.com/auth/experimentsandconfigs"));
       assert.equal(url.searchParams.get("access_type"), "offline");
       assert.match(url.searchParams.get("prompt")!, /select_account/);
       if (outcome === "cancel" || outcome === "timeout") {
@@ -63,13 +113,14 @@ test("Google PKCE login waits for callback and managed project; cancellation/tim
           await new Promise(yes => setImmediate(yes));
           t.mock.timers.tick(5000);
         }
-        if (outcome === "project-required") {
-          await assert.rejects(login.completion, /Cloud project/);
+        if (outcome === "project-required" || outcome === "ineligible") {
+          await assert.rejects(login.completion, outcome === "ineligible" ? /Account is not eligible for Antigravity/ : /Cloud project/);
           assert.equal(calls.length, 2);
         } else assert.deepEqual(await login.completion, {
           access_token: "access", refresh_token: "refresh", expires_at: 3601000, project_id: "managed-project",
         });
         assert.equal(tokenRequest!.get("code"), "code");
+        assert.equal(tokenRequest!.get("client_id"), url.searchParams.get("client_id"));
         assert.equal(tokenRequest!.get("redirect_uri"), url.searchParams.get("redirect_uri"));
         assert.equal(crypto.createHash("sha256").update(tokenRequest!.get("code_verifier")!).digest("base64url"), url.searchParams.get("code_challenge"));
       }
@@ -89,6 +140,7 @@ test("Google refresh preserves project/token, coalesces requests and cannot resu
   }, { now: () => 1000, fetch: async (_url, init) => {
     calls++;
     assert.equal(new URLSearchParams(String(init?.body)).get("grant_type"), "refresh_token");
+    assert.equal(new URLSearchParams(String(init?.body)).get("client_id"), "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com");
     if (mode === "logout") await new Promise<void>(resolve => { release = resolve; });
     if (mode === "rejected") return Response.json({ error: "invalid_grant" }, { status: 400 });
     return Response.json({ access_token: "new", expires_in: 3600 });

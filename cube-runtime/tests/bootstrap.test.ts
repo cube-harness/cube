@@ -188,7 +188,22 @@ test("startup reuses prepared resources and reads the committed model", { timeou
         xai: { access_token: "grok-test", refresh_token: "grok-refresh", expires_at: Date.now() + 3600000 },
       } }));
       const grok = await runtime.gateway.createStoredDraft("oauth/xai");
-      await runtime.gateway.set({ draftId: grok.draftId, model: { modelId: "xai/grok-build" } });
+      // Use the real Session gate to exercise the runtime's live-switch boundary.
+      const session = (runtime as unknown as { dependencies: { session: import("@cube/agent").Session } }).dependencies.session;
+      const approval = session.approval.arm({ toolName: "execute_command", toolCallId: "gate" });
+      await assert.rejects(runtime.gateway.set({ draftId: grok.draftId, model: { modelId: "xai/grok-build" } }), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.doesNotMatch(error.message, /rollback failed/);
+        assert.match(String(error.cause), /Finish or cancel/);
+        return true;
+      });
+      assert.equal(runtime.model.current().modelId, modelId);
+      assert.equal((await ConfigStore(home).read()).gateway, "api_key/google");
+      runtime.respondToApproval({ toolName: "execute_command", toolCallId: "gate", decision: "decline" });
+      await approval;
+      session.approval.clearToolName();
+      const grokRetry = await runtime.gateway.createStoredDraft("oauth/xai");
+      await runtime.gateway.set({ draftId: grokRetry.draftId, model: { modelId: "xai/grok-build" } });
       assert.equal(runtime.model.current().modelId, "xai/grok-build");
       assert.equal((await ConfigStore(home).read()).gateway, "oauth/xai");
       assert.equal((await runtime.gateway.listModels()).providers.xai?.models[0]?.tool_call, undefined);

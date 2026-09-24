@@ -7,7 +7,7 @@ import {
   RunnableConfigSchema,
   CubeHome,
   type CubeConfig,
-  type Home,
+  type HomeManager,
 } from "@cube/workspace";
 import {
   createMemory,
@@ -61,7 +61,6 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
         buffer_activation: 0.8,
         block_after: 1.2,
         previous_observer_tokens: 2_000,
-        instruction: null,
         manage_working_memory: true,
         thread_title: false,
         observe_attachments: "auto",
@@ -71,14 +70,13 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
         observation_tokens: 40_000,
         buffer_activation: 0.5,
         block_after: 1.2,
-        instruction: null,
       },
     },
   },
   permissions: { require_approval_for: ["execute_command"] },
 });
 
-const createTestHome = async (): Promise<{ home: Home; root: string }> => {
+const createTestHome = async (): Promise<{ home: HomeManager; root: string }> => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cube-memory-test-"));
   const home = CubeHome({ cubeHome: root });
   await home.ensure();
@@ -115,6 +113,8 @@ test("maps the normalized task-memory pipeline without forwarding DEFAULT fields
     assert.equal(merged.workingMemory?.scope, "thread");
     assert.equal(merged.workingMemory?.agentManaged, false);
     assert.ok(om && typeof om === "object");
+    assert.equal(om.observation?.instruction, undefined);
+    assert.equal(om.reflection?.instruction, undefined);
     assert.equal("model" in om, false);
     assert.equal(om.activateAfterIdle, false);
     assert.equal(om.activateOnProviderChange, true);

@@ -3,6 +3,7 @@ import {
   Text,
   getKeybindings,
   truncateToWidth,
+  stripTerminalSequences,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
@@ -13,7 +14,7 @@ import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { KeyHint } from "./key-hint.js";
 import { SearchBar } from "./search-bar.js";
 
-const EFFORT_DESCRIPTIONS: Record<string, string> = {
+const API_KEY_EFFORT_DESCRIPTIONS: Record<string, string> = {
   none: "Disable reasoning",
   minimal: "Fast shallow reasoning",
   low: "Light thinking pass",
@@ -98,6 +99,9 @@ export class ModelPickerComponent implements Component, Focusable {
   }
 
   private showReasoning(modelId: string, efforts: string[]): void {
+    const descriptions = this.options.gatewayId.startsWith("api_key/")
+      ? API_KEY_EFFORT_DESCRIPTIONS
+      : this.models.find(model => model.modelId === modelId)?.reasoning_effort_descriptions;
     this.step = "reasoning";
     this.focused = this.hasFocus;
     this.selectedModelId = modelId;
@@ -111,7 +115,7 @@ export class ModelPickerComponent implements Component, Focusable {
           (modelId === this.options.currentModelId && effort === this.options.currentReasoningEffort
             ? " (Current)"
             : ""),
-        description: EFFORT_DESCRIPTIONS[effort] ?? effort + " level",
+        description: stripTerminalSequences(descriptions?.[effort] ?? "").replace(/[\r\n\t]/g, " "),
       })),
       Math.min(8, Math.max(3, efforts.length)),
       createSelectListTheme(),

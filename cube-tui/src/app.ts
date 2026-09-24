@@ -86,6 +86,7 @@ export class CubeApp {
       workspace: this.runtime.workspaceRoot,
       threadId: this.runtime.thread.current() ?? "new thread",
     });
+    this.syncInstructionInfo();
     this.applyPreferences(this.preferences);
     if (!options.screenAlreadyMounted) this.screen.startTerminal();
   }
@@ -104,23 +105,33 @@ export class CubeApp {
   async submitPrompt(content: string): Promise<void> {
     const trimmed = content.trim();
     if (!trimmed) return;
-    const state = this.runtime.getDisplayState();
-    const isSlashCommand = trimmed.startsWith("/");
-    if (!isSlashCommand) {
-      if (state.isRunning || (state.queuedFollowUps ?? 0) > 0) {
-        this.screen.promptEditor.enqueueQueuedPrompt(trimmed);
-        this.screen.requestRender();
-      } else {
-        this.screen.addUserMessage(trimmed);
-      }
-    }
-
     try {
-      await this.handlePromptResult(await this.runtime.prompt.submit(trimmed));
+      await this.handlePromptResult(await this.runtime.prompt.submit(trimmed, (queued) => {
+        if (queued) {
+          this.screen.promptEditor.enqueueQueuedPrompt(trimmed);
+          this.screen.requestRender();
+        } else {
+          this.screen.addUserMessage(trimmed);
+        }
+      }));
     } catch (error: unknown) {
       this.screen.workingIndicator.stop();
       this.screen.showNotice(toRuntimeNotice(error));
+    } finally {
+      this.syncInstructionInfo();
+      this.screen.requestRender();
     }
+  }
+
+  private syncInstructionInfo(): void {
+    const info = this.runtime.getInstructionInfo();
+    const number = (value: number) => value.toLocaleString("en-US");
+    this.screen.setInfo({
+      soul: `Loaded · ${number(info.soulCharacters)} chars`,
+      agentMd: info.agentsFiles
+        ? `Loaded · ${number(info.agentsFiles)} ${info.agentsFiles === 1 ? "file" : "files"} · ${number(info.agentsCharacters)} chars`
+        : "None",
+    });
   }
 
   async handlePromptResult(result: PromptResult): Promise<void> {
@@ -217,6 +228,7 @@ export class CubeApp {
         return;
       case "usage":
         this.screen.showUsage(result.metrics);
+        if (result.notice) this.screen.showNotice(result.notice);
         return;
       case "command-catalog":
         this.screen.showNotice({
@@ -333,6 +345,9 @@ export class CubeApp {
         this.screen.workingIndicator.stop();
         this.screen.showNotice(toRuntimeNotice(event.error));
         return;
+      case "info":
+        this.screen.showNotice({ level: "info", message: event.message });
+        return;
       case "workspace_status_changed":
         if (String(event.status) !== "ready") {
           this.screen.workingIndicator.start(`Workspace: ${String(event.status)}`);
@@ -350,11 +365,11 @@ export class CubeApp {
   handleInterrupt(): boolean {
     const queued = this.screen.promptEditor.popQueuedPrompt();
     if (queued !== undefined) {
+      this.locallyCancelledQueueTransitions += 1;
       const nativeQueued = this.runtime.prompt.cancelLatestQueued();
       if (nativeQueued === null) {
+        this.locallyCancelledQueueTransitions -= 1;
         this.screen.promptEditor.enqueueQueuedPrompt(queued);
-      } else {
-        this.locallyCancelledQueueTransitions += 1;
       }
       this.screen.requestRender();
       return true;
@@ -381,6 +396,7 @@ export class CubeApp {
   }
 
   private applyDisplayState(state: RuntimeDisplayState): void {
+    this.syncInstructionInfo();
     const nextQueued = state.queuedFollowUps ?? 0;
     if (nextQueued < this.nativeQueuedFollowUps) {
       let removed = this.nativeQueuedFollowUps - nextQueued;

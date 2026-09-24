@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth} from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import chalk, { type ChalkInstance } from "chalk";
 import { appTheme } from "../themes/app.theme.js";
 
@@ -16,6 +16,7 @@ const CUBE_ICON = [
 export interface InfoBoxContent {
   model?: string;
   workspace?: string;
+  soul?: string;
   agentMd?: string;
   threadTitle?: string;
   threadId?: string;
@@ -26,11 +27,12 @@ export type InforBoxContent = InfoBoxContent;
 export class InfoBox implements Component {
   invalidate = () => {};
 
-  private model: string = "cube-agent";
-  private workspace: string = "D:/cube";
-  private agentMd: string = "AGENT.md (active)";
+  private model: string = "<none>";
+  private workspace: string = "<none>";
+  private soul: string = "<none>";
+  private agentMd: string = "<none>";
   private threadTitle?: string;
-  private threadId: string = "thread_default";
+  private threadId: string = "new thread";
 
   private paddingX: number = 2;
   private paddingY: number = 1;
@@ -81,6 +83,7 @@ export class InfoBox implements Component {
   setInfo(info: InfoBoxContent) {
     if (info.model !== undefined) this.model = info.model;
     if (info.workspace !== undefined) this.workspace = info.workspace;
+    if (info.soul !== undefined) this.soul = info.soul;
     if (info.agentMd !== undefined) this.agentMd = info.agentMd;
     if ("threadTitle" in info) this.threadTitle = info.threadTitle;
     if (info.threadId !== undefined) this.threadId = info.threadId;
@@ -94,13 +97,15 @@ export class InfoBox implements Component {
       : appTheme.ui.border;
 
     const titleChalk = this.titleColor
-      ? ((chalk[this.titleColor as keyof ChalkInstance] ?? appTheme.ui.primary.bold) as ChalkInstance)
+      ? ((chalk[this.titleColor as keyof ChalkInstance] ??
+          appTheme.ui.primary.bold) as ChalkInstance)
       : appTheme.ui.primary.bold;
 
     const contentLines: string[] = [
       `${appTheme.ui.muted("Model        :")} ${appTheme.ui.text(this.model)}`,
       `${appTheme.ui.muted("Workspace    :")} ${appTheme.ui.text(this.workspace)}`,
-      `${appTheme.ui.muted("AGENT.md     :")} ${appTheme.ui.text(this.agentMd)}`,
+      `${appTheme.ui.muted("SOUL.md      :")} ${appTheme.ui.text(this.soul)}`,
+      `${appTheme.ui.muted("AGENTS.md    :")} ${appTheme.ui.text(this.agentMd)}`,
     ];
 
     if (this.threadTitle) {
@@ -109,9 +114,7 @@ export class InfoBox implements Component {
       );
     }
 
-    contentLines.push(
-      `${appTheme.ui.muted("Thread ID    :")} ${appTheme.ui.text(this.threadId)}`,
-    );
+    contentLines.push(`${appTheme.ui.muted("Thread ID    :")} ${appTheme.ui.text(this.threadId)}`);
 
     // Tạo gradient cho Cube Icon giống Banner cũ
     const iconHeight = CUBE_ICON.length;
@@ -141,14 +144,20 @@ export class InfoBox implements Component {
     const effectiveInnerWidth = boxWidth - 2;
 
     const rightDashCount = Math.max(0, boxWidth - titleWidth - 3);
-    const topLine = borderChalk("╭─") + titleChalk(formattedTitle) + borderChalk("─".repeat(rightDashCount)) + borderChalk("╮");
+    const topLine =
+      borderChalk("╭─") +
+      titleChalk(formattedTitle) +
+      borderChalk("─".repeat(rightDashCount)) +
+      borderChalk("╮");
     const bottomLine = borderChalk("╰") + borderChalk("─".repeat(boxWidth - 2)) + borderChalk("╯");
 
     const renderedLines: string[] = [topLine];
 
     // Padding Y ở trên
     for (let i = 0; i < this.paddingY; i++) {
-      renderedLines.push(`${borderChalk("│")}${" ".repeat(effectiveInnerWidth)}${borderChalk("│")}`);
+      renderedLines.push(
+        `${borderChalk("│")}${" ".repeat(effectiveInnerWidth)}${borderChalk("│")}`,
+      );
     }
 
     // Gộp Cube (bên trái) và Text (bên phải) theo từng dòng
@@ -160,7 +169,10 @@ export class InfoBox implements Component {
       const cubeLine = coloredIcon[i] ?? " ".repeat(cubeWidth);
       let textLine = contentLines[i] ?? "";
 
-      const maxAllowedTextWidth = Math.max(0, effectiveInnerWidth - (this.paddingX * 2) - cubeWidth - gap);
+      const maxAllowedTextWidth = Math.max(
+        0,
+        effectiveInnerWidth - this.paddingX * 2 - cubeWidth - gap,
+      );
       if (visibleWidth(textLine) > maxAllowedTextWidth) {
         textLine = truncateToWidth(textLine, maxAllowedTextWidth);
       }
@@ -176,7 +188,9 @@ export class InfoBox implements Component {
 
     // Padding Y ở dưới
     for (let i = 0; i < this.paddingY; i++) {
-      renderedLines.push(`${borderChalk("│")}${" ".repeat(effectiveInnerWidth)}${borderChalk("│")}`);
+      renderedLines.push(
+        `${borderChalk("│")}${" ".repeat(effectiveInnerWidth)}${borderChalk("│")}`,
+      );
     }
 
     renderedLines.push(bottomLine);
@@ -189,8 +203,12 @@ export class InfoBox implements Component {
 const interpolateHex = (from: string, to: string, t: number): string => {
   const a = parseInt(from.slice(1), 16);
   const b = parseInt(to.slice(1), 16);
-  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  const ar = (a >> 16) & 255,
+    ag = (a >> 8) & 255,
+    ab = a & 255;
+  const br = (b >> 16) & 255,
+    bg = (b >> 8) & 255,
+    bb = b & 255;
   const r = Math.round(ar + (br - ar) * t);
   const g = Math.round(ag + (bg - ag) * t);
   const bl = Math.round(ab + (bb - ab) * t);

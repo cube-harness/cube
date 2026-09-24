@@ -25,7 +25,6 @@ export const startTui = async (): Promise<void> => {
             }`
           : "Not configured",
         workspace: bootstrap.workspaceRoot,
-        agentMd: "AGENT.md (active)",
         threadId: "new thread",
       },
     });

@@ -7,11 +7,11 @@ export type {
 export {
   createCubeAgent,
   updateCubeAgentModel,
-  updateCubeAgentSoul,
-  reloadCubeAgentSoul,
+  reloadCubeAgentInstructions,
   buildModelConfig,
 } from "./agents/default.agent.js";
 export { createCubeController } from "./agents/controller.js";
+export type { InstructionInfo, InstructionSnapshot } from "./prompts/system.prompt.js";
 export { configureCubePermissions, resolveCubeToolCategory } from "./permission.js";
 export {
   createCubeLogger,
@@ -22,6 +22,9 @@ export {
 export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
 export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
+export type { CubeTools } from "./tools/cube-tools.js";
+export type { FileMutationResult, FileChange } from "./tools/file.tools.js";
+export type { CommandResult } from "./tools/command.tools.js";
 export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";
 export {
   createCubeGateways,
@@ -43,6 +46,7 @@ export {
   ANTHROPIC_BASE_URL,
   ANTHROPIC_OAUTH_HEADERS,
   GOOGLE_CODE_ASSIST_BASE_URL,
-  GOOGLE_CODE_ASSIST_HEADERS,
+  ANTIGRAVITY_BASE_URL,
+  ANTIGRAVITY_HEADERS,
 } from "./gateways/oauth.gateway.js";
 export * from "./gateways/types.js";
