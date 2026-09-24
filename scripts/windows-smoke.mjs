@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,7 +10,7 @@ const { createCubeAgent } = await import("@cube/agent");
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { LibSQLStore } = await import("@mastra/libsql");
 const { loadInitializePrompt } = await import(new URL("./processors/initialize.processor.js", import.meta.resolve("@cube/agent")));
-const scratch = await mkdtemp(path.join(tmpdir(), "cube-windows-smoke-"));
+const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-windows-smoke-")));
 const cwd = process.cwd();
 let agent;
 let storage;
@@ -40,7 +40,7 @@ try {
   const commands = await agent.listTools();
   const result = await commands.execute_command.execute({ command: "echo CUBE_COMMAND_OK", reason: "Verify packaged command execution" }, {});
   assert.equal(result.exit_code, 0);
-  assert.equal(result.cwd, project);
+  assert.equal(await realpath(result.cwd), await realpath(project));
   assert.match(result.output, /CUBE_COMMAND_OK/);
   storage = new LibSQLStore({ id: "smoke", url: `file:${home.getMemoryDbPath()}` });
   await storage.init();
