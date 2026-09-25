@@ -1,33 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { INITIALIZE_PROMPT } from "../prompts/initialize.prompt.js";
 import type {
   Processor,
   ProcessLLMRequestArgs,
   ProcessLLMRequestResult,
 } from "@mastra/core/processors";
 
-let cachedPrompt: string | null = null;
-
 export const loadInitializePrompt = (): string => {
-  if (cachedPrompt) return cachedPrompt;
-
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidatePaths = [
-    path.join(currentDir, "..", "prompts", "initialize.md"),
-    path.join(currentDir, "..", "src", "prompts", "initialize.md"),
-    path.resolve(process.cwd(), "cube-agent/src/prompts/initialize.md"),
-    path.resolve(process.cwd(), "src/prompts/initialize.md"),
-  ];
-
-  for (const candidate of candidatePaths) {
-    if (existsSync(candidate)) {
-      cachedPrompt = readFileSync(candidate, "utf-8").trim();
-      return cachedPrompt;
-    }
-  }
-
-  throw new Error("Could not locate initialize.md prompt file.");
+  return INITIALIZE_PROMPT;
 };
 
 export interface InitializeProcessorOptions {
