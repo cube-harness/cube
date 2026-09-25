@@ -30,7 +30,11 @@ pass `-InstallDir <temporary-directory> -NoPathUpdate`.
 Configure a dedicated R2 bucket with a public custom domain. In the private GitHub
 repository configure secrets `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (write access
 limited to this bucket), and variables `R2_ENDPOINT` (HTTPS S3 endpoint) and
-`R2_BUCKET`. The Windows runner needs the AWS CLI for the opt-in publish step.
+`R2_BUCKET`. The Windows publish runner needs the AWS CLI.
+
+Run the single `Cube package` workflow (`.github/workflows/package.yml`) for all
+four targets: Windows, Linux/WSL, macOS Apple Silicon and Intel. It publishes only
+after every target passes and `publish` is selected; otherwise it only saves artifacts.
 
 The workflow uploads immutable checksum-named archives first, then `latest.json`.
 Do not cache `latest.json` or `install.ps1` as immutable. A checksum detects a damaged

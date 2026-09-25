@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+# Resolve the installer's symlink without changing the caller's working directory.
+launcher=$0
+while [ -L "$launcher" ]; do
+  directory=$(CDPATH= cd -P -- "$(dirname -- "$launcher")" && pwd)
+  launcher=$(readlink "$launcher")
+  case "$launcher" in /*) ;; *) launcher=$directory/$launcher ;; esac
+done
+directory=$(CDPATH= cd -P -- "$(dirname -- "$launcher")" && pwd)
+PATH="$directory/runtime:$PATH"
+export PATH
+exec "$directory/runtime/node" "$directory/app/dist/main.js" "$@"

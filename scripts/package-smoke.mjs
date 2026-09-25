@@ -10,7 +10,7 @@ const { createCubeAgent } = await import("@cube/agent");
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { LibSQLStore } = await import("@mastra/libsql");
 const { loadInitializePrompt } = await import(new URL("./processors/initialize.processor.js", import.meta.resolve("@cube/agent")));
-const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-windows-smoke-")));
+const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-package-smoke-")));
 const cwd = process.cwd();
 let agent;
 let storage;
@@ -29,12 +29,12 @@ try {
   assert.equal(workspace.filesystem.basePath, project);
   const tools = await createWorkspaceTools(workspace);
   assert.deepEqual(Object.keys(tools).sort(), ["grep", "list_files", "read_file"]);
-  await writeFile(path.join(project, "probe.txt"), "CUBE_WINDOWS_OK\n");
+  await writeFile(path.join(project, "probe.txt"), "CUBE_PACKAGE_OK\n");
   const previousPath = process.env.PATH;
   try {
     process.env.PATH = "";
-    assert.match(await tools.grep.execute({ pattern: "CUBE_WINDOWS_OK" }), /probe.txt:1:1/);
-    assert.match(await tools.read_file.execute({ path: "probe.txt" }), /CUBE_WINDOWS_OK/);
+    assert.match(await tools.grep.execute({ pattern: "CUBE_PACKAGE_OK" }), /probe.txt:1:1/);
+    assert.match(await tools.read_file.execute({ path: "probe.txt" }), /CUBE_PACKAGE_OK/);
     assert.match(await tools.list_files.execute({ path: "." }), /probe.txt/);
   } finally { process.env.PATH = previousPath; }
   const commands = await agent.listTools();
@@ -44,7 +44,7 @@ try {
   assert.match(result.output, /CUBE_COMMAND_OK/);
   storage = new LibSQLStore({ id: "smoke", url: `file:${home.getMemoryDbPath()}` });
   await storage.init();
-  console.log("windows-smoke: native tools, command, templates and SQLite OK outside checkout");
+  console.log("package-smoke: native tools, command, templates and SQLite OK outside checkout");
 } finally {
   await agent?.disposeTools();
   await storage?.close();
