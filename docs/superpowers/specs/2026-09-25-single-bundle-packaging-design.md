@@ -57,9 +57,8 @@ cube-windows-x64.zip (~80MB)
 ├── cube.cmd / cube (executable launcher)
 └── app/
     └── dist/
-        ├── bundle.js (Single compiled ESM bundle, ~5MB)
-        ├── prompts/initialize.md
-        └── template/
+        ├── bundle.js (Single compiled ESM bundle, ~5MB, includes inlined initialize.prompt.ts)
+        └── template/ (Workspace initial configuration templates)
 ```
 
 ---
@@ -86,12 +85,11 @@ We introduce an esbuild packaging step in `scripts/build-binary.mjs` (or via ded
   ```
   *(Ensures compatibility with CJS dependencies bundled into ESM format).*
 
-### 4.2. Handling Static Assets & Templates
+### 4.2. Handling Static Assets & Inlined Prompts
 
-The existing build logic copies workspace templates and prompts into `dist/`. In the single-bundle layout:
-1. `cube-workspace/src/template` is copied directly to `app/dist/template`.
-2. `cube-agent/src/prompts/initialize.md` is copied directly to `app/dist/prompts/initialize.md`.
-3. In `bundle.js`, path resolutions using `import.meta.url` or `process.cwd()` resolve relative to `app/dist/`, preserving exact asset discovery behavior.
+1. **Prompt Inlining**: `initialize.md` has been converted to `initialize.prompt.ts` (`INITIALIZE_PROMPT` string constant in TypeScript). `esbuild` bundles this prompt directly into `bundle.js`, completely eliminating runtime disk I/O and external file lookup for prompts.
+2. **Workspace Templates**: `cube-workspace/src/template` is copied directly to `app/dist/template` so the CLI can bootstrap new workspace configurations.
+3. In `bundle.js`, template path resolutions using `import.meta.url` resolve relative to `app/dist/`, preserving exact asset discovery behavior.
 
 ### 4.3. Handling Native C++ Addons (`@libsql/client` & SQLite)
 
