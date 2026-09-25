@@ -167,7 +167,6 @@ export const createCubeAgent = async (
     tools: () => ({
       ...cubeTools.forModel(activeModel),
       fetch: webFetchTool,
-      search: webSearchTool
     }),
     defaultOptions: ({ requestContext }) => {
       const controller = requestContext.get("controller") as { threadId?: string } | undefined;
