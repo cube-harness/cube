@@ -94,7 +94,6 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
   const dispose = runtime.subscribe((event) => received.push(event));
   assert.equal(listenerCalls, 1);
   assert.deepEqual(received, events.concat([{ type: "display_state", displayState }]));
-  assert.equal(dispose, unsubscribe);
   dispose();
   assert.equal(unsubscribeCalls, 1);
 

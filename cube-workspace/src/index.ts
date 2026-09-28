@@ -3,8 +3,8 @@ export { HomeManager, CubeHome } from "./home-manager.js";
 export type { HomeOptions, CubeRoot } from "./home-manager.js";
 
 // Export Workspace Manager
-export { WorkspaceManager, CubeWorkspace, ContextFile } from "./workspace-manager.js";
-export type { CubeProject } from "./workspace-manager.js";
+export { WorkspaceManager, CubeWorkspace } from "./workspace-manager.js";
+export type { CubeProject, ContextFile } from "./workspace-manager.js";
 
 // Export Stores & Bootstrap
 export {

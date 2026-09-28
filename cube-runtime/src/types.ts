@@ -8,7 +8,7 @@ import type {
 } from "@cube/workspace";
 
 export type RuntimeEvent = AgentControllerEvent;
-export type RuntimeDisplayState = Readonly<AgentControllerDisplayState>;
+export type RuntimeDisplayState = Readonly<AgentControllerDisplayState> & { compacting?: boolean };
 export type RuntimeMessage = Awaited<ReturnType<Session["thread"]["listMessages"]>>[number];
 
 export type RuntimeNotice = {

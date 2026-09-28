@@ -9,10 +9,7 @@ import {
   type CubeConfig,
   type HomeManager,
 } from "@cube/workspace";
-import {
-  createMemory,
-  finalizeCubeAgentMemory,
-} from "../src/memory.js";
+import { createMemory } from "../src/memory.js";
 
 const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
   gateway: "api_key/google",
@@ -45,33 +42,7 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
       agent_managed: false,
       template: "# Thread Task State\n\n## Objective\n",
     },
-    observational_memory: {
-      enabled: true,
-      scope: "thread",
-      activate_after_idle: false,
-      activate_on_provider_change: true,
-      share_token_budget: false,
-      temporal_markers: false,
-      retrieval: { enabled: true, vector: false, scope: "thread" },
-      observation: {
-        model: "inherit",
-        message_tokens: 30_000,
-        buffer_tokens: 0.2,
-        buffer_on_idle: false,
-        buffer_activation: 0.8,
-        block_after: 1.2,
-        previous_observer_tokens: 2_000,
-        manage_working_memory: true,
-        thread_title: false,
-        observe_attachments: "auto",
-      },
-      reflection: {
-        model: "inherit",
-        observation_tokens: 40_000,
-        buffer_activation: 0.5,
-        block_after: 1.2,
-      },
-    },
+    compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
   permissions: { require_approval_for: ["execute_command"] },
 });
@@ -101,40 +72,16 @@ test("keeps code-owned Memory options fixed outside public YAML", async () => {
   }
 });
 
-test("maps the normalized task-memory pipeline without forwarding DEFAULT fields", async () => {
+test("disables OM and keeps saved working memory read-only", async () => {
   const { home, root } = await createTestHome();
   try {
     const memory = createMemory(createConfig(), home);
     const merged = memory.getMergedThreadConfig();
-    const om = merged.observationalMemory;
-
-    assert.equal(memory.listTools().recall !== undefined, true);
+    assert.equal(merged.observationalMemory, false);
+    assert.equal(memory.listTools().recall, undefined);
     assert.equal(memory.listTools().setWorkingMemory, undefined);
-    assert.equal(merged.workingMemory?.scope, "thread");
     assert.equal(merged.workingMemory?.agentManaged, false);
-    assert.ok(om && typeof om === "object");
-    assert.equal(om.observation?.instruction, undefined);
-    assert.equal(om.reflection?.instruction, undefined);
-    assert.equal("model" in om, false);
-    assert.equal(om.activateAfterIdle, false);
-    assert.equal(om.activateOnProviderChange, true);
-    assert.deepEqual(om.retrieval, { vector: false, scope: "thread" });
-    assert.equal(om.observation?.manageWorkingMemory, true);
-    assert.equal("modelSettings" in (om.observation ?? {}), false);
-    assert.equal("providerOptions" in (om.observation ?? {}), false);
-    assert.equal("maxTokensPerBatch" in (om.observation ?? {}), false);
-    assert.equal("activateAfterIdle" in (om.observation ?? {}), false);
-    assert.equal("activateOnProviderChange" in (om.observation ?? {}), false);
-    assert.equal(om.observation?.extract?.length, 1);
-    assert.equal(om.observation?.extract?.[0]?.slug, "working-memory");
-    assert.equal("modelSettings" in (om.reflection ?? {}), false);
-    assert.equal("providerOptions" in (om.reflection ?? {}), false);
-    assert.equal("activateAfterIdle" in (om.reflection ?? {}), false);
-    assert.equal("activateOnProviderChange" in (om.reflection ?? {}), false);
-    assert.equal("extract" in (om.reflection ?? {}), false);
-  } finally {
-    await removeTestHome(root);
-  }
+  } finally { await removeTestHome(root); }
 });
 
 test("resolves inherit against the model currently active on the Cube agent", async () => {
@@ -144,11 +91,6 @@ test("resolves inherit against the model currently active on the Cube agent", as
     config.memory.generate_title.enabled = true;
     const memory = createMemory(config, home);
     const merged = memory.getMergedThreadConfig();
-    const om = merged.observationalMemory;
-    assert.ok(om && typeof om === "object");
-    assert.equal(typeof om.observation?.model, "function");
-    assert.equal(typeof om.reflection?.model, "function");
-
     const activeModel = "openrouter/poolside/laguna-xs-2.1:free";
     const dynamicContext = {
       requestContext: {},
@@ -160,8 +102,6 @@ test("resolves inherit against the model currently active on the Cube agent", as
       },
     } as any;
 
-    assert.equal(await (om.observation?.model as Function)(dynamicContext), activeModel);
-    assert.equal(await (om.reflection?.model as Function)(dynamicContext), activeModel);
 
     const generateTitle = merged.generateTitle;
     assert.ok(generateTitle && typeof generateTitle === "object");
@@ -197,58 +137,4 @@ test("uses Cube's local memory database for optional vector storage", async () =
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
     await removeTestHome(root);
   }
-});
-
-test("finalizes the installed observational-memory processor without exposing its record", async () => {
-  const calls: unknown[] = [];
-  const agent = {
-    resolveProcessorById: async (id: string) => {
-      assert.equal(id, "observational-memory");
-      return {
-        id,
-        engine: {
-          finalize: async (input: unknown) => {
-            calls.push(input);
-            return {
-              activated: true,
-              observed: false,
-              reflected: false,
-              record: { private: "mastra-internal" },
-            };
-          },
-        },
-      };
-    },
-  };
-
-  assert.deepEqual(
-    await finalizeCubeAgentMemory(agent, {
-      threadId: "thread-1",
-      resourceId: "workspace-1",
-    }),
-    {
-      enabled: true,
-      activated: true,
-      observed: false,
-      reflected: false,
-    },
-  );
-  assert.deepEqual(calls, [
-    { threadId: "thread-1", resourceId: "workspace-1" },
-  ]);
-});
-
-test("reports observational memory as disabled when no finalizable processor exists", async () => {
-  assert.deepEqual(
-    await finalizeCubeAgentMemory(
-      { resolveProcessorById: async () => null },
-      { threadId: "thread-1", resourceId: "workspace-1" },
-    ),
-    {
-      enabled: false,
-      activated: false,
-      observed: false,
-      reflected: false,
-    },
-  );
 });

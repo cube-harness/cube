@@ -40,7 +40,7 @@ export class InfoBox implements Component {
   private titleColor?: string;
 
   constructor(
-    private title: string = "Cube Information",
+    private title: string = "WorkSpace Information",
     content?: InfoBoxContent,
   ) {
     if (content) {
@@ -102,6 +102,7 @@ export class InfoBox implements Component {
       : appTheme.ui.primary.bold;
 
     const contentLines: string[] = [
+      ``,
       `${appTheme.ui.muted("Model        :")} ${appTheme.ui.text(this.model)}`,
       `${appTheme.ui.muted("Workspace    :")} ${appTheme.ui.text(this.workspace)}`,
       `${appTheme.ui.muted("SOUL.md      :")} ${appTheme.ui.text(this.soul)}`,

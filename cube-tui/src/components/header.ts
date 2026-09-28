@@ -11,7 +11,7 @@ export class Header implements Component {
 
   constructor(info?: InfoBoxContent) {
     this.banner = new Banner();
-    this.infoBox = new InfoBox("Cube Information", info);
+    this.infoBox = new InfoBox("WorkSpace Information", info);
   }
 
   getBanner(): Banner {

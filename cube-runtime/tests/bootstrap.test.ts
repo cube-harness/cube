@@ -170,9 +170,6 @@ test("startup reuses prepared resources and reads the committed model", { timeou
         embedder: { ...config.memory.embedder, enabled: false },
         semantic_recall: { ...config.memory.semantic_recall, enabled: false },
         generate_title: { ...config.memory.generate_title, enabled: false },
-        observational_memory: { ...config.memory.observational_memory, enabled: false,
-          observation: { ...config.memory.observational_memory.observation, manage_working_memory: false },
-        },
         working_memory: { ...config.memory.working_memory, enabled: false },
       },
     }));
