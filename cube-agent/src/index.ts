@@ -20,7 +20,7 @@ export {
   type CubeLogging,
 } from "./logger.js";
 export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
-export { finalizeCubeAgentMemory, type CubeMemoryFinalizeResult } from "./memory.js";
+export { CubeContext, type CompactResult, type ContextLimits } from "./context.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
 export type { CubeTools } from "./tools/cube-tools.js";
 export type { FileMutationResult, FileChange } from "./tools/file.tools.js";

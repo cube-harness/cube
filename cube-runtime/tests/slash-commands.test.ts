@@ -124,7 +124,7 @@ const createContext = () => {
     memory: {
       compact: async () => {
         calls.push(["memory.compact"]);
-        return { activated: true, observed: true, reflected: false };
+        return { status: "compacted", before: 90000, after: 10000 };
       },
     },
     gateway: {

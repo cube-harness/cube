@@ -2,7 +2,6 @@ import {
   createCubeMastra,
   createCubeGateways,
   configureCubePermissions,
-  finalizeCubeAgentMemory,
   reloadCubeAgentInstructions,
   runWithCubeLogContext,
   updateCubeAgentModel,
@@ -36,6 +35,7 @@ import { PreferenceService } from "./services/preference.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ThreadService } from "./services/thread.service.js";
 import type { GatewayReadiness, ModelSelection, PreferenceState, SlashCommandSuggestion } from "./types.js";
+import { toRuntimeNotice } from "./types.js";
 
 export type CreateCubeRuntimeOptions = {
   workspacePath?: string;
@@ -154,20 +154,36 @@ export const prepareCubeRuntime = async (
           resourceId: workspacePaths.root,
         });
 
+        const memory = new MemoryService(session, composition.context);
         gatewayDependencies.onActiveCredentialRemoved = async () => {
           while (session.followUps.dequeue()) {
             /* Drop prompts queued for the removed credential. */
           }
+          if (memory.isManual()) { memory.cancel(); return; }
           await session.abort();
         };
         const permissionNotices = await configureCubePermissions(session, config.permissions);
         await normalizeStartupSession(session);
 
+        const stopPruning = session.onBeforeAgentEnd(async (event) => {
+          const threadId = session.thread.getId();
+          if (event.reason !== "complete" || !threadId || session.approval.isArmed() || session.suspensions.hasPending()) return;
+          try {
+            await composition!.context.prune(threadId);
+          } catch (error) {
+            composition!.logger.error("Context pruning failed", { threadId, error });
+            session.emit({ type: "info", message: toRuntimeNotice(error).message });
+          }
+        });
         const thread = new ThreadService(session, {
           read: composition.agent.readInstructions,
           install: composition.agent.installInstructions,
           refresh: composition.agent.refreshInstructions,
           reload: (includeDiscovered) => reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
+        }, undefined, {
+          fork: (id, title) => composition!.context.fork(id, title),
+          invalidate: () => composition!.context.invalidate(),
+          isBusy: () => memory.isBusy(),
         });
         composition.agent.onInstructionsDiscovered = async (snapshot) => {
           if (thread.current()) await thread.saveInstructions(snapshot);
@@ -178,7 +194,7 @@ export const prepareCubeRuntime = async (
         const applyLiveModel = (modelId: string, selection: ModelSelection) => {
           // Rollback of a rejected switch is a no-op, even during an active turn.
           if (modelId === liveModelId && selection.reasoningEffort === liveEffort) return;
-          if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) {
+          if (memory.isBusy() || session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) {
             throw new Error("Finish or cancel the current turn before changing the model or gateway.");
           }
           updateCubeAgentModel(composition!.agent, modelId, selection.reasoningEffort);
@@ -207,9 +223,6 @@ export const prepareCubeRuntime = async (
           appTitle: config.app_title,
           statusLine: config.status_line,
         });
-        const memory = new MemoryService(session, (input) =>
-          finalizeCubeAgentMemory(composition!.agent, input),
-        );
         const commands: SlashCommandContext = {
           thread,
           model,
@@ -225,6 +238,7 @@ export const prepareCubeRuntime = async (
         return new CubeRuntime({
           session,
           tools: composition.tools,
+          context: composition.context,
           notices: permissionNotices,
           prompt,
           thread,
@@ -236,7 +250,7 @@ export const prepareCubeRuntime = async (
           workspaceRoot: workspacePaths.root,
           readInstructionInfo: () => composition!.agent.instructionInfo,
           readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
-          shutdownResources: () => composition!.shutdown(),
+          shutdownResources: async () => { stopPruning(); await composition!.shutdown(); },
         });
       } catch (error) {
         await composition?.shutdown().catch(() => undefined);

@@ -60,6 +60,11 @@ export class ThreadService {
       refresh: (saved: unknown) => Promise<InstructionSnapshot>;
     },
     private readonly createId: () => string = crypto.randomUUID,
+    private readonly context?: {
+      fork(id: string, title?: string): Promise<{ id: string }>;
+      invalidate(): void;
+      isBusy(): boolean;
+    },
   ) {
     this.plannedThreadId = createId();
     this.startupSnapshot = instructions.read();
@@ -86,7 +91,7 @@ export class ThreadService {
       if (!this.snapshots.has(activeId)) await this.activateInstructions(activeId);
       return activeId;
     }
-    if (this.session.run.isRunning()) throw activeRunError("create a thread");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("create a thread");
 
     if (this.reloadBeforeCreate) {
       await this.instructions.reload();
@@ -104,7 +109,7 @@ export class ThreadService {
   }
 
   async create(): Promise<{ threadId: null }> {
-    if (this.session.run.isRunning()) throw activeRunError("start a new thread");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("start a new thread");
 
     this.session.thread.detachFromCurrent();
     await this.session.thread.clearAndReleaseLock();
@@ -114,9 +119,10 @@ export class ThreadService {
   }
 
   async resume(threadId: string): Promise<ThreadSnapshot> {
-    if (this.session.run.isRunning()) throw activeRunError("switch threads");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("switch threads");
 
     const snapshot = await this.prepareInstructions(threadId);
+    this.context?.invalidate();
     await this.session.thread.switch({ threadId });
     this.instructions.install(snapshot);
     this.snapshots.set(threadId, snapshot);
@@ -126,7 +132,7 @@ export class ThreadService {
   }
 
   async rename(title: string): Promise<{ threadId: string; title: string }> {
-    if (this.session.run.isRunning()) throw activeRunError("rename a thread");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("rename a thread");
     const threadId = this.current();
     if (!threadId) throw new Error("No active thread to rename");
     const normalizedTitle = title.trim();
@@ -137,7 +143,7 @@ export class ThreadService {
   }
 
   async delete(threadId: string): Promise<{ threadId: string; wasActive: boolean }> {
-    if (this.session.run.isRunning()) throw activeRunError("delete a thread");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("delete a thread");
     const wasActive = this.current() === threadId;
     await this.session.thread.delete({ threadId });
     this.snapshots.delete(threadId);
@@ -151,14 +157,18 @@ export class ThreadService {
   }
 
   async fork(title?: string): Promise<ThreadSnapshot> {
-    if (this.session.run.isRunning()) throw activeRunError("fork a thread");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("fork a thread");
     const sourceThreadId = this.current();
     if (!sourceThreadId) throw new Error("No active thread to fork");
     const normalizedTitle = title?.trim() || undefined;
-    const clone = await this.session.thread.clone({
+    const clone = this.context ? await this.context.fork(sourceThreadId, normalizedTitle) : await this.session.thread.clone({
       sourceThreadId,
       title: normalizedTitle,
     });
+    if (this.context) {
+      await this.session.thread.switch({ threadId: clone.id });
+      this.context.invalidate();
+    }
     const snapshot = structuredClone(this.snapshots.get(sourceThreadId) ?? this.instructions.read());
     await this.saveInstructions(snapshot);
     this.instructions.install(snapshot);
@@ -175,7 +185,7 @@ export class ThreadService {
   }
 
   async reload(): Promise<void> {
-    if (this.session.run.isRunning()) throw activeRunError("reload project context");
+    if (this.session.run.isRunning() || this.context?.isBusy()) throw activeRunError("reload project context");
     await this.instructions.reload(true);
     const snapshot = this.instructions.read();
     if (this.current()) await this.saveInstructions(snapshot);

@@ -13,6 +13,8 @@ import {
   type InstructionSnapshot,
 } from "../prompts/system.prompt.js";
 import { createAgentsMdProcessor } from "../processors/agents-md.processor.js";
+import { createContextProcessor } from "../processors/context.processor.js";
+import type { CubeContext, ContextLimits } from "../context.js";
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
@@ -114,6 +116,7 @@ export const createCubeAgent = async (
   config: CubeConfig,
   logger?: IMastraLogger,
   tools?: CubeTools,
+  contextManager?: { context: CubeContext; readModel: (modelId: string) => Promise<{ limits: ContextLimits }> },
 ) => {
   let snapshot = await loadInstructionSnapshot(home, workspace);
   const startupSnapshot = structuredClone(snapshot);
@@ -159,7 +162,10 @@ export const createCubeAgent = async (
           context = formatAgentsContext(snapshot.sources);
           result.instructionInfo = instructionInfo(snapshot);
         },
+        (message) => contextManager?.context.protectedMessages.add(message),
       ),
+      ...(contextManager ? [createContextProcessor(contextManager.context, () => contextManager.readModel(activeModel),
+        () => JSON.stringify({ activeModel, snapshot }))] : []),
     ],
     workspace: mastraWorkspace,
     skills: [home.getSkillDir()],
@@ -208,6 +214,7 @@ export const createCubeAgent = async (
   const result = Object.assign(agent, {
     setToolModel: (modelId: string) => {
       activeModel = modelId;
+      contextManager?.context.invalidate();
     },
     disposeTools: cubeTools.dispose,
     instructionInfo: instructionInfo(snapshot),
@@ -216,6 +223,7 @@ export const createCubeAgent = async (
       | undefined,
     readInstructions: (): InstructionSnapshot => structuredClone(snapshot),
     installInstructions: (next: InstructionSnapshot): void => {
+      contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
       agent.__updateInstructions([

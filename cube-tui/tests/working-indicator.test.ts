@@ -44,10 +44,10 @@ test("indicator distinguishes approval, tools, memory, and reasoning", () => {
 
   assert.deepEqual(
     deriveWorkingIndicatorState(
-      state({ omProgress: { status: "observing" } }) as never,
+      state({ compacting: true }) as never,
       false,
     ),
-    { visible: true, spinning: true, phase: "memory", message: "Observing memory" },
+    { visible: true, spinning: true, phase: "memory", message: "Compacting" },
   );
 
   assert.deepEqual(
@@ -87,7 +87,7 @@ test("assistant text does not hide an unfinished turn, including before tool inp
   );
 });
 
-test("indicator labels non-model subagent and buffering work explicitly", () => {
+test("indicator labels non-model subagent and compacting work explicitly", () => {
   assert.deepEqual(
     deriveWorkingIndicatorState(
       state({
@@ -102,18 +102,18 @@ test("indicator labels non-model subagent and buffering work explicitly", () => 
 
   assert.deepEqual(
     deriveWorkingIndicatorState(
-      state({ bufferingMessages: true }) as never,
+      state({ compacting: true }) as never,
       false,
     ),
-    { visible: true, spinning: true, phase: "memory", message: "Buffering messages" },
+    { visible: true, spinning: true, phase: "memory", message: "Compacting" },
   );
 
   assert.deepEqual(
     deriveWorkingIndicatorState(
-      state({ bufferingObservations: true }) as never,
+      state({ compacting: true }) as never,
       false,
     ),
-    { visible: true, spinning: true, phase: "memory", message: "Buffering observations" },
+    { visible: true, spinning: true, phase: "memory", message: "Compacting" },
   );
 });
 
@@ -219,7 +219,7 @@ test("input indicator spins with elapsed time and an Escape cancel hint", () => 
   indicator.stop();
 });
 
-test("background memory indicator does not claim Escape can cancel it", () => {
+test("compaction indicator offers Escape to interrupt", () => {
   const timer = { unref() {} } as NodeJS.Timeout;
   const indicator = new WorkingIndicator(
     { requestRender() {} } as never,
@@ -233,10 +233,10 @@ test("background memory indicator does not claim Escape can cancel it", () => {
     },
   );
 
-  indicator.sync(state({ bufferingMessages: true }) as never, false);
+  indicator.sync(state({ compacting: true }) as never, false);
   const rendered = indicator.render(100).join("\n");
-  assert.match(rendered, /Buffering messages \(0s\)/);
-  assert.doesNotMatch(rendered, /Esc/);
+  assert.match(rendered, /Compacting \(0s/);
+  assert.match(rendered, /Esc/);
   indicator.stop();
 });
 
@@ -259,8 +259,8 @@ test("indicator timer restarts when the native work phase changes", () => {
   now = 166_000;
   assert.match(indicator.render(100).join("\n"), /156s/);
 
-  indicator.sync(state({ bufferingMessages: true }) as never, false);
-  assert.match(indicator.render(100).join("\n"), /Buffering messages \(0s/);
+  indicator.sync(state({ compacting: true }) as never, false);
+  assert.match(indicator.render(100).join("\n"), /Compacting \(0s/);
   indicator.stop();
 });
 

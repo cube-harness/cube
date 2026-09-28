@@ -53,17 +53,7 @@ const baseConfig = (): CubeConfigDocument => ({
     generate_title: { enabled: false, model: "google/gemini-test", instructions: "title" },
     semantic_recall: { enabled: false, top_k: 1, message_range: { before: 0, after: 0 }, scope: "resource", threshold: null },
     working_memory: { enabled: false, scope: "resource", use_state_signals: false, agent_managed: false, template: "memory" },
-    observational_memory: {
-      enabled: false,
-      scope: "resource",
-      activate_after_idle: false,
-      activate_on_provider_change: false,
-      share_token_budget: false,
-      temporal_markers: false,
-      retrieval: { enabled: false, vector: false, scope: "resource" },
-      observation: { model: "google/gemini-test", message_tokens: 1000, buffer_tokens: false, buffer_on_idle: false, buffer_activation: 1, block_after: 1, previous_observer_tokens: false, manage_working_memory: false, thread_title: false, observe_attachments: false },
-      reflection: { model: "google/gemini-test", observation_tokens: 1000, buffer_activation: 1, block_after: 1 },
-    },
+    compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
   permissions: { require_approval_for: [] },
 });

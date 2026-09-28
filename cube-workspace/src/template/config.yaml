@@ -31,8 +31,7 @@ memory:
     provider: sqlite
     mode: local
 
-  # Optional vector storage. Enable it when Semantic Recall or vector-based
-  # observational retrieval is enabled.
+  # Optional vector storage for Semantic Recall.
   vector:
     enabled: false
     provider: sqlite
@@ -69,8 +68,8 @@ memory:
     # With state signals, the main-agent tool is named setWorkingMemory when
     # agent_managed is enabled.
     use_state_signals: true
-    # The Observer owns updates by default. Set true to also give the main
-    # agent a Working Memory tool.
+    # Saved state is read-only by default. Set true to expose the main-agent
+    # Working Memory tool. Compaction does not update working memory.
     agent_managed: false
     template: |
       # Thread Task State
@@ -91,57 +90,14 @@ memory:
 
       ## Next Action
 
-  observational_memory:
-    enabled: true
-    scope: thread
-
-    # Observation activation settings supported through new Memory(...).
-    # activate_after_idle accepts false, auto, a duration such as 5m, or an
-    # absolute millisecond value.
-    activate_after_idle: false
-    activate_on_provider_change: true
-    # Shared token budgets are incompatible with the async pipeline below.
-    share_token_budget: false
-    temporal_markers: false
-
-    # Gives the main agent a recall tool for historical observations. Set
-    # vector: true only when Vector and Embedder are enabled.
-    retrieval:
-      enabled: true
-      vector: false
-      scope: thread
-
-    observation:
-      # inherit follows the model active in the current session. A concrete
-      # provider/model ID can be configured instead.
-      model: inherit
-      message_tokens: 60000
-      # false disables asynchronous buffering. 0.2 runs the Observer every
-      # 20% of message_tokens, approximately every 6k raw-message tokens.
-      buffer_tokens: 0.2
-      buffer_on_idle: false
-      # 0.8 replaces approximately 80% of the raw-message window and retains
-      # approximately 20% when buffered observations activate.
-      buffer_activation: 0.8
-      # 1-<100 is a multiplier; >=100 is an absolute token count.
-      block_after: 1.2
-      # false means unlimited previous observations, not disabled.
-      previous_observer_tokens: 2000
-      # Uses Mastra's built-in WorkingMemoryExtractor.
-      manage_working_memory: true
-      thread_title: false
-      # auto | true | false | MIME allowlist such as ["image/*"]
-      observe_attachments: auto
-
-    reflection:
-      # inherit follows the model active in the current session. A concrete
-      # provider/model ID can be configured instead.
-      model: inherit
-      observation_tokens: 80000
-      # Start background Reflection at 50% of observation_tokens.
-      buffer_activation: 0.5
-      # 1-<100 is a multiplier; >=100 is an absolute token count.
-      block_after: 1.2
+  compaction:
+    # /compact requires this fraction of the model context plus a safe cut.
+    manual_min_ratio: 0.30
+    # Fraction of conversation capacity retained after reserving instructions
+    # and the new summary. Tool exchanges are never split.
+    keep_recent_ratio: 0.25
+    # Generation/counting reserve, not a fixed summary length.
+    reserve_tokens: 16384
 
 permissions:
   require_approval_for:
