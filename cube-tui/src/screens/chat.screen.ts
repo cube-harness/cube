@@ -1,4 +1,7 @@
-import { type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  HStack, ScrollView, VStack, isViewportTUI, truncateToWidth, visibleWidth,
+  type Component, type TUI,
+} from "@earendil-works/pi-tui";
 import type {
   GatewayId,
   GatewaySelection,
@@ -80,6 +83,8 @@ export class ChatScreen {
   readonly footer: Footer;
 
   private mounted = false;
+  private dock?: VStack;
+  private transcript?: ScrollView;
   private onSubmit?: (content: string) => void | Promise<void>;
   private reasoningTiming?: {
     messageId: string;
@@ -116,6 +121,27 @@ export class ChatScreen {
     this.options.tui.addChild(this.workingIndicator);
     this.options.tui.addChild(this.promptEditor);
     this.options.tui.addChild(this.footer);
+    if (isViewportTUI(this.options.tui)) {
+      this.dock = new VStack([this.promptEditor, { component: this.footer, shrink: 0 }]);
+      this.transcript = new ScrollView(this.messageList, { follow: "end", primary: true });
+      const welcome: Component = {
+        invalidate: () => { this.banner.invalidate(); this.infoBox.invalidate(); },
+        render: (width) => [this.banner, this.infoBox].flatMap((component) => {
+          const lines = component.render(width).map((line) => truncateToWidth(line, width, ""));
+          const contentWidth = Math.max(0, ...lines.map(visibleWidth));
+          const padding = " ".repeat(Math.max(0, Math.floor((width - contentWidth) / 2)));
+          return lines.map((line) => padding + line);
+        }),
+      };
+      const empty = () => this.messageList.getMessages().length === 0;
+      this.options.tui.setLayoutRoot(new VStack([
+        { component: new HStack([{ component: welcome, grow: 1 }], { align: "center" }),
+          basis: 0, grow: 1, visible: empty },
+        { component: this.transcript, basis: 0, grow: 1, visible: () => !empty() },
+        { component: this.workingIndicator, shrink: 0 },
+        { component: this.dock, minSize: 2 },
+      ]));
+    }
     this.options.tui.setFocus(this.promptEditor);
   }
 
@@ -128,6 +154,9 @@ export class ChatScreen {
     this.workingIndicator.stop();
     if (!this.mounted) return;
     this.mounted = false;
+    if (isViewportTUI(this.options.tui)) this.options.tui.setLayoutRoot(undefined);
+    this.dock = undefined;
+    this.transcript = undefined;
     this.options.tui.removeChild(this.footer);
     this.options.tui.removeChild(this.promptEditor);
     this.options.tui.removeChild(this.workingIndicator);
@@ -187,6 +216,7 @@ export class ChatScreen {
   showThread(snapshot: ThreadSnapshot): void {
     this.reasoningTiming = undefined;
     this.messageList.setSessionMessages(snapshot.messages);
+    this.transcript?.scrollToEnd();
     this.setInfo({
       threadTitle: snapshot.title,
       threadId: snapshot.threadId,
@@ -230,6 +260,7 @@ export class ChatScreen {
   clearConversation(): void {
     this.reasoningTiming = undefined;
     this.messageList.clearMessages();
+    this.transcript?.scrollToEnd();
     this.promptEditor.clearQueuedPrompts();
     this.setInfo({
       threadTitle: undefined,
@@ -377,15 +408,16 @@ export class ChatScreen {
     onClose?: () => void,
   ): Promise<T> {
     return new Promise<T>((resolve) => {
+      const host = this.dock ?? this.options.tui;
       let closed = false;
       let overlay: Component;
       const finish = (value: T): void => {
         if (closed) return;
         closed = true;
-        this.options.tui.removeChild(this.footer);
-        this.options.tui.removeChild(overlay);
-        this.options.tui.addChild(this.promptEditor);
-        this.options.tui.addChild(this.footer);
+        host.removeChild(this.footer);
+        host.removeChild(overlay);
+        host.addChild(this.promptEditor);
+        host.addChild(this.footer);
         this.options.tui.setFocus(this.promptEditor);
         this.requestRender();
         onClose?.();
@@ -394,10 +426,10 @@ export class ChatScreen {
 
       overlay = new Card(create(finish));
       onOpen?.(finish);
-      this.options.tui.removeChild(this.footer);
-      this.options.tui.removeChild(this.promptEditor);
-      this.options.tui.addChild(overlay);
-      this.options.tui.addChild(this.footer);
+      host.removeChild(this.footer);
+      host.removeChild(this.promptEditor);
+      host.addChild(overlay);
+      host.addChild(this.footer);
       this.options.tui.setFocus(overlay);
       this.requestRender();
     });

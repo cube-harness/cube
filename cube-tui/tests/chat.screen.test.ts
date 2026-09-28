@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import { TuiAltScreen, type Component, type Terminal, type TUI } from "@earendil-works/pi-tui";
 import type { RuntimeDisplayState } from "@cube/runtime";
 import { ChatScreen } from "../src/screens/chat.screen.js";
 import { renderUsageBoxToString } from "../src/components/usage-box.js";
@@ -96,6 +96,60 @@ const createTui = () => {
     getRenders: () => renders,
   };
 };
+
+test("fullscreen chat keeps the editor docked through scrolling, resize, picker and new", async () => {
+  let output = "";
+  let input: (data: string) => void = () => undefined;
+  const terminal: Terminal = {
+    columns: 120, rows: 40, kittyProtocolActive: false,
+    start: (onInput) => { input = onInput; }, stop: () => undefined, drainInput: async () => undefined,
+    write: (data) => { output += data; },
+    moveBy: () => undefined, hideCursor: () => undefined, showCursor: () => undefined,
+    clearLine: () => undefined, clearFromCursor: () => undefined, clearScreen: () => undefined,
+    setTitle: () => undefined, setProgress: () => undefined,
+  };
+  const tui = new TuiAltScreen(terminal);
+  const screen = new ChatScreen({ tui, basePath: "D:\\cube" });
+  let rows: string[] = [];
+  const render = () => {
+    output = "";
+    tui.renderNow();
+    for (const match of output.matchAll(/\x1b\[(\d+);1H\x1b\[2K([\s\S]*?)(?=\x1b\[\d+;\d+H|$)/g)) {
+      rows[Number(match[1]) - 1] = stripTerminalSequences(match[2]!);
+    }
+    rows.length = terminal.rows;
+    return rows.findIndex((line) => line?.includes("Ask Cube"));
+  };
+  screen.mount({ onSubmit: () => undefined });
+  tui.start();
+  try {
+    assert.equal(render(), 37);
+    const info = rows.findIndex((line) => line?.includes("WorkSpace Information"));
+    assert.ok(info > 0 && info < 36);
+    assert.ok(rows[info]!.indexOf("╭") > 0);
+    screen.addUserMessage(Array.from({ length: 100 }, (_, i) => `history-${i}`).join("\n"));
+    assert.equal(render(), 37);
+    const bottom = rows.slice(0, 36).join("\n");
+    tui.scrollToTop();
+    assert.equal(render(), 37);
+    assert.notEqual(rows.slice(0, 36).join("\n"), bottom);
+    assert.match(rows.join("\n"), /history-0/);
+    terminal.columns = 60;
+    terminal.rows = 24;
+    rows = [];
+    assert.equal(render(), 21);
+    assert.ok(rows.every((line) => visibleWidth(line) <= 60));
+    const picker = screen.pickThread([]);
+    assert.equal(render(), -1);
+    input("\x1b");
+    assert.equal(await picker, null);
+    screen.clearConversation();
+    assert.equal(render(), 21);
+    assert.match(rows.join("\n"), /WorkSpace Information/);
+  } finally {
+    screen.stopTerminal();
+  }
+});
 
 test("ChatScreen mounts its concrete components in one stable order", () => {
   const fake = createTui();
