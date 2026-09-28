@@ -44,6 +44,7 @@ export interface WorkingIndicatorState {
 }
 
 interface SessionDisplayStateLike {
+  compacting?: boolean;
   isRunning: boolean;
   currentMessage: null | {
     content?: { parts?: unknown[] };
@@ -101,17 +102,8 @@ export const deriveWorkingIndicatorState = (
     };
   }
 
-  if (state.bufferingMessages) {
-    return { visible: true, spinning: true, phase: "memory", message: "Buffering messages" };
-  }
-  if (state.bufferingObservations) {
-    return { visible: true, spinning: true, phase: "memory", message: "Buffering observations" };
-  }
-  if (state.omProgress.status === "observing") {
-    return { visible: true, spinning: true, phase: "memory", message: "Observing memory" };
-  }
-  if (state.omProgress.status === "reflecting") {
-    return { visible: true, spinning: true, phase: "memory", message: "Reflecting memory" };
+  if (state.compacting) {
+    return { visible: true, spinning: true, phase: "memory", message: "Compacting" };
   }
 
   if (!state.isRunning) {
@@ -254,9 +246,7 @@ export class WorkingIndicator implements Component {
     const suffix =
       this.phase === "input"
         ? ` • ${formatBinding("cube.turn.interrupt")} to cancel`
-        : this.phase === "memory" && this.message.startsWith("Buffering")
-          ? ""
-          : ` • ${formatBinding("cube.turn.interrupt")} to interrupt`;
+        : ` • ${formatBinding("cube.turn.interrupt")} to interrupt`;
     const timer = this.timerStyle(`(${elapsedSeconds}s${suffix})`);
 
     const line = `  ${spinner} ${text} ${timer}`;

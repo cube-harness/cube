@@ -98,16 +98,16 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/compact",
-    description: "Finalize pending observational memory",
+    description: "Compact conversation context",
     execute: async (_argument, context) => {
       const result = await context.memory.compact();
       return {
         kind: "notice",
         notice: {
           level: "info",
-          message: result.activated
-            ? "Memory compacted."
-            : "No pending observational memory required compaction.",
+          message: result.status === "compacted"
+            ? `Context compacted (estimated ${result.before} → ${result.after} tokens).`
+            : result.reason,
         },
       };
     },

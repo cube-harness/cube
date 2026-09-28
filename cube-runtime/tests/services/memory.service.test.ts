@@ -3,65 +3,53 @@ import test from "node:test";
 import type { Session } from "@cube/agent";
 import { MemoryService } from "../../src/services/memory.service.js";
 
-const session = (threadId: string | null, running = false): Session =>
-  ({
-    thread: { getId: () => threadId },
-    identity: { getResourceId: () => "workspace-1" },
-    run: { isRunning: () => running },
-  }) as unknown as Session;
-
-test("MemoryService rejects compact without an active thread or during an active turn", async () => {
-  const calls: unknown[] = [];
-  const finalize = async (input: unknown) => {
-    calls.push(input);
-    return {
-      enabled: true,
-      activated: true,
-      observed: false,
-      reflected: false,
-    };
-  };
-
-  await assert.rejects(
-    new MemoryService(session(null), finalize).compact(),
-    /No active thread/,
-  );
-  await assert.rejects(
-    new MemoryService(session("thread-1", true), finalize).compact(),
-    /agent turn is active/,
-  );
-  assert.deepEqual(calls, []);
+test("manual compact holds native queue ownership until cancellation settles", async () => {
+  let running = false, drained = 0, calls = 0;
+  let thread: string | null = null;
+  const session = {
+    thread: { getId: () => thread },
+    run: { isRunning: () => running, ensureAbortController: () => { running = true; return new AbortController(); }, reset: () => { running = false; } },
+    approval: { isArmed: () => false }, suspensions: { hasPending: () => false },
+    drainFollowUpQueue: async () => { drained++; },
+  } as unknown as Session;
+  const service = new MemoryService(session, {
+    isCompacting: () => false, cancel() {}, drain: async () => {},
+    compactManual: async ({ signal }) => {
+      calls++;
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      signal.throwIfAborted();
+      return { status: "skipped", reason: "unused" };
+    },
+  });
+  await assert.rejects(service.compact(), /No active thread/);
+  thread = "thread";
+  const pending = service.compact();
+  assert.equal(running, true);
+  await assert.rejects(service.compact(), /active turn/);
+  assert.equal(calls, 1);
+  service.cancel();
+  assert.equal(service.isManual(), true);
+  assert.equal(running, true);
+  await assert.rejects(pending, /abort/i);
+  assert.equal(running, false);
+  assert.equal(service.isBusy(), false);
+  assert.equal(drained, 1);
 });
 
-test("MemoryService rejects a disabled observational-memory pipeline", async () => {
-  const service = new MemoryService(session("thread-1"), async () => ({
-    enabled: false,
-    activated: false,
-    observed: false,
-    reflected: false,
-  }));
-
-  await assert.rejects(service.compact(), /Observational Memory is disabled/);
-});
-
-test("MemoryService finalizes the active thread and returns public outcome flags", async () => {
-  const calls: unknown[] = [];
-  const service = new MemoryService(session("thread-1"), async (input) => {
-    calls.push(input);
-    return {
-      enabled: true,
-      activated: true,
-      observed: false,
-      reflected: false,
-    };
+test("shutdown cancels compact without starting queued work", async () => {
+  let drained = 0;
+  const session = {
+    thread: { getId: () => "thread" },
+    run: { isRunning: () => false, ensureAbortController: () => new AbortController(), reset() {} },
+    approval: { isArmed: () => false }, suspensions: { hasPending: () => false },
+    drainFollowUpQueue: async () => { drained++; },
+  } as unknown as Session;
+  const service = new MemoryService(session, {
+    isCompacting: () => false, cancel() {}, drain: async () => {},
+    compactManual: async ({ signal }) => { signal.throwIfAborted(); return { status: "skipped", reason: "small" }; },
   });
-
-  assert.deepEqual(await service.compact(), {
-    activated: true,
-    observed: false,
-    reflected: false,
-  });
-  assert.deepEqual(calls, [
-    { threadId: "thread-1", resourceId: "workspace-1" },
-  ]);
+  const pending = service.compact();
+  await service.shutdown();
+  await assert.rejects(pending, /abort/i);
+  assert.equal(drained, 0);
 });

@@ -1,4 +1,4 @@
-import type { Session, InstructionInfo, CubeTools } from "@cube/agent";
+import type { Session, InstructionInfo, CubeTools, CubeContext } from "@cube/agent";
 import type { MemoryService } from "./services/memory.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
@@ -22,6 +22,7 @@ type CubeRuntimeDependencies = {
   model: ModelService;
   preference: PreferenceService;
   memory: MemoryService;
+  context?: CubeContext;
   gateway: GatewayService;
   suggestions: SlashCommandSuggestion[];
   workspaceRoot: string;
@@ -68,7 +69,8 @@ export class CubeRuntime {
   }
 
   getDisplayState(): RuntimeDisplayState {
-    return this.dependencies.session.displayState.get();
+    const state = this.dependencies.session.displayState.get();
+    return this.dependencies.context ? { ...state, compacting: this.dependencies.context.isCompacting() } : state;
   }
 
   getInstructionInfo(): InstructionInfo {
@@ -76,12 +78,19 @@ export class CubeRuntime {
   }
 
   subscribe(listener: RuntimeEventListener): () => void {
-    const unsubscribe = this.dependencies.session.subscribe(listener);
+    const unsubscribe = this.dependencies.session.subscribe((event) => listener(event.type === "display_state_changed"
+      ? { ...event, displayState: this.getDisplayState() } : event));
+    const stopContext = this.dependencies.context?.subscribe((_active, result) => {
+      void listener({ type: "display_state_changed", displayState: this.getDisplayState() });
+      if (result?.status === "compacted") void listener({ type: "info",
+        message: `Context compacted (estimated ${result.before} → ${result.after} tokens).`,
+      });
+    });
     if (!this.noticesDelivered) {
       this.noticesDelivered = true;
       for (const message of this.dependencies.notices ?? []) listener({ type: "info", message });
     }
-    return unsubscribe;
+    return () => { stopContext?.(); unsubscribe(); };
   }
 
   isApprovalPending(): boolean {
@@ -89,6 +98,7 @@ export class CubeRuntime {
   }
 
   interrupt(): boolean {
+    if (this.memory.isManual?.()) { this.memory.cancel(); return true; }
     if (
       !this.dependencies.session.run.isRunning() &&
       !this.dependencies.session.suspensions.hasPending()
@@ -132,6 +142,7 @@ export class CubeRuntime {
       const session = this.dependencies.session;
       this.unsubscribeTools?.();
       this.dependencies.tools?.discardPreview();
+      await this.memory.shutdown?.();
       if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) session.abort();
       if (session.thread.getId() !== null) {
         await session.thread.clearAndReleaseLock().catch(() => undefined);

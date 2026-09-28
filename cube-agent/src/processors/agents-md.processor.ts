@@ -7,6 +7,7 @@ import { parsePatch } from "../tools/apply-patch.js";
 export const createAgentsMdProcessor = (
   readContext: () => string,
   discover?: (paths: string[]) => Promise<void>,
+  protect?: (message: object) => void,
 ): InputProcessor => ({
   id: "cube-agents-md",
 
@@ -72,10 +73,12 @@ export const createAgentsMdProcessor = (
       index = prompt.findIndex((message) => message.role !== "system");
       if (index < 0) index = prompt.length;
     }
+    const injected = { role: "user" as const, content: [{ type: "text" as const, text: context }] };
+    protect?.(injected);
     return {
       prompt: [
         ...prompt.slice(0, index),
-        { role: "user", content: [{ type: "text", text: context }] },
+        injected,
         ...prompt.slice(index),
       ],
     };

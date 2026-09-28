@@ -1,8 +1,11 @@
 import { Mastra } from "@mastra/core";
+import { Agent } from "@mastra/core/agent";
 import { LibSQLStore } from "@mastra/libsql";
 import { MastraStorageExporter, Observability } from "@mastra/observability";
 import {
   AuthStore,
+  ModelManager,
+  type GatewayId,
   type CubeConfig,
   type HomeManager,
   type WorkspaceManager,
@@ -12,8 +15,10 @@ import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
 import { createMcpServer } from "./mcp/server.js";
 import { createCubeGateways, type CubeGatewayComposition } from "./gateways/factory.js";
-import { toMastraRouterId } from "./gateways/types.js";
+import { toMastraRouterId, getCanonicalModelId, gatewayDescriptors } from "./gateways/types.js";
 import { createCubeTools, type CubeTools } from "./tools/cube-tools.js";
+import { CubeContext } from "./context.js";
+import { COMPACT_SYSTEM_PROMPT } from "./prompts/compact.prompt.js";
 
 // Mastra 1.17.4 does not await in-flight storage writes on shutdown.
 export class DrainingStorageExporter extends MastraStorageExporter {
@@ -48,6 +53,7 @@ export interface CubeMastraComposition {
   logger: Awaited<ReturnType<typeof createCubeLogger>>["logger"];
   gateways: CubeGatewayComposition;
   tools: CubeTools;
+  context: CubeContext;
   shutdown: () => Promise<void>;
 }
 
@@ -91,7 +97,41 @@ export const createCubeMastra = async (
       ...config,
       model: toMastraRouterId(config.gateway, config.model),
     };
-    const agent = await createCubeAgent(home, workspace, routedConfig, logging.logger, tools);
+    let mastra!: Mastra;
+    let summarizer!: Agent;
+    const catalog = new ModelManager(home);
+    const context = new CubeContext({
+      policy: config.memory.compaction,
+      storage: async () => {
+        const store = await mastra.getStorage()?.getStore("memory");
+        if (!store) throw new Error("Context storage is unavailable");
+        return store;
+      },
+      protectedTools: new Set(["skill", "skill_read"]),
+      summarize: async ({ text, signal, maxOutputTokens, requestContext }) => {
+        const output = await summarizer.generate(text, {
+          abortSignal: signal, requestContext, maxSteps: 1,
+          modelSettings: { maxOutputTokens },
+        });
+        return { text: output.text, finishReason: output.finishReason, toolCalls: output.toolCalls };
+      },
+    });
+    const agent = await createCubeAgent(home, workspace, routedConfig, logging.logger, tools, {
+      context,
+      readModel: async (modelId) => {
+        const gateway = Object.entries(gatewayDescriptors).find(([, descriptor]) =>
+          modelId.startsWith(`${descriptor.internalId}/${descriptor.providerId}/`))?.[0] as GatewayId | undefined;
+        const models = gateway ? await catalog.getCatalog(gateway) : undefined;
+        const model = Object.values(models?.providers ?? {}).flatMap((provider) => provider.models)
+          .find((candidate) => candidate.modelId === getCanonicalModelId(modelId));
+        return { limits: model?.limit ?? {} };
+      },
+    });
+    summarizer = new Agent({
+      id: "cube-compactor", name: "Cube Compactor",
+      instructions: COMPACT_SYSTEM_PROMPT,
+      model: ({ requestContext }) => agent.getModel({ requestContext }),
+    });
     const pendingStreams = new Set<Promise<void>>();
     // Session emits agent_end on abort before the native stream finishes DB cleanup.
     // Keep its public completion promise so shutdown cannot close SQLite too early.
@@ -116,8 +156,8 @@ export const createCubeMastra = async (
     );
     const mcpServer = createMcpServer();
 
-    const mastra = new Mastra({
-      agents: { cubeAgent: agent },
+    mastra = new Mastra({
+      agents: { cubeAgent: agent, cubeCompactor: summarizer },
       agentControllers: { cubeController: controller },
       logger: logging.logger,
       loggerOptions: {
@@ -154,8 +194,11 @@ export const createCubeMastra = async (
       logger: logging.logger,
       gateways,
       tools,
+      context,
       shutdown: () => {
         shutdownPromise ??= (async () => {
+          context.cancel();
+          await context.drain();
           try {
             await tools.dispose();
           } finally {

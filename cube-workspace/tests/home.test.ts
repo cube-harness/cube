@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  Home,
-  CubeHome,
+  HomeManager,
   createBootstrap,
   ConfigSchema,
   ConfigStore,
@@ -16,12 +15,12 @@ import { existsSync } from "node:fs";
 
 const createTestHome = async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cube-home-test-"));
-  const home = new Home({ cubeHome: tmp });
+  const home = new HomeManager({ cubeHome: tmp });
   await home.ensure();
   return { home, tmp };
 };
 
-test("Home resolves correct directory paths", async () => {
+test("HomeManager resolves correct directory paths", async () => {
   const { home, tmp } = await createTestHome();
   try {
     assert.equal(home.getRoot(), path.resolve(tmp));
@@ -56,7 +55,7 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
     await createBootstrap(home).run();
 
     const config = await ConfigStore(home).read();
-    assert.equal(config.version, 2);
+    assert.equal("version" in config, false);
     assert.equal(config.gateway, undefined);
     assert.equal(config.model, undefined);
     assert.equal(config.gateway_options["local/ollama"]?.base_url, "http://127.0.0.1:11434");
@@ -82,39 +81,10 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
       model: "inherit",
       instructions: "Generate a concise title under 80 characters.",
     });
-    assert.deepEqual(config.memory.observational_memory.retrieval, {
-      enabled: true,
-      vector: false,
-      scope: "thread",
+    assert.deepEqual(config.memory.compaction, {
+      manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384,
     });
-    assert.equal(
-      config.memory.observational_memory.activate_on_provider_change,
-      true,
-    );
-    assert.equal(
-      config.memory.observational_memory.observation.buffer_on_idle,
-      false,
-    );
-    assert.equal(config.memory.working_memory.scope, "thread");
-    assert.equal("version" in config.memory.working_memory, false);
-    assert.equal("schema" in config.memory.working_memory, false);
-    assert.equal(config.memory.observational_memory.observation.model, "inherit");
-    assert.equal("model_settings" in config.memory.observational_memory.observation, false);
-    assert.equal("provider_options" in config.memory.observational_memory.observation, false);
-    assert.equal("max_tokens_per_batch" in config.memory.observational_memory.observation, false);
-    assert.equal("activate_after_idle" in config.memory.observational_memory.observation, false);
-    assert.equal("activate_on_provider_change" in config.memory.observational_memory.observation, false);
-    assert.equal(
-      config.memory.observational_memory.observation.thread_title,
-      false,
-    );
-    assert.equal("extract" in config.memory.observational_memory.observation, false);
-    assert.equal(config.memory.observational_memory.reflection.model, "inherit");
-    assert.equal("model_settings" in config.memory.observational_memory.reflection, false);
-    assert.equal("provider_options" in config.memory.observational_memory.reflection, false);
-    assert.equal("activate_after_idle" in config.memory.observational_memory.reflection, false);
-    assert.equal("activate_on_provider_change" in config.memory.observational_memory.reflection, false);
-    assert.equal("extract" in config.memory.observational_memory.reflection, false);
+    assert.equal(config.memory.working_memory.agent_managed, false);
 
     const soul = await SoulStore(home).read();
     assert.ok(soul.length > 0);
@@ -123,21 +93,16 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
   }
 });
 
-test("ConfigSchema rejects enabled Working Memory without an update owner", async () => {
+test("ConfigSchema accepts saved read-only Working Memory without an Observer", async () => {
   const { home, tmp } = await createTestHome();
   try {
     await createBootstrap(home).run();
     const config = structuredClone(await ConfigStore(home).read()) as any;
     config.memory.working_memory.agent_managed = false;
-    config.memory.observational_memory.observation.manage_working_memory = false;
 
     const result = ConfigSchema.safeParse(config);
 
-    assert.equal(result.success, false);
-    assert.match(
-      result.error?.issues[0]?.message ?? "",
-      /Working Memory is enabled but has no manager/,
-    );
+    assert.equal(result.success, true);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

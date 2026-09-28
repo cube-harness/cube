@@ -18,12 +18,11 @@ test("fresh home uses one unversioned schema from onboarding through persisted s
     const raw = YAML.parse(await readFile(home.getConfigPath(), "utf8"));
     assert.equal("version" in raw, false);
     assert.equal("fallback_model" in raw, false);
-    for (const section of ["observation", "reflection"] as const) {
-      assert.equal("instruction" in raw.memory.observational_memory[section], false);
-      const old = structuredClone(raw);
-      old.memory.observational_memory[section].instruction = null;
-      assert.equal(ConfigSchema.safeParse(old).success, false);
-    }
+    assert.equal("observational_memory" in raw.memory, false);
+    assert.deepEqual(raw.memory.compaction, {
+      manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384,
+    });
+    assert.equal(ConfigSchema.safeParse({ ...raw, memory: { ...raw.memory, observational_memory: {} } }).success, false);
     assert.equal(ConfigSchema.safeParse(raw).success, true);
     assert.equal(RunnableConfigSchema.safeParse(raw).success, false);
     assert.deepEqual(await new AuthStore(home).read(), { api_keys: {}, oauth: {} });

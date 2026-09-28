@@ -17,18 +17,10 @@ export type GatewayId = z.infer<typeof GatewayIdSchema>;
 export type ApiKeyGatewayId = Extract<GatewayId, `api_key/${string}`>;
 export type LocalGatewayId = Extract<GatewayId, `local/${string}`>;
 
-const ratio = z.number().gt(0).lte(1);
 const positiveInteger = z.number().int().positive();
 const nonNegativeInteger = z.number().int().nonnegative();
 const nullableString = z.string().min(1).nullable().default(null);
 const modelReference = z.string().min(1);
-
-const activationTtl = z.union([
-  z.literal("auto"),
-  z.literal(false),
-  z.number().nonnegative(),
-  z.string().min(1),
-]);
 
 const storage = z.object({
   provider: z.literal("sqlite"),
@@ -71,51 +63,10 @@ const workingMemory = z.object({
   template: z.string().min(1),
 }).strict();
 
-const retrieval = z.object({
-  enabled: z.boolean(),
-  vector: z.boolean(),
-  scope: z.enum(["resource", "thread"]),
-}).strict();
-
-const blockAfter = z.number().gte(1);
-
-const observation = z.object({
-  model: modelReference,
-  message_tokens: positiveInteger,
-  buffer_tokens: z.union([z.literal(false), z.number().positive()]),
-  buffer_on_idle: z.boolean(),
-  buffer_activation: z.number().refine(
-    value => (value > 0 && value <= 1) || value >= 1000,
-    "buffer_activation must be a ratio in (0, 1] or an absolute retention value >= 1000",
-  ),
-  block_after: blockAfter,
-  previous_observer_tokens: z.union([z.literal(false), nonNegativeInteger]),
-  manage_working_memory: z.boolean(),
-  thread_title: z.boolean(),
-  observe_attachments: z.union([
-    z.literal("auto"),
-    z.boolean(),
-    z.array(z.string().min(1)),
-  ]),
-}).strict();
-
-const reflection = z.object({
-  model: modelReference,
-  observation_tokens: positiveInteger,
-  buffer_activation: ratio,
-  block_after: blockAfter,
-}).strict();
-
-const observationalMemory = z.object({
-  enabled: z.boolean(),
-  scope: z.enum(["resource", "thread"]),
-  activate_after_idle: activationTtl,
-  activate_on_provider_change: z.boolean(),
-  share_token_budget: z.literal(false),
-  temporal_markers: z.boolean(),
-  retrieval,
-  observation,
-  reflection,
+const compaction = z.object({
+  manual_min_ratio: z.number().gt(0).lt(1),
+  keep_recent_ratio: z.number().gt(0).lt(1),
+  reserve_tokens: positiveInteger,
 }).strict();
 
 const memory = z.object({
@@ -125,31 +76,8 @@ const memory = z.object({
   generate_title: generateTitle,
   semantic_recall: semanticRecall,
   working_memory: workingMemory,
-  observational_memory: observationalMemory,
+  compaction,
 }).strict().superRefine((value, ctx) => {
-  const wm = value.working_memory;
-  const om = value.observational_memory;
-  const observerManagesWorkingMemory =
-    om.enabled && om.observation.manage_working_memory;
-
-  if (wm.enabled && !wm.agent_managed && !observerManagesWorkingMemory) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["working_memory"],
-      message:
-        "Working Memory is enabled but has no manager. Enable working_memory.agent_managed or observational_memory.observation.manage_working_memory.",
-    });
-  }
-
-  if (om.observation.manage_working_memory && (!om.enabled || !wm.enabled)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["observational_memory", "observation", "manage_working_memory"],
-      message:
-        "manage_working_memory requires both Working Memory and Observational Memory to be enabled.",
-    });
-  }
-
   const vectorFeatureEnabled = value.vector.enabled && value.embedder.enabled;
   if (value.embedder.enabled && value.embedder.model === null) {
     ctx.addIssue({
@@ -173,39 +101,6 @@ const memory = z.object({
         "Semantic Recall requires both Vector and Embedder to be enabled.",
     });
   }
-  if (om.enabled && om.retrieval.enabled && om.retrieval.vector && !vectorFeatureEnabled) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["observational_memory", "retrieval", "vector"],
-      message:
-        "Vector-based observational retrieval requires both Vector and Embedder to be enabled.",
-    });
-  }
-
-  const validateAbsoluteBlockAfter = (
-    configured: number,
-    threshold: number,
-    path: (string | number)[],
-  ) => {
-    if (configured >= 100 && configured < threshold) {
-      ctx.addIssue({
-        code: "custom",
-        path,
-        message: `Absolute block_after (${configured}) must be greater than or equal to its token threshold (${threshold}).`,
-      });
-    }
-  };
-
-  validateAbsoluteBlockAfter(
-    om.observation.block_after,
-    om.observation.message_tokens,
-    ["observational_memory", "observation", "block_after"],
-  );
-  validateAbsoluteBlockAfter(
-    om.reflection.block_after,
-    om.reflection.observation_tokens,
-    ["observational_memory", "reflection", "block_after"],
-  );
 });
 
 export const ReasoningEffortSchema = z.enum([

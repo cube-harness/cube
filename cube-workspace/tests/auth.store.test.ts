@@ -55,10 +55,10 @@ const createTestHome = async () => {
 const cleanup = (tmp: string) =>
   rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
-test("AuthStore keeps all requested provider keys separate, including Coding Plans", async () => {
+test("AuthStore keeps all supported provider keys separate, including Coding Plans", async () => {
   const { home, tmp } = await createTestHome();
   const providers = ["google", "openrouter", "openai", "anthropic", "groq", "xai", "mistral",
-    "deepseek", "moonshotai", "nvidia", "poolside", "zai", "zai-coding-plan",
+    "deepseek", "moonshotai", "nvidia", "zai", "zai-coding-plan",
     "alibaba", "alibaba-coding-plan", "huggingface"] as const;
   try {
     const auth = new AuthStore(home);
