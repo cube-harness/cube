@@ -1,6 +1,5 @@
 import {
   Input,
-  Markdown,
   SelectList,
   truncateToWidth,
   visibleWidth,
@@ -9,12 +8,10 @@ import {
   type Focusable,
 } from "@earendil-works/pi-tui";
 import { KeyHint } from "./key-hint.js";
+import { Markdown } from "./markdown.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
 import { appTheme } from "../themes/app.theme.js";
-import {
-  createMarkdownTheme,
-  createSelectListTheme,
-} from "../themes/pi-tui.theme.js";
+import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 
 export type ToolSuspensionRequest = {
   toolCallId: string;
@@ -115,7 +112,7 @@ export class ToolSuspensionPicker implements Component, Focusable {
       const payload = asRecord(request.suspendPayload) ?? {};
       const plan = typeof payload.plan === "string" ? payload.plan : undefined;
       if (plan) {
-        this.planMarkdown = new Markdown(plan, 0, 0, createMarkdownTheme());
+        this.planMarkdown = new Markdown(plan);
       }
       this.decision = new SelectList(
         [

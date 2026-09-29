@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Markdown, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { Chalk } from "chalk";
 import { MessageList } from "../src/components/message-list.js";
 import { appTheme } from "../src/themes/app.theme.js";
-import { createMarkdownTheme } from "../src/themes/pi-tui.theme.js";
+import { Markdown } from "../src/components/markdown.js";
 
 test("stored mutation diffs and command reasons render identically live and after restore", () => {
   const tool = {
@@ -69,13 +69,21 @@ test("finished assistant code blocks hide fences and the language label", () => 
   assert.doesNotMatch(rendered, /```|typescript/);
 
   const source = `${fence}typescript\nconst first = 1;\n\nconst second = 2;\n${fence}`;
-  const render = (showFences: boolean) => new Markdown(source, 0, 0, {
-    ...createMarkdownTheme(),
-    ...(showFences ? { codeBlockBorder: (text: string) => text } : {}),
-  }).render(80).map(line => stripTerminalSequences(line).trimEnd());
   const codeLines = ["  const first = 1;", "", "  const second = 2;"];
-  assert.deepEqual(render(false), codeLines);
-  assert.deepEqual(render(true), [`${fence}typescript`, ...codeLines, fence]);
+  for (const width of [24, 80]) {
+    const markdown = new Markdown(source);
+    assert.deepEqual(markdown.render(width).map(line => stripTerminalSequences(line).trimEnd()), codeLines);
+    // Re-rendering the native cache must not bring back fence rows.
+    assert.deepEqual(markdown.render(width).map(line => stripTerminalSequences(line).trimEnd()), codeLines);
+    list.setMessages([{
+      id: "assistant-code", role: "assistant", status: "done",
+      content: `Dành cho tool skill:\n${source}\n\nDành cho skill_read:\n${fence}typescript\nname: string\n${fence}`,
+    }]);
+    assert.deepEqual(list.render(width).map(line => stripTerminalSequences(line).trim()), [
+      "❖ Dành cho tool skill:", "const first = 1;", "", "const second = 2;", "",
+      "Dành cho skill_read:", "name: string", "",
+    ]);
+  }
 });
 
 test("setMessages restores a structured tool invocation", () => {

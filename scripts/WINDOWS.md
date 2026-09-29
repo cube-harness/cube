@@ -20,7 +20,7 @@ Build output is `build/windows/cube-windows-x64.zip`, its `.sha256` checksum,
 ```
 
 Then open a terminal in another project and run `cube`. Installation uses
-`%LOCALAPPDATA%\Cube`; personal configuration stays in `~/.cube`. On a clean home,
+`%LOCALAPPDATA%\cube`; personal configuration stays in `~/.cube`. On a clean home,
 the normal onboarding screen requests credentials. Old installations are retained
 under `versions` instead of being deleted during an upgrade. For an isolated test,
 pass `-InstallDir <temporary-directory> -NoPathUpdate`.
