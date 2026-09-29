@@ -1,13 +1,12 @@
 // cube-tui/src/components/message-list.ts
 import {
-  Markdown,
   wrapTextWithAnsi,
   truncateToWidth,
   visibleWidth,
   type Component,
 } from "@earendil-works/pi-tui";
 import { appTheme } from "../themes/app.theme.js";
-import { createMarkdownTheme } from "../themes/pi-tui.theme.js";
+import { Markdown } from "./markdown.js";
 import { formatBinding } from "../keybindings.js";
 import type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 import { fileChanges, commandResult, renderToolDiff, toolText } from "./tool-diff.js";
@@ -424,9 +423,7 @@ export class MessageList implements Component {
     const lines: string[] = [];
 
     if (msg.role === "assistant" && msg.status !== "streaming") {
-      const markdown = new Markdown(msg.content, 0, 0, createMarkdownTheme(), {
-        color: appTheme.role.assistant,
-      });
+      const markdown = new Markdown(msg.content);
       const renderedLines = markdown.render(contentWidth);
       renderedLines.forEach((line, index) => {
         const combined = `${index === 0 ? prefix : indent}${line}`;
@@ -478,10 +475,18 @@ export class MessageList implements Component {
       }
       const command = commandResult(tool?.result);
       const args = asRecord(tool?.args);
-      const reason = command?.reason ?? (typeof args?.reason === "string" ? args.reason : undefined);
+      const reason =
+        command?.reason ?? (typeof args?.reason === "string" ? args.reason : undefined);
       const cwd = command?.cwd ?? (typeof args?.cwd === "string" ? args.cwd : undefined);
-      for (const detail of [reason && `Reason: ${reason}`, cwd && `Directory: ${cwd}`, command && `${command.status}${command.exit_code === null ? "" : ` · exit ${command.exit_code}`}${command.truncated ? " · output truncated" : ""}`]) {
-        if (detail) for (const line of wrapTextWithAnsi(appTheme.ui.muted(toolText(detail)), contentWidth)) lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
+      for (const detail of [
+        reason && `Reason: ${reason}`,
+        cwd && `Directory: ${cwd}`,
+        command &&
+          `${command.status}${command.exit_code === null ? "" : ` · exit ${command.exit_code}`}${command.truncated ? " · output truncated" : ""}`,
+      ]) {
+        if (detail)
+          for (const line of wrapTextWithAnsi(appTheme.ui.muted(toolText(detail)), contentWidth))
+            lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
       }
       const output = toolText(command ? command.output : tool ? toolOutput(tool) : "");
       if (output) {

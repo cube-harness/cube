@@ -2,7 +2,7 @@ param(
   [string]$BaseUrl = 'https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev',
   [string]$ArchivePath,
   [string]$Sha256,
-  [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Cube'),
+  [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'cube'),
   [switch]$NoPathUpdate
 )
 
