@@ -15,6 +15,8 @@ import {
 import { createAgentsMdProcessor } from "../processors/agents-md.processor.js";
 import { createContextProcessor } from "../processors/context.processor.js";
 import type { CubeContext, ContextLimits } from "../context.js";
+import { createCubeSkills } from "../skills.js";
+import { createSkillsProcessor } from "../processors/skills.processor.js";
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
@@ -135,7 +137,8 @@ export const createCubeAgent = async (
   ].join("\n");
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
-  const mastraWorkspace = await createMastraWorkspace(workspace);
+  const skills = await createCubeSkills(home, workspace, config.skills.disabled);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
 
   const agent = createCodingAgent({
     id: "cube-agent",
@@ -146,6 +149,7 @@ export const createCubeAgent = async (
       { role: "system", content: executionInstructions },
     ],
     inputProcessors: [
+      createSkillsProcessor(skills),
       createAgentsMdProcessor(
         () => context,
         async (targets) => {
@@ -168,7 +172,7 @@ export const createCubeAgent = async (
         () => JSON.stringify({ activeModel, snapshot }))] : []),
     ],
     workspace: mastraWorkspace,
-    skills: [home.getSkillDir()],
+    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
     basePath: paths.root,
     tools: () => ({
       ...cubeTools.forModel(activeModel),
@@ -212,6 +216,7 @@ export const createCubeAgent = async (
 
   if (logger) agent.__registerPrimitives({ logger });
   const result = Object.assign(agent, {
+    cubeSkills: skills,
     setToolModel: (modelId: string) => {
       activeModel = modelId;
       contextManager?.context.invalidate();

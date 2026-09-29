@@ -6,6 +6,7 @@ import { createMastraWorkspace } from "../workspace.js";
 import { resolveCubeToolCategory } from "../permission.js";
 import { cubeAskUserTool } from "../tools/ask-user.tool.js";
 import { createMemory } from "../memory.js";
+import type { CubeSkills } from "../skills.js";
 
 export const createCubeController = async (
   home: HomeManager,
@@ -13,8 +14,9 @@ export const createCubeController = async (
   config: CubeConfig,
   agent: Agent,
   gateways: MastraModelGatewayInterface[] = [],
+  skills?: CubeSkills,
 ) => {
-  const mastraWorkspace = await createMastraWorkspace(workspace);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
 
   return new AgentController({
     id: "cube-controller",

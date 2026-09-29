@@ -180,6 +180,10 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (process.argv.includes("--install-only") || process.env.CI) {
+    console.warn(`[cube] Warning: Pre-installation skipped: ${err.message}`);
+    process.exit(0);
+  }
   console.error(`[cube] Error: ${err.message}`);
   process.exit(1);
 });

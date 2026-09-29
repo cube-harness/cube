@@ -222,7 +222,7 @@ export const prepareCubeRuntime = async (
           theme: config.theme,
           appTitle: config.app_title,
           statusLine: config.status_line,
-        });
+        }, composition.skills);
         const commands: SlashCommandContext = {
           thread,
           model,

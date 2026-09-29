@@ -6,3 +6,4 @@ export { API_KEY_PROVIDERS } from "@cube/workspace";
 export { AuthManager, OpenAIAuthManager } from "./auth/auth-manager.js";
 export * from "./auth/openai.js";
 export { GatewayService, type GatewayServiceDependencies, type GatewayRuntimeAdapter } from "./services/gateway.service.js";
+export type { SkillChoice } from "@cube/agent";

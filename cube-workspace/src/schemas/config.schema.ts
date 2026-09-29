@@ -119,6 +119,7 @@ export const ModelConfigSchema = z.object({
 }).strict();
 
 const configSettingsShape = {
+  skills: z.object({ disabled: z.array(z.string().min(1)).default([]) }).strict().default({ disabled: [] }),
   model_config: ModelConfigSchema.nullish().transform((val) => val ?? {}),
   theme: z.string().min(1).default("default"),
   app_title: z.array(z.string().min(1)).min(1).default(["model", "workspace", "threadId"]),

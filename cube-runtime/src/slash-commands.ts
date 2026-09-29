@@ -58,6 +58,11 @@ const parseModelSelection = (argument: string) => {
 
 const definitions: SlashCommandDefinition[] = [
   {
+    name: "/skills",
+    description: "Enable or disable skills",
+    execute: async (_argument, context) => ({ kind: "skills", skills: await context.preference.listSkills() }),
+  },
+  {
     name: "/reload",
     description: "Reload project instructions",
     execute: async (_argument, context) => {

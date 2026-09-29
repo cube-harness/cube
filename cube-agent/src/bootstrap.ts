@@ -54,6 +54,7 @@ export interface CubeMastraComposition {
   gateways: CubeGatewayComposition;
   tools: CubeTools;
   context: CubeContext;
+  skills: Awaited<ReturnType<typeof createCubeAgent>>["cubeSkills"];
   shutdown: () => Promise<void>;
 }
 
@@ -153,6 +154,7 @@ export const createCubeMastra = async (
       routedConfig,
       agent,
       gateways.ordered,
+      agent.cubeSkills,
     );
     const mcpServer = createMcpServer();
 
@@ -195,6 +197,7 @@ export const createCubeMastra = async (
       gateways,
       tools,
       context,
+      skills: agent.cubeSkills,
       shutdown: () => {
         shutdownPromise ??= (async () => {
           context.cancel();
