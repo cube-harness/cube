@@ -1,5 +1,6 @@
 import { ConfigStore, type HomeManager } from "@cube/workspace";
 import type { PreferenceState } from "../types.js";
+import { skillPathIdentity, type CubeSkills, type SkillChoice } from "@cube/agent";
 
 const copyState = (state: PreferenceState): PreferenceState => ({
   theme: state.theme,
@@ -9,16 +10,39 @@ const copyState = (state: PreferenceState): PreferenceState => ({
 
 export class PreferenceService {
   private state: PreferenceState;
+  private skillWrite: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly home: HomeManager,
     state: PreferenceState,
+    private readonly skills?: CubeSkills,
   ) {
     this.state = copyState(state);
   }
 
   get(): PreferenceState {
     return copyState(this.state);
+  }
+
+  async listSkills(): Promise<SkillChoice[]> {
+    return this.skills?.list() ?? [];
+  }
+
+  setSkillEnabled(path: string, enabled: boolean): Promise<SkillChoice[]> {
+    const write = this.skillWrite.then(async () => {
+      const choice = (await this.listSkills()).find((skill) => skill.path === path);
+      if (!choice || !this.skills) throw new Error("Skill is no longer available. Reopen /skills.");
+      const saved = await ConfigStore(this.home).update((config) => ({ ...config,
+        skills: { disabled: enabled
+          ? config.skills.disabled.filter((item) => skillPathIdentity(item) !== path)
+          : [...new Set([...config.skills.disabled, path])],
+        },
+      }));
+      this.skills.setDisabled(saved.skills.disabled);
+      return this.listSkills();
+    });
+    this.skillWrite = write.catch(() => undefined);
+    return write;
   }
 
   async setTheme(theme: string): Promise<PreferenceState> {

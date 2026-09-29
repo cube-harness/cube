@@ -1,5 +1,8 @@
 model_config: {}
 
+skills:
+  disabled: []
+
 gateway_options:
   local/ollama:
     base_url: http://127.0.0.1:11434

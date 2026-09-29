@@ -194,6 +194,7 @@ export type SlashCommandSuggestion = {
 };
 
 export type PromptResult =
+  | { kind: "skills"; skills: import("@cube/agent").SkillChoice[] }
   | { kind: "ignored" }
   | { kind: "submitted" }
   | { kind: "notice"; notice: RuntimeNotice }

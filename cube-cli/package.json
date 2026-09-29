@@ -13,8 +13,5 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "scripts": {
-    "postinstall": "node ./bin/cube.js --install-only"
-  },
   "license": "MIT"
 }
