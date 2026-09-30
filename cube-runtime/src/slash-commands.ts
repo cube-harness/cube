@@ -4,6 +4,7 @@ import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
+import type { PromptService } from "./services/prompt.service.js";
 import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -17,6 +18,7 @@ export type SlashCommandContext = {
   preference: PreferenceService;
   memory: MemoryService;
   gateway: GatewayService;
+  prompt: Pick<PromptService, "initialize">;
 };
 
 type SlashCommandDefinition = SlashCommandSuggestion & {
@@ -57,6 +59,11 @@ const parseModelSelection = (argument: string) => {
 };
 
 const definitions: SlashCommandDefinition[] = [
+  {
+    name: "/init",
+    description: "analyze the project and create or update AGENTS.md",
+    execute: async (_argument, context) => context.prompt.initialize(),
+  },
   {
     name: "/skills",
     description: "enable or disable skills",

@@ -1,68 +1,33 @@
+import { isUserAuthoredMessage } from "@mastra/core/agent";
+import type { InputProcessor, ProcessInputArgs } from "@mastra/core/processors";
 import { INITIALIZE_PROMPT } from "../prompts/initialize.prompt.js";
-import type {
-  Processor,
-  ProcessLLMRequestArgs,
-  ProcessLLMRequestResult,
-} from "@mastra/core/processors";
 
-export const loadInitializePrompt = (): string => {
-  return INITIALIZE_PROMPT;
-};
-
-export interface InitializeProcessorOptions {
-  prompt?: string;
-}
-
-export const createInitializeProcessor = (options: InitializeProcessorOptions = {}): Processor => {
-  return {
-    id: "initialize-processor",
-    name: "Initialize Processor",
-    description:
-      "Injects AGENTS.md initialization prompt during /init command execution without persisting raw prompt to DB",
-
-    async processLLMRequest(args: ProcessLLMRequestArgs): Promise<ProcessLLMRequestResult> {
-      const isInit =
-        args.requestContext?.get("command") === "init" ||
-        (args.requestContext as any)?.all?.command === "init";
-      if (!isInit) return;
-
-      const promptText = options.prompt ?? loadInitializePrompt();
-      const prompt = args.prompt;
-
-      let lastUserIdx = -1;
-      for (let i = prompt.length - 1; i >= 0; i--) {
-        if (prompt[i]?.role === "user") {
-          lastUserIdx = i;
-          break;
-        }
-      }
-
-      if (lastUserIdx === -1) {
-        return {
-          prompt: [
-            ...prompt,
-            {
-              role: "user",
-              content: [{ type: "text" as const, text: promptText }],
-            },
-          ],
-        };
-      }
-
-      const updatedPrompt = prompt.map((msg, idx) => {
-        if (idx === lastUserIdx && msg.role === "user") {
-          return {
-            ...msg,
-            content: [{ type: "text" as const, text: promptText }],
-          };
-        }
-        return msg;
-      });
-
-      return { prompt: updatedPrompt };
-    },
+// Expand only new /init submissions; persisted instructions survive later turns.
+export const createInitializeProcessor = (): InputProcessor => {
+  const expand = ({ messageList }: ProcessInputArgs) => {
+    for (const message of messageList.get.input.db().filter(isUserAuthoredMessage)) {
+      const text = message.content.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (text !== "/init") continue;
+      const metadata = message.content.metadata ?? {};
+      const cube = (metadata.cube ?? {}) as Record<string, unknown>;
+      messageList.add(
+        {
+          ...message,
+          content: {
+            ...message.content,
+            parts: [{ type: "text", text: INITIALIZE_PROMPT }],
+            metadata: { ...metadata, cube: { ...cube, displayText: "" } },
+          },
+        },
+        "input",
+        { merge: false },
+      );
+    }
+    return messageList;
   };
+  return { id: "cube-initialize", processInput: expand, processInputStep: expand };
 };
-
-export const initializeProcessor: Processor = createInitializeProcessor();
-export default initializeProcessor;

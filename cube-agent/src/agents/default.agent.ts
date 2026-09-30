@@ -17,6 +17,7 @@ import { createContextProcessor } from "../processors/context.processor.js";
 import type { CubeContext, ContextLimits } from "../context.js";
 import { createCubeSkills } from "../skills.js";
 import { createSkillsProcessor } from "../processors/skills.processor.js";
+import { createInitializeProcessor } from "../processors/initialize.processor.js";
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
@@ -152,6 +153,7 @@ export const createCubeAgent = async (
       { role: "system", content: executionInstructions },
     ],
     inputProcessors: [
+      createInitializeProcessor(),
       createSkillsProcessor(skills),
       createAgentsMdProcessor(
         () => context,
