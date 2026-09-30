@@ -13,7 +13,10 @@ export class FieldPicker implements Component, Focusable {
   private readonly hint = new KeyHint([
     { key: "Space", label: "Toggle [ ]/[x]" },
     { key: "Type", label: "Filter" },
-    { key: formatBinding("tui.select.up") + "/" + formatBinding("tui.select.down"), label: "Navigate" },
+    {
+      key: formatBinding("tui.select.up") + "/" + formatBinding("tui.select.down"),
+      label: "Navigate",
+    },
     { key: formatBinding("tui.select.confirm"), label: "Apply" },
     { key: formatBinding("tui.select.cancel"), label: "Cancel" },
   ]);
@@ -21,26 +24,35 @@ export class FieldPicker implements Component, Focusable {
   private selectedIndex = 0;
   private errorMessage?: string;
 
-  constructor(private readonly options: {
-    title: string;
-    items: FieldPickerItem[];
-    initialSelection: string[];
-    preview(ids: string[]): string;
-    onSelect(ids: string[]): void;
-    onCancel(): void;
-  }) {
+  constructor(
+    private readonly options: {
+      title: string;
+      items: FieldPickerItem[];
+      initialSelection: string[];
+      preview(ids: string[]): string;
+      onSelect(ids: string[]): void;
+      onCancel(): void;
+    },
+  ) {
     this.title = new Text(appTheme.ui.text.bold(options.title), 0, 0);
     this.selectedIds = [...options.initialSelection];
   }
 
-  get focused(): boolean { return this.search.focused; }
-  set focused(value: boolean) { this.search.focused = value; }
-  getSelectedIds(): string[] { return [...this.selectedIds]; }
+  get focused(): boolean {
+    return this.search.focused;
+  }
+  set focused(value: boolean) {
+    this.search.focused = value;
+  }
+  getSelectedIds(): string[] {
+    return [...this.selectedIds];
+  }
 
   private filteredItems(): FieldPickerItem[] {
     const query = this.search.getQuery().toLowerCase().trim();
-    return this.options.items.filter(item =>
-      [item.id, item.label, item.description].some(value => value.toLowerCase().includes(query)));
+    return this.options.items.filter((item) =>
+      [item.id, item.label, item.description].some((value) => value.toLowerCase().includes(query)),
+    );
   }
 
   render(width: number): string[] {
@@ -52,14 +64,22 @@ export class FieldPicker implements Component, Focusable {
       const active = index === this.selectedIndex;
       const cursor = active ? appTheme.ui.primary("❯") : " ";
       const checkbox = this.selectedIds.includes(item.id)
-        ? appTheme.status.success("[x]") : appTheme.ui.muted("[ ]");
+        ? appTheme.status.success("[x]")
+        : appTheme.ui.muted("[ ]");
       const label = active ? appTheme.ui.primary.bold(item.label) : appTheme.ui.text(item.label);
-      const description = (active ? appTheme.ui.primary : appTheme.ui.muted)(`(${item.description})`);
+      const description = (active ? appTheme.ui.primary : appTheme.ui.muted)(
+        `(${item.description})`,
+      );
       lines.push(`${cursor} ${checkbox} ${label} ${description}`);
     }
     if (this.errorMessage) lines.push(appTheme.status.warning(`⚠ ${this.errorMessage}`));
-    lines.push("", appTheme.ui.muted("Preview:"), this.options.preview(this.getSelectedIds()), "");
-    return [...lines.map(line => truncateToWidth(line, width)), ...this.hint.render(width)];
+
+    lines.push(
+      "",
+      `${appTheme.ui.muted("Preview:")} ${this.options.preview(this.getSelectedIds())}`,
+      "",
+    );
+    return [...lines.map((line) => truncateToWidth(line, width)), ...this.hint.render(width)];
   }
 
   handleInput(data: string): void {
@@ -83,7 +103,7 @@ export class FieldPicker implements Component, Focusable {
             this.errorMessage = "At least one option must be selected.";
             return;
           }
-          this.selectedIds = this.selectedIds.filter(id => id !== item.id);
+          this.selectedIds = this.selectedIds.filter((id) => id !== item.id);
         } else this.selectedIds.push(item.id);
         this.errorMessage = undefined;
       }

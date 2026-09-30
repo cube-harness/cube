@@ -15,7 +15,10 @@ import type {
   ThreadSnapshot,
   ThreadSummary,
   UsageMetrics,
+  SkillChoice,
 } from "@cube/runtime";
+import { toRuntimeNotice } from "@cube/runtime";
+import { SkillPicker } from "../components/skill-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "../components/approval-picker.js";
 import {
   ToolSuspensionPicker,
@@ -44,6 +47,7 @@ export type ChatScreenOptions = {
   initialHistory?: string[];
   statusLine?: string[];
   initialInfo?: InfoBoxContent;
+  getSkills?: () => Promise<SkillChoice[]>;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -106,6 +110,7 @@ export class ChatScreen {
       basePath: options.basePath,
       slashCommands: options.slashCommands,
       initialHistory: options.initialHistory,
+      getSkills: () => this.options.getSkills?.() ?? Promise.resolve([]),
       onSubmit: (content) => this.onSubmit?.(content),
     });
     this.footer = new Footer(options.initialInfo, options.statusLine);
@@ -319,6 +324,17 @@ export class ChatScreen {
       if (result instanceof Error) throw result;
       return result;
     });
+  }
+
+  setSkillProvider(getSkills: () => Promise<SkillChoice[]>): void {
+    this.options.getSkills = getSkills;
+  }
+
+  pickSkills(items: SkillChoice[], onApply: (changes: Pick<SkillChoice, "path" | "enabled">[]) => Promise<void>): Promise<void> {
+    return this.showOverlay<void>((finish) => new SkillPicker(items, {
+      onApply, onCancel: () => finish(), onChange: () => this.requestRender(),
+      onError: (error) => this.showNotice(toRuntimeNotice(error)),
+    }));
   }
 
   pickTheme(current: string): Promise<string | null> {

@@ -86,7 +86,7 @@ type SessionMessageLike = {
   id?: string;
   role?: string;
   createdAt?: Date | string;
-  content?: string | { parts?: unknown[] };
+  content?: string | { parts?: unknown[]; metadata?: Record<string, unknown> };
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -183,7 +183,14 @@ const mapSessionMessage = (
       : [];
   }
 
-  const parts = raw.content?.parts ?? [];
+  const metadata = raw.content?.metadata;
+  const signalType = asRecord(metadata?.signal)?.type;
+  const userAuthored = raw.role === "user" || (raw.role === "signal" && ["user", "user-message"].includes(String(signalType)));
+  const displayText = userAuthored ? asRecord(metadata?.cube)?.displayText : undefined;
+  const originalParts = raw.content?.parts ?? [];
+  const parts = typeof displayText === "string"
+    ? [{ type: "text", text: displayText }, ...originalParts.filter((part) => asRecord(part)?.type !== "text")]
+    : originalParts;
   const messages: ChatMessage[] = [];
   let textIndex = 0;
   let reasoningRendered = false;

@@ -1,6 +1,7 @@
 import { ConfigStore, type HomeManager } from "@cube/workspace";
 import type { PreferenceState } from "../types.js";
 import { skillPathIdentity, type CubeSkills, type SkillChoice } from "@cube/agent";
+import { realpath } from "node:fs/promises";
 
 const copyState = (state: PreferenceState): PreferenceState => ({
   theme: state.theme,
@@ -28,18 +29,29 @@ export class PreferenceService {
     return this.skills?.list() ?? [];
   }
 
-  setSkillEnabled(path: string, enabled: boolean): Promise<SkillChoice[]> {
+  setSkillsEnabled(changes: readonly Pick<SkillChoice, "path" | "enabled">[]): Promise<void> {
+    const pending = changes.map((change) => ({ ...change }));
     const write = this.skillWrite.then(async () => {
-      const choice = (await this.listSkills()).find((skill) => skill.path === path);
-      if (!choice || !this.skills) throw new Error("Skill is no longer available. Reopen /skills.");
-      const saved = await ConfigStore(this.home).update((config) => ({ ...config,
-        skills: { disabled: enabled
-          ? config.skills.disabled.filter((item) => skillPathIdentity(item) !== path)
-          : [...new Set([...config.skills.disabled, path])],
+      if (!pending.length) return;
+      const choices = await this.listSkills();
+      if (!this.skills || pending.some(({ path }) => !choices.some((skill) => skill.path === path))) {
+        throw new Error("Skill is no longer available. Reopen /skills.");
+      }
+      const updates = new Map(pending.map(({ path, enabled }) => [skillPathIdentity(path), enabled]));
+      const store = ConfigStore(this.home);
+      const current = await store.read();
+      const aliases = new Set<string>();
+      for (const item of current.skills.disabled) {
+        if (updates.has(skillPathIdentity(await realpath(item).catch(() => item)))) aliases.add(item);
+      }
+      const saved = await store.update((config) => ({ ...config,
+        skills: { disabled: [...new Set([
+          ...config.skills.disabled.filter((item) => !aliases.has(item) && !updates.has(skillPathIdentity(item))),
+          ...pending.filter(({ enabled }) => !enabled).map(({ path }) => path),
+        ])],
         },
       }));
       this.skills.setDisabled(saved.skills.disabled);
-      return this.listSkills();
     });
     this.skillWrite = write.catch(() => undefined);
     return write;

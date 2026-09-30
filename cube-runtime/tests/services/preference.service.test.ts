@@ -1,10 +1,45 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { ConfigStore, createBootstrap, Home } from "@cube/workspace";
+import { ConfigStore, Store, createBootstrap, HomeManager as Home, WorkspaceManager } from "@cube/workspace";
+import { createCubeSkills } from "../../../cube-agent/src/skills.js";
 import { PreferenceService } from "../../src/services/preference.service.js";
+
+test("skill toggles persist serially and a failed write keeps catalog availability unchanged", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cube-skill-preference-"));
+  const home = new Home({ cubeHome: directory });
+  try {
+    await createBootstrap(home).run();
+    for (const name of ["review", "build"]) {
+      const skill = path.join(home.getSkillDir(), name);
+      await mkdir(skill, { recursive: true });
+      await writeFile(path.join(skill, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill\n---\nInstructions`);
+    }
+    const skills = await createCubeSkills(home, new WorkspaceManager(home, directory), []);
+    const service = new PreferenceService(home, { theme: "default", appTitle: ["model"], statusLine: ["model"] }, skills);
+    const choices = await service.listSkills();
+    const diskWrite = t.mock.method(Store.prototype, "write");
+    const setDisabled = t.mock.method(skills, "setDisabled");
+    await service.setSkillsEnabled(choices.map(({ path }) => ({ path, enabled: false })));
+    assert.equal(diskWrite.mock.callCount(), 1);
+    assert.equal(setDisabled.mock.callCount(), 1);
+    diskWrite.mock.restore();
+    setDisabled.mock.restore();
+    const saved = await ConfigStore(home).read();
+    assert.equal(saved.skills.disabled.length, 2);
+    assert.equal(saved.theme, "default");
+    const reopened = await createCubeSkills(home, new WorkspaceManager(home, directory), saved.skills.disabled);
+    assert.ok((await reopened.list()).every((skill) => !skill.enabled));
+    const write = t.mock.method(Store.prototype, "write", async () => { throw new Error("disk write failed"); });
+    await assert.rejects(service.setSkillsEnabled([{ path: choices[0]!.path, enabled: true }]), /disk write failed/);
+    assert.ok((await service.listSkills()).every((skill) => !skill.enabled));
+    write.mock.restore();
+    await service.setSkillsEnabled([{ path: choices[0]!.path, enabled: true }]);
+    assert.equal((await service.listSkills()).filter((skill) => skill.enabled).length, 1);
+  } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
 
 test("PreferenceService persists each owned field and returns defensive array copies", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-preference-service-"));
