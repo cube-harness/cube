@@ -693,6 +693,47 @@ test("OpenAI refreshes cached reasoning metadata once, including when descriptio
   }
 });
 
+test("OpenAI hides provider-marked models and refreshes legacy visibility metadata once", async () => {
+  let cached: ModelCatalog = { updatedAt: new Date().toISOString(), providers: {
+    openai: { name: "OpenAI", models: [
+      { ...model("openai/gpt-visible"), reasoning_effort_descriptions: {} },
+      { ...model("openai/gpt-reserve"), reasoning_effort_descriptions: {} },
+    ] },
+  } };
+  let requests = 0;
+  const harness = createHarness({
+    auth: { api_keys: {}, oauth: { openai: {
+      access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, account_id: "account",
+    } } },
+    getCatalog: async () => cached,
+    fetch: async () => {
+      requests++;
+      return Response.json({ models: [
+        { slug: "gpt-visible", visibility: "list" },
+        { slug: "gpt-reserve", visibility: "hide" },
+        { slug: "codex-auto-review", visibility: "hide" },
+        { slug: "another-hidden-model", visibility: "hide" },
+        { slug: "model-without-visibility" },
+      ] });
+    },
+  });
+  cached = await harness.service.listModels("oauth/openai");
+  assert.deepEqual(cached.providers.openai!.models.map(({ modelId }) => modelId),
+    ["openai/gpt-visible", "openai/model-without-visibility"]);
+  assert.ok(cached.providers.openai!.models.every(({ visibility }) => visibility === "list"));
+  assert.deepEqual(await harness.service.listModels("oauth/openai"), cached);
+  assert.equal(requests, 1);
+
+  const apiCatalog: ModelCatalog = { updatedAt: new Date().toISOString(), providers: {
+    openai: { name: "OpenAI", models: [model("openai/gpt-reserve")] },
+  } };
+  const apiHarness = createHarness({
+    auth: { api_keys: { openai: { api_key: "test" } }, oauth: {} },
+    getCatalog: async () => apiCatalog,
+  });
+  assert.deepEqual(await apiHarness.service.listModels("api_key/openai"), apiCatalog);
+});
+
 test("account-only model stays selectable with explicit metadata and login does not mark it current", async () => {
   const credential = { access_token: "access", refresh_token: "refresh", expires_at: Date.now() + 3600000, account_id: "account" };
   const harness = createHarness({

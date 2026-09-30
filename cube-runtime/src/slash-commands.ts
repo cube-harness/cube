@@ -59,12 +59,15 @@ const parseModelSelection = (argument: string) => {
 const definitions: SlashCommandDefinition[] = [
   {
     name: "/skills",
-    description: "Enable or disable skills",
-    execute: async (_argument, context) => ({ kind: "skills", skills: await context.preference.listSkills() }),
+    description: "enable or disable skills",
+    execute: async (_argument, context) => ({
+      kind: "skills",
+      skills: await context.preference.listSkills(),
+    }),
   },
   {
     name: "/reload",
-    description: "Reload project instructions",
+    description: "reload project instructions",
     execute: async (_argument, context) => {
       await context.thread.reload();
       return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
@@ -73,7 +76,7 @@ const definitions: SlashCommandDefinition[] = [
   {
     name: "/resume",
     aliases: ["/threads"],
-    description: "Switch to a previous conversation",
+    description: "switch to a previous conversation",
     execute: async (argument, context) => {
       if (argument) {
         return {
@@ -90,7 +93,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/new",
-    description: "Start a new conversation",
+    description: "start a new conversation",
     execute: async (_argument, context) => {
       await context.thread.create();
       return { kind: "thread-reset" };
@@ -98,28 +101,29 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/exit",
-    description: "Exit Cube",
+    description: "exit Cube",
     execute: async () => ({ kind: "exit-requested" }),
   },
   {
     name: "/compact",
-    description: "Compact conversation context",
+    description: "summarize conversation to prevent hitting the context limit",
     execute: async (_argument, context) => {
       const result = await context.memory.compact();
       return {
         kind: "notice",
         notice: {
           level: "info",
-          message: result.status === "compacted"
-            ? `Context compacted (estimated ${result.before} → ${result.after} tokens).`
-            : result.reason,
+          message:
+            result.status === "compacted"
+              ? `Context compacted (estimated ${result.before} → ${result.after} tokens).`
+              : result.reason,
         },
       };
     },
   },
   {
     name: "/gateway",
-    description: "Choose or configure an API, oauth, or local gateway",
+    description: "select an api, oauth or local gateway strategy",
     execute: async (_argument, context) => {
       const [choices, readiness] = await Promise.all([
         context.gateway.listChoices(),
@@ -143,7 +147,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/model",
-    description: "Choose what model and reasoning effort to use",
+    description: "select what model and reasoning effort to use",
     execute: async (argument, context) => {
       if (!argument) {
         const catalog = await context.model.list();
@@ -179,8 +183,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/effort",
-    aliases: ["/thinking"],
-    description: "Set reasoning effort for the active model",
+    description: "set reasoning effort for the active model",
     execute: async (argument, context) => {
       const current = context.model.current();
       if (!current.modelId) {
@@ -241,7 +244,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/help",
-    description: "Show available commands",
+    description: "show available commands",
     execute: async () => ({
       kind: "command-catalog",
       commands: slashCommandSuggestions,
@@ -249,7 +252,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/rename",
-    description: "Rename current conversation /rename <title>",
+    description: "rename current conversation",
     execute: async (argument, context) => {
       const result = await context.thread.rename(argument);
       return {
@@ -260,7 +263,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/delete",
-    description: "Delete a conversation",
+    description: "delete a conversation",
     execute: async (argument, context) => {
       if (!argument) {
         return {
@@ -279,7 +282,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/fork",
-    description: "Fork current conversation into a new branch",
+    description: "fork current conversation into a new branch",
     execute: async (argument, context) => ({
       kind: "thread",
       snapshot: await context.thread.fork(argument || undefined),
@@ -288,13 +291,17 @@ const definitions: SlashCommandDefinition[] = [
   {
     name: "/status",
     aliases: ["/usage"],
-    description: "Show session status, context usage and subscription limits",
+    description: "show session status, context usage and subscription limits",
     execute: async (_argument, context) => {
       const metrics = await context.model.getUsage();
       try {
         const subscription = await context.gateway.getSubscriptionUsage();
-        return { kind: "usage", metrics: subscription ? { ...metrics, subscription } : metrics,
-          ...(subscription?.notice ? { notice: toRuntimeNotice(new Error(subscription.notice)) } : {}),
+        return {
+          kind: "usage",
+          metrics: subscription ? { ...metrics, subscription } : metrics,
+          ...(subscription?.notice
+            ? { notice: toRuntimeNotice(new Error(subscription.notice)) }
+            : {}),
         };
       } catch (error) {
         return { kind: "usage", metrics, notice: toRuntimeNotice(error) };
@@ -303,7 +310,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/theme",
-    description: "Choose a syntax highlighting theme /theme [name]",
+    description: "select a syntax highlighting theme",
     execute: async (argument, context) => {
       if (argument) {
         return {
@@ -319,7 +326,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/copy",
-    description: "Copy last response as markdown",
+    description: "copy last response as markdown",
     execute: async (_argument, context) => {
       const content = await context.thread.lastAssistantContent();
       if (!content) {
@@ -333,7 +340,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/title",
-    description: "Configure which items appear in the terminal title",
+    description: "configure which items appear in the terminal title",
     execute: async (argument, context) => {
       const fields = parseFields(argument);
       if (fields.length > 0) {
@@ -350,7 +357,7 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/statusline",
-    description: "Configure which items appear in the status line",
+    description: "configure which items appear in the status line",
     execute: async (argument, context) => {
       const fields = parseFields(argument);
       if (fields.length > 0) {

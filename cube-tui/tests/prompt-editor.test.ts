@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PromptEditor } from "../src/components/prompt-editor.js";
+import { PromptEditor, createPromptAutocomplete } from "../src/components/prompt-editor.js";
+import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { installCubeKeybindings } from "../src/keybindings.js";
 import { CURSOR_MARKER, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -121,6 +124,34 @@ test("PromptEditor cancels queued prompts newest first while draining stays FIFO
   assert.deepEqual(editor.dequeueQueuedPrompts(2), ["first", "second"]);
 });
 
+test("completion preserves mentions and quoted paths without fd, and rejects outside roots", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cube-completion-"));
+  try {
+    const workspace = join(root, "workspace");
+    const outside = join(root, "outside");
+    await mkdir(workspace); await mkdir(outside);
+    await writeFile(join(workspace, "hello world.md"), "not injected");
+    await writeFile(join(outside, "secret.md"), "outside");
+    await symlink(outside, join(workspace, "escape"), process.platform === "win32" ? "junction" : "dir");
+    let enabled = true;
+    const provider = createPromptAutocomplete(workspace, [{ name: "/model", description: "Model" }], async () => [{
+      name: "review", description: "Review", path: "skill", source: "project", enabled, userInvocable: true,
+    }]);
+    const suggest = (text: string) => provider.getSuggestions([text], 0, text.length, { signal: new AbortController().signal });
+    const skill = (await suggest("Use $rev"))!;
+    assert.equal(skill.items[0]!.value, "$review");
+    assert.equal(provider.applyCompletion(["Use $rev later"], 0, 8, skill.items[0]!, skill.prefix).lines[0], "Use $review  later");
+    enabled = false;
+    assert.equal(await suggest("$rev"), null);
+    const file = (await suggest("Read @hello"))!;
+    assert.equal(file.items[0]!.value, '@"hello world.md"');
+    assert.equal(provider.applyCompletion(["Read @hello"], 0, 11, file.items[0]!, file.prefix).lines[0], 'Read @"hello world.md" ');
+    assert.equal((await suggest("/mod"))!.items[0]!.value, "model");
+    for (const text of ["@../outside/", "@escape/", "@~/", `@${outside}/`]) assert.equal(await suggest(text), null, text);
+    assert.ok(!(await suggest("@"))!.items.some((item) => item.label === "escape/"));
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("PromptEditor uses the shared card and a display-only placeholder without losing input or autocomplete", async () => {
   const originalColorLevel = chalk.level;
   chalk.level = 3;
@@ -128,7 +159,10 @@ test("PromptEditor uses the shared card and a display-only placeholder without l
   const editor = new PromptEditor({
     tui: { terminal: { rows: 24 }, requestRender() {} } as any,
     onSubmit: text => { submissions.push(text); },
-    slashCommands: [{ name: "/model", description: "Choose model" }],
+    slashCommands: [
+      { name: "/model", description: "Choose model" },
+      { name: "/skills", description: "Manage skills" },
+    ],
   });
   editor.focused = true;
   try {
@@ -157,7 +191,19 @@ test("PromptEditor uses the shared card and a display-only placeholder without l
     editor.setText("");
     editor.handleInput("/");
     await new Promise(resolve => setTimeout(resolve, 150));
-    assert.match(stripTerminalSequences(editor.render(80).join("\n")), /Choose model/);
+    const completed = editor.render(80);
+    const suggestionIndex = completed.findIndex(line => line.includes("Choose model"));
+    const inputIndex = completed.findIndex(line => line.includes(CURSOR_MARKER));
+    assert.ok(suggestionIndex >= 0 && suggestionIndex < inputIndex, "autocomplete must be above the input card");
+    assert.match(stripTerminalSequences(completed[suggestionIndex]!), /^ {2}❯ \/model\s+Choose model/);
+    // Primary foreground + black background, inverted: primary surface with black text.
+    assert.ok(completed[suggestionIndex]!.includes(appTheme.ui.primary("x").split("x")[0]!));
+    assert.ok(completed[suggestionIndex]!.includes("\x1b[40m\x1b[7m"));
+    const unselected = completed.find(line => line.includes("Manage skills"))!;
+    assert.match(stripTerminalSequences(unselected), /^ {4}\/skills/);
+    assert.doesNotMatch(unselected, /\x1b\[(?:4[0-8]|7)m|\x1b\[48[;:]/);
+    assert.ok(completed[inputIndex]!.includes(background), "input keeps its surface");
+    assert.doesNotMatch(stripTerminalSequences(completed.join("\n")), /→/);
     editor.handleInput("\t");
     assert.equal(editor.getText().trim(), "/model");
     editor.handleInput("\r");

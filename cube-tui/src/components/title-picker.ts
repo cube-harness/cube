@@ -83,7 +83,7 @@ export class TitlePickerComponent extends FieldPicker {
       title: "Configure Terminal Title",
       items,
       initialSelection,
-      preview: ids => appTheme.ui.primary(formatTerminalTitle(ids, current)),
+      preview: (ids) => appTheme.ui.primary(formatTerminalTitle(ids, current)),
       onSelect: options.onSelect,
       onCancel: options.onCancel,
     });

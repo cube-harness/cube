@@ -36,20 +36,22 @@ export async function createCubeSkills(
   const global = resolveAgentSkills([home.getSkillDir()]);
   let disabledPaths = [...disabled];
   const snapshots = new WeakMap<RequestContext, Promise<SkillSnapshot>>();
-  const canonical = async (path: string) => skillPathIdentity(await realpath(path).catch(() => path));
+  const canonical = async (path: string) => resolve(await realpath(path).catch(() => path));
   async function list(): Promise<SkillChoice[]> {
+    const disabledAtStart = [...disabledPaths];
     // Preserve native refresh/cooldown behavior; the picker includes shadowed sources.
     await Promise.all([project.maybeRefresh(), global.maybeRefresh()]);
-    const disabledSet = new Set(await Promise.all(disabledPaths.map(canonical)));
+    const disabledSet = new Set((await Promise.all(disabledAtStart.map(canonical))).map(skillPathIdentity));
     const seen = new Set<string>();
     const choices: SkillChoice[] = [];
     for (const [source, registry] of [["global", global], ["project", project]] as const) {
       for (const skill of await registry.list()) {
         const path = await canonical(join(skill.path, "SKILL.md"));
-        if (seen.has(path)) continue;
-        seen.add(path);
+        const identity = skillPathIdentity(path);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
         choices.push({ name: skill.name, path, source, description: skill.description,
-          enabled: !disabledSet.has(path), userInvocable: skill["user-invocable"] !== false });
+          enabled: !disabledSet.has(identity), userInvocable: skill["user-invocable"] !== false });
       }
     }
     return choices.sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source) || a.path.localeCompare(b.path));

@@ -43,7 +43,19 @@ export function createSkillsProcessor(skills: CubeSkills): InputProcessor {
   }
   return {
     id: "cube-skills",
-    processInput: ({ messageList, requestContext }) => enrich(messageList, requestContext),
-    processInputStep: ({ messageList, requestContext }) => enrich(messageList, requestContext),
+    async processInput({ messageList, requestContext, state }) {
+      try { return await enrich(messageList, requestContext); }
+      catch (error) { state.skillError = error instanceof Error ? error.message : String(error); return messageList; }
+    },
+    async processInputStep({ messageList, requestContext, state }) {
+      if (state.skillError) return messageList;
+      try { return await enrich(messageList, requestContext); }
+      catch (error) { state.skillError = error instanceof Error ? error.message : String(error); return messageList; }
+    },
+    processLLMRequest({ state }) {
+      // Input-stage exceptions lose their cause in native thread startup. Surface
+      // failures at the request boundary, before any provider call, without a tripwire.
+      if (state.skillError) throw new Error(String(state.skillError));
+    },
   };
 }

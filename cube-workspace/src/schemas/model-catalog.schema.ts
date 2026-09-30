@@ -22,6 +22,7 @@ const CostSchema = z.object({
 export const CatalogModelSchema = z.object({
   modelId: z.string().min(1),
   name: z.string().min(1),
+  visibility: z.string().optional(),
   family: z.string().optional(),
   reasoning: z.boolean().optional(),
   reasoning_efforts: z.array(z.string()).optional(),

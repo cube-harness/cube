@@ -16,6 +16,9 @@ test("fresh home uses one unversioned schema from onboarding through persisted s
   try {
     await new Bootstrap(home).run();
     const raw = YAML.parse(await readFile(home.getConfigPath(), "utf8"));
+    assert.deepEqual(ConfigSchema.parse({ ...raw, skills: undefined }).skills, { disabled: [] });
+    await ConfigStore(home).update((config) => ({ ...config, skills: { disabled: ["D:/skills/review/SKILL.md"] } }));
+    assert.deepEqual((await ConfigStore(home).read()).skills.disabled, ["D:/skills/review/SKILL.md"]);
     assert.equal("version" in raw, false);
     assert.equal("fallback_model" in raw, false);
     assert.equal("observational_memory" in raw.memory, false);
