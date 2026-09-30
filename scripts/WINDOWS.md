@@ -21,8 +21,9 @@ Build output is `build/windows/cube-windows-x64.zip`, its `.sha256` checksum,
 
 Then open a terminal in another project and run `cube`. Installation uses
 `%LOCALAPPDATA%\cube`; personal configuration stays in `~/.cube`. On a clean home,
-the normal onboarding screen requests credentials. Old installations are retained
-under `versions` instead of being deleted during an upgrade. For an isolated test,
+the normal onboarding screen requests credentials. Successful installation switches
+the launcher before removing older checksum-named directories under `versions`.
+For an isolated test,
 pass `-InstallDir <temporary-directory> -NoPathUpdate`.
 
 ## Private CI and public downloads
@@ -47,4 +48,13 @@ irm https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev/install.ps1 | iex
 ```
 
 No CI workflow or upload has been executed just by adding these files. Validate the
-ZIP installer locally before enabling publishing. There is no auto-update service.
+ZIP installer locally before enabling publishing.
+
+Installed Cube checks `latest.json` on startup (3-second timeout), comparing the
+published checksum with the running build rather than the fixed package version.
+Onboarding offers Update, Continue, or Cancel (Esc/Ctrl+C exits). Update downloads
+and verifies the archive, exits the old Node process, then the launcher runs the
+installer and opens Cube again in the same workspace. Installer output is captured;
+failure returns to the previous build with a system notice. `~/.cube` is unchanged.
+Source/development runs and portable archives outside `versions` skip this check.
+There is no background updater, and publication remains manual opt-in.

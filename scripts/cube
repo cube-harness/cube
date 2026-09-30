@@ -2,6 +2,8 @@
 set -eu
 # Resolve the installer's symlink without changing the caller's working directory.
 launcher=$0
+CUBE_LAUNCHER=$(CDPATH= cd -P -- "$(dirname -- "$launcher")" && pwd)/$(basename -- "$launcher")
+export CUBE_LAUNCHER
 while [ -L "$launcher" ]; do
   directory=$(CDPATH= cd -P -- "$(dirname -- "$launcher")" && pwd)
   launcher=$(readlink "$launcher")
@@ -10,4 +12,9 @@ done
 directory=$(CDPATH= cd -P -- "$(dirname -- "$launcher")" && pwd)
 PATH="$directory/runtime:$PATH"
 export PATH
-exec "$directory/runtime/node" "$directory/app/dist/main.js" "$@"
+status=0
+"$directory/runtime/node" "$directory/app/dist/main.js" "$@" || status=$?
+if [ "$status" -eq 75 ]; then
+  exec sh "$directory/../../.update/run.sh" "$@"
+fi
+exit "$status"

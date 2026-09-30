@@ -42,6 +42,7 @@ try {
   if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
     New-Item -ItemType Directory -Path $expanded -Force | Out-Null
     tar.exe -xf $ArchivePath -C $expanded
+    if ($LASTEXITCODE) { throw 'Cannot extract the Cube package. Existing installation is unchanged.' }
   } else {
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $expanded
   }
@@ -59,12 +60,7 @@ try {
   } elseif (-not (Test-Path -LiteralPath (Join-Path $destination 'app/dist/main.js'))) {
     throw "Incomplete existing installation at $destination; it has not been overwritten."
   }
-  # Clean up older versions to prevent disk accumulation
-  Get-ChildItem -Directory -LiteralPath $versions -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne $versionKey } |
-    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-
-  $launcher = "@echo off`r`nsetlocal`r`nset `"PATH=%~dp0..\versions\$versionKey\runtime;%PATH%`"`r`n`"%~dp0..\versions\$versionKey\runtime\node.exe`" `"%~dp0..\versions\$versionKey\app\dist\main.js`" %*`r`nexit /b %errorlevel%`r`n"
+  $launcher = "@echo off`r`nsetlocal`r`nset `"CUBE_LAUNCHER=%~f0`"`r`nset `"PATH=%~dp0..\versions\$versionKey\runtime;%PATH%`"`r`n`"%~dp0..\versions\$versionKey\runtime\node.exe`" `"%~dp0..\versions\$versionKey\app\dist\main.js`" %*`r`nif `"%errorlevel%`"==`"75`" (`r`n  call `"%~dp0..\.update\run.cmd`"`r`n  exit /b`r`n)`r`nexit /b %errorlevel%`r`n"
   $launcherTemp = Join-Path $bin ('cube-' + [guid]::NewGuid().ToString('N') + '.tmp')
   [IO.File]::WriteAllText($launcherTemp, $launcher, [Text.Encoding]::ASCII)
   Move-Item -LiteralPath $launcherTemp -Destination (Join-Path $bin 'cube.cmd') -Force
@@ -75,6 +71,22 @@ try {
     }
     if (($env:PATH -split ';') -notcontains $bin) { $env:PATH = "$bin;$env:PATH" }
   }
+  # The update launcher waits for the old Cube process to exit before installing.
+  # Switch the launcher successfully before removing any previous version.
+  Get-ChildItem -Directory -LiteralPath $versions -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne $versionKey -and $_.Name -match '^[a-f0-9]{16}$' -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+    ForEach-Object {
+      $oldVersion = [IO.Path]::GetFullPath($_.FullName)
+      if ([IO.Path]::GetDirectoryName($oldVersion) -eq [IO.Path]::GetFullPath($versions)) {
+        # Another Cube instance may still be using this runtime: keep the whole version.
+        $oldRuntime = Join-Path $oldVersion 'runtime/node.exe'
+        if (Test-Path -LiteralPath $oldRuntime) {
+          try { $probe = [IO.File]::Open($oldRuntime, 'Open', 'ReadWrite', 'None'); $probe.Dispose() }
+          catch { return }
+        }
+        Remove-Item -LiteralPath $oldVersion -Recurse -Force -ErrorAction SilentlyContinue
+      }
+    }
   Write-Host ""
   Write-Host "Congratulations on successfully installing Cube!" -ForegroundColor Green
   Write-Host "Run " -NoNewline -ForegroundColor White
