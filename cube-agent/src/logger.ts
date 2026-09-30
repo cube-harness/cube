@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { TransformCallback } from "node:stream";
+import { format } from "node:util";
 import { LoggerTransport } from "@mastra/core/logger";
 import { PinoLogger } from "@mastra/loggers";
 import type { HomeManager } from "@cube/workspace";
@@ -125,12 +126,31 @@ export const createCubeLogger = async (home: HomeManager): Promise<CubeLogging> 
     },
   });
 
+  // Mastra's skill registry bypasses its logger, including during lazy discovery.
+  // ponytail: one CLI runtime owns console; use a shared dispatcher if runtimes coexist.
+  const restoreConsole = (["warn", "error"] as const).map((level) => {
+    const original = console[level];
+    const redirect = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("[WorkspaceSkills]")) {
+        logger[level](format(...args));
+      } else {
+        original.apply(console, args);
+      }
+    };
+    console[level] = redirect;
+    return () => {
+      if (console[level] === redirect) console[level] = original;
+    };
+  });
+
   return {
     logger,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
+    close: () => {
+      restoreConsole.forEach((restore) => restore());
+      return new Promise<void>((resolve, reject) => {
         transport.once("error", reject);
         transport.end(resolve);
-      }),
+      });
+    },
   };
 };

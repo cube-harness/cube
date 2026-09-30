@@ -144,7 +144,8 @@ const sessionToolStatus = (invocation: Record<string, unknown>): DisplayTool["st
     return invocation.isError === true ? "error" : "completed";
   }
   if (state === "error" || state === "output-error") return "error";
-  if (state === "declined" || state === "approval-rejected") return "declined";
+  if (state === "declined" || state === "approval-rejected" || state === "output-denied")
+    return "declined";
   if (state.includes("approval")) return "waiting_approval";
   return "running";
 };
@@ -242,7 +243,8 @@ const mapSessionMessage = (
     const toolName = typeof invocation.toolName === "string" ? invocation.toolName : undefined;
     if (!toolCallId || !toolName) continue;
     const invocationStatus = sessionToolStatus(invocation);
-    const invocationResult = invocation.result ?? invocation.output ?? invocation.error;
+    const invocationResult =
+      invocation.result ?? invocation.output ?? invocation.error ?? asRecord(invocation.approval)?.reason;
     const tool: DisplayTool = {
       id: toolCallId,
       name: toolName,
@@ -429,33 +431,13 @@ export class MessageList implements Component {
     const contentWidth = Math.max(1, availableWidth - prefixWidth);
     const lines: string[] = [];
 
-    if (msg.role === "assistant" && msg.status !== "streaming") {
+    if (msg.role === "assistant") {
       const markdown = new Markdown(msg.content);
       const renderedLines = markdown.render(contentWidth);
       renderedLines.forEach((line, index) => {
         const combined = `${index === 0 ? prefix : indent}${line}`;
         lines.push(truncateToWidth(combined, availableWidth));
       });
-      lines.push("");
-      return lines;
-    }
-
-    if (msg.role === "assistant") {
-      const contentLines = msg.content.split(/\r?\n/);
-      for (let index = 0; index < contentLines.length; index++) {
-        const wrapped = wrapTextWithAnsi(
-          appTheme.role.assistant(contentLines[index]),
-          contentWidth,
-        );
-        if (wrapped.length === 0) {
-          lines.push(index === 0 ? truncateToWidth(prefix, availableWidth) : "");
-        } else {
-          wrapped.forEach((wLine, wIdx) => {
-            const linePrefix = index === 0 && wIdx === 0 ? prefix : indent;
-            lines.push(truncateToWidth(`${linePrefix}${wLine}`, availableWidth));
-          });
-        }
-      }
       lines.push("");
       return lines;
     }

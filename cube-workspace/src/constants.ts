@@ -21,7 +21,7 @@ export const HOME_FILES = {
   MODEL_CATALOG: "model-catalog.json",
   SOUL: "SOUL.md",
   WORKSPACE: "workspace.json",
-  AGENTS: "AGENTS.md"
+  AGENTS: "AGENTS.md",
 } as const;
 
 export const HOME_LIMITS = {

@@ -2,7 +2,13 @@ import { MessageList, isUserAuthoredMessage, type MastraDBMessage } from "@mastr
 import type { InputProcessor, ProcessLLMRequestArgs } from "@mastra/core/processors";
 import type { RequestContext } from "@mastra/core/request-context";
 import { asSchema, type FlexibleSchema } from "ai";
-import { CubeContext, estimateTokens, OMITTED_OUTPUT, type ContextCheckpoint, type ContextLimits } from "../context.js";
+import {
+  CubeContext,
+  estimateTokens,
+  OMITTED_OUTPUT,
+  type ContextCheckpoint,
+  type ContextLimits,
+} from "../context.js";
 import { buildSummaryContext } from "../prompts/context.prompt.js";
 
 type Prompt = ProcessLLMRequestArgs["prompt"];
@@ -17,27 +23,44 @@ export type RequestFrame = {
   refresh(messages: MastraDBMessage[]): Promise<RequestFrame>;
   count(prompt: Prompt): number | undefined;
   project(checkpoint: ContextCheckpoint): Prompt;
-  select(checkpoint: ContextCheckpoint, keep: number): { boundary: string; task?: string; text: string } | undefined;
+  select(
+    checkpoint: ContextCheckpoint,
+    keep: number,
+  ): { boundary: string; task?: string; text: string } | undefined;
 };
 
-const nonempty = (message: { content: unknown }) => typeof message.content === "string"
-  ? message.content.length > 0 : Array.isArray(message.content) && message.content.length > 0;
+const nonempty = (message: { content: unknown }) =>
+  typeof message.content === "string"
+    ? message.content.length > 0
+    : Array.isArray(message.content) && message.content.length > 0;
 
 function toolIds(message: { content: unknown }): string {
-  return Array.isArray(message.content) ? message.content.flatMap((part) =>
-    part && typeof part === "object" && "toolCallId" in part ? [part.toolCallId] : []).join("\0") : "";
+  return Array.isArray(message.content)
+    ? message.content
+        .flatMap((part) =>
+          part && typeof part === "object" && "toolCallId" in part ? [part.toolCallId] : [],
+        )
+        .join("\0")
+    : "";
 }
 
 /** Match native conversion order and tool identity, never the user's text. */
 export function mapRequestSources(
-  messages: MastraDBMessage[], prompt: Prompt, protectedMessages: WeakSet<object>,
+  messages: MastraDBMessage[],
+  prompt: Prompt,
+  protectedMessages: WeakSet<object>,
 ): Segment[] {
   const expected = messages.flatMap((message) => {
     const list = new MessageList({ filterIncompleteToolCalls: true });
     list.add([message], "memory");
-    return list.get.all.aiV5.model().filter(nonempty).map((converted) => ({
-      id: message.id, role: converted.role, tools: toolIds(converted),
-    }));
+    return list.get.all.aiV5
+      .model()
+      .filter(nonempty)
+      .map((converted) => ({
+        id: message.id,
+        role: converted.role,
+        tools: toolIds(converted),
+      }));
   });
   let index = 0;
   const segments = prompt.map((message): Segment => {
@@ -48,22 +71,35 @@ export function mapRequestSources(
     }
     return { id: source.id, message };
   });
-  if (index !== expected.length) throw new Error("Native request omitted context that cannot be mapped safely");
+  if (index !== expected.length)
+    throw new Error("Native request omitted context that cannot be mapped safely");
   return segments;
 }
 
 function prunePrompt(prompt: Prompt, ids: Set<string>): Prompt {
-  return prompt.map((message) => message.role !== "tool" ? message : {
-    ...message,
-    content: message.content.map((part) => part.type === "tool-result" && ids.has(part.toolCallId)
-      ? { ...part, output: { type: "text" as const, value: OMITTED_OUTPUT } } : part),
-  });
+  return prompt.map((message) =>
+    message.role !== "tool"
+      ? message
+      : {
+          ...message,
+          content: message.content.map((part) =>
+            part.type === "tool-result" && ids.has(part.toolCallId)
+              ? { ...part, output: { type: "text" as const, value: OMITTED_OUTPUT } }
+              : part,
+          ),
+        },
+  );
 }
 
 export function makeRequestFrame(input: {
-  threadId: string; messages: MastraDBMessage[]; prompt: Prompt;
-  protectedMessages: WeakSet<object>; toolsTokens: number; limits: ContextLimits;
-  requestedOutput?: number; requestContext: RequestContext;
+  threadId: string;
+  messages: MastraDBMessage[];
+  prompt: Prompt;
+  protectedMessages: WeakSet<object>;
+  toolsTokens: number;
+  limits: ContextLimits;
+  requestedOutput?: number;
+  requestContext: RequestContext;
   isCurrent: () => boolean;
 }): RequestFrame {
   const segments = mapRequestSources(input.messages, input.prompt, input.protectedMessages);
@@ -79,28 +115,48 @@ export function makeRequestFrame(input: {
   };
   const project = (checkpoint: ContextCheckpoint): Prompt => {
     const boundary = checkpoint.summary ? locate(checkpoint.summary.firstRetainedMessageId) : 0;
-    const retained = segments.filter((segment) => segment.id === undefined ||
-      locate(segment.id) >= boundary || segment.id === checkpoint.summary?.taskMessageId);
-    const prompt = prunePrompt(retained.map((segment) => segment.message), new Set(checkpoint.prunedToolCallIds));
+    const retained = segments.filter(
+      (segment) =>
+        segment.id === undefined ||
+        locate(segment.id) >= boundary ||
+        segment.id === checkpoint.summary?.taskMessageId,
+    );
+    const prompt = prunePrompt(
+      retained.map((segment) => segment.message),
+      new Set(checkpoint.prunedToolCallIds),
+    );
     if (!checkpoint.summary) return prompt;
     let position = prompt.findIndex((message) => message.role !== "system");
     if (position < 0) position = prompt.length;
-    prompt.splice(position, 0, { role: "user", content: [{ type: "text", text:
-      buildSummaryContext(checkpoint.summary.text),
-    }] });
+    prompt.splice(position, 0, {
+      role: "user",
+      content: [{ type: "text", text: buildSummaryContext(checkpoint.summary.text) }],
+    });
     return prompt;
   };
   return {
-    threadId: input.threadId, limits: input.limits, requestedOutput: input.requestedOutput,
-    requestContext: input.requestContext, isCurrent: input.isCurrent,
+    threadId: input.threadId,
+    limits: input.limits,
+    requestedOutput: input.requestedOutput,
+    requestContext: input.requestContext,
+    isCurrent: input.isCurrent,
     fixedTokens: count(segments.filter((segment) => !segment.id).map((segment) => segment.message)),
-    count, project,
+    count,
+    project,
     async refresh(messages) {
       // Manual compaction only needs the new persisted suffix of the last request.
       // A changed prefix means the accounting envelope is stale, not permission to guess.
-      if (messages.length < input.messages.length || input.messages.some((message, index) =>
-        messages[index]?.id !== message.id || JSON.stringify(messages[index]?.content) !== JSON.stringify(message.content))) {
-        throw new Error("Context changed since the last request; send a turn before retrying /compact.");
+      if (
+        messages.length < input.messages.length ||
+        input.messages.some(
+          (message, index) =>
+            messages[index]?.id !== message.id ||
+            JSON.stringify(messages[index]?.content) !== JSON.stringify(message.content),
+        )
+      ) {
+        throw new Error(
+          "Context changed since the last request; send a turn before retrying /compact.",
+        );
       }
       const suffix = messages.slice(input.messages.length);
       const list = new MessageList({ filterIncompleteToolCalls: true });
@@ -119,7 +175,9 @@ export function makeRequestFrame(input: {
       let accumulated = 0;
       for (let i = input.messages.length - 1; i >= start; i--) {
         const id = input.messages[i]!.id;
-        const parts = segments.filter((segment) => segment.id === id).map((segment) => segment.message);
+        const parts = segments
+          .filter((segment) => segment.id === id)
+          .map((segment) => segment.message);
         if (!parts.length) continue;
         const tokens = estimateTokens(prunePrompt(parts, new Set(checkpoint.prunedToolCallIds)));
         if (tokens === undefined) return;
@@ -128,9 +186,15 @@ export function makeRequestFrame(input: {
         boundary = i;
       }
       if (boundary <= start || boundary === input.messages.length) return;
-      const older = segments.filter((segment) => segment.id &&
-        (locate(segment.id) >= start || segment.id === checkpoint.summary?.taskMessageId) &&
-        locate(segment.id) < boundary && segment.id !== latestTask?.id).map((segment) => segment.message);
+      const older = segments
+        .filter(
+          (segment) =>
+            segment.id &&
+            (locate(segment.id) >= start || segment.id === checkpoint.summary?.taskMessageId) &&
+            locate(segment.id) < boundary &&
+            segment.id !== latestTask?.id,
+        )
+        .map((segment) => segment.message);
       if (!older.length) return;
       const pruned = prunePrompt(older, new Set(checkpoint.prunedToolCallIds));
       if (estimateTokens(pruned) === undefined) return;
@@ -152,12 +216,18 @@ export const createContextProcessor = (
   async processInputStep({ messageList, tools, modelSettings, state }) {
     state.contextMessages = structuredClone(messageList.get.all.db());
     state.contextSettings = modelSettings;
-    const schemas = await Promise.all(Object.entries(tools ?? {}).map(async ([name, tool]) => {
-      if (!tool || typeof tool !== "object") throw new Error(`Cannot account for tool schema: ${name}`);
-      const schema = "inputSchema" in tool ? tool.inputSchema : undefined;
-      return { name, description: "description" in tool ? tool.description : undefined,
-        schema: schema ? await asSchema(schema as FlexibleSchema<unknown>).jsonSchema : undefined };
-    }));
+    const schemas = await Promise.all(
+      Object.entries(tools ?? {}).map(async ([name, tool]) => {
+        if (!tool || typeof tool !== "object")
+          throw new Error(`Cannot account for tool schema: ${name}`);
+        const schema = "inputSchema" in tool ? tool.inputSchema : undefined;
+        return {
+          name,
+          description: "description" in tool ? tool.description : undefined,
+          schema: schema ? await asSchema(schema as FlexibleSchema<unknown>).jsonSchema : undefined,
+        };
+      }),
+    );
     state.contextToolsTokens = estimateTokens(schemas);
   },
   async processLLMRequest({ prompt, requestContext, abortSignal, state, abort }) {
@@ -169,10 +239,14 @@ export const createContextProcessor = (
       const current = await readModel();
       const revision = readRevision();
       const frame = makeRequestFrame({
-        threadId, prompt, messages: state.contextMessages as MastraDBMessage[],
+        threadId,
+        prompt,
+        messages: state.contextMessages as MastraDBMessage[],
         toolsTokens: Number(state.contextToolsTokens ?? 0),
         requestedOutput: (state.contextSettings as { maxOutputTokens?: number })?.maxOutputTokens,
-        limits: current.limits, requestContext, protectedMessages: context.protectedMessages,
+        limits: current.limits,
+        requestContext,
+        protectedMessages: context.protectedMessages,
         isCurrent: () => readRevision() === revision,
       });
       context.remember(frame);

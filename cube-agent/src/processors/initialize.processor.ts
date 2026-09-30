@@ -13,18 +13,14 @@ export interface InitializeProcessorOptions {
   prompt?: string;
 }
 
-export const createInitializeProcessor = (
-  options: InitializeProcessorOptions = {},
-): Processor => {
+export const createInitializeProcessor = (options: InitializeProcessorOptions = {}): Processor => {
   return {
     id: "initialize-processor",
     name: "Initialize Processor",
     description:
       "Injects AGENTS.md initialization prompt during /init command execution without persisting raw prompt to DB",
 
-    async processLLMRequest(
-      args: ProcessLLMRequestArgs,
-    ): Promise<ProcessLLMRequestResult> {
+    async processLLMRequest(args: ProcessLLMRequestArgs): Promise<ProcessLLMRequestResult> {
       const isInit =
         args.requestContext?.get("command") === "init" ||
         (args.requestContext as any)?.all?.command === "init";

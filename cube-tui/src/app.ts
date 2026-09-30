@@ -303,7 +303,7 @@ export class CubeApp {
             if (resolution.kind === "dismissed") return;
             if (resolution.kind === "cancel") {
               this.suspensionQueueCancelled = true;
-              this.runtime.interrupt();
+              await this.runtime.cancelSuspension(event.toolCallId);
               return;
             }
             await this.runtime.respondToSuspension({

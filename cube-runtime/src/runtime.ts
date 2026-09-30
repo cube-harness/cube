@@ -53,7 +53,12 @@ export class CubeRuntime {
     if (dependencies.tools) {
       this.unsubscribeTools = dependencies.session.subscribe((event) => {
         if (event.type === "tool_end") dependencies.tools!.discardPreview(event.toolCallId);
-        if (event.type === "agent_end" && (event.reason === "aborted" || event.reason === "error" || (event.reason === "complete" && !dependencies.session.approval.isArmed()))) {
+        if (
+          event.type === "agent_end" &&
+          (event.reason === "aborted" ||
+            event.reason === "error" ||
+            (event.reason === "complete" && !dependencies.session.approval.isArmed()))
+        ) {
           dependencies.tools!.discardPreview();
         }
       });
@@ -70,7 +75,9 @@ export class CubeRuntime {
 
   getDisplayState(): RuntimeDisplayState {
     const state = this.dependencies.session.displayState.get();
-    return this.dependencies.context ? { ...state, compacting: this.dependencies.context.isCompacting() } : state;
+    return this.dependencies.context
+      ? { ...state, compacting: this.dependencies.context.isCompacting() }
+      : state;
   }
 
   getInstructionInfo(): InstructionInfo {
@@ -78,19 +85,29 @@ export class CubeRuntime {
   }
 
   subscribe(listener: RuntimeEventListener): () => void {
-    const unsubscribe = this.dependencies.session.subscribe((event) => listener(event.type === "display_state_changed"
-      ? { ...event, displayState: this.getDisplayState() } : event));
+    const unsubscribe = this.dependencies.session.subscribe((event) =>
+      listener(
+        event.type === "display_state_changed"
+          ? { ...event, displayState: this.getDisplayState() }
+          : event,
+      ),
+    );
     const stopContext = this.dependencies.context?.subscribe((_active, result) => {
       void listener({ type: "display_state_changed", displayState: this.getDisplayState() });
-      if (result?.status === "compacted") void listener({ type: "info",
-        message: `Context compacted (estimated ${result.before} → ${result.after} tokens).`,
-      });
+      if (result?.status === "compacted")
+        void listener({
+          type: "info",
+          message: `Context compacted (estimated ${result.before} → ${result.after} tokens).`,
+        });
     });
     if (!this.noticesDelivered) {
       this.noticesDelivered = true;
       for (const message of this.dependencies.notices ?? []) listener({ type: "info", message });
     }
-    return () => { stopContext?.(); unsubscribe(); };
+    return () => {
+      stopContext?.();
+      unsubscribe();
+    };
   }
 
   isApprovalPending(): boolean {
@@ -98,7 +115,10 @@ export class CubeRuntime {
   }
 
   interrupt(): boolean {
-    if (this.memory.isManual?.()) { this.memory.cancel(); return true; }
+    if (this.memory.isManual?.()) {
+      this.memory.cancel();
+      return true;
+    }
     if (
       !this.dependencies.session.run.isRunning() &&
       !this.dependencies.session.suspensions.hasPending()
@@ -110,9 +130,19 @@ export class CubeRuntime {
 
   respondToApproval(input: ToolApprovalResponse): void {
     const { tools, session } = this.dependencies;
-    if (input.decision !== "decline" && tools && ["edit_file", "write_file", "apply_patch"].includes(input.toolName) && !tools.hasPreview(input.toolCallId)) {
-      const reason = "This file approval has no valid live preview. Request a fresh tool call before approving.";
-      session.respondToToolApproval({ decision: "decline", toolCallId: input.toolCallId, declineContext: { reason } });
+    if (
+      input.decision !== "decline" &&
+      tools &&
+      ["edit_file", "write_file", "apply_patch"].includes(input.toolName) &&
+      !tools.hasPreview(input.toolCallId)
+    ) {
+      const reason =
+        "This file approval has no valid live preview. Request a fresh tool call before approving.";
+      session.respondToToolApproval({
+        decision: "decline",
+        toolCallId: input.toolCallId,
+        declineContext: { reason },
+      });
       tools.discardPreview(input.toolCallId);
       throw new Error(reason);
     }
@@ -133,6 +163,23 @@ export class CubeRuntime {
     return this.dependencies.session.respondToToolSuspension(input);
   }
 
+  async cancelSuspension(toolCallId: string): Promise<void> {
+    const { session } = this.dependencies;
+    const suspension = session.suspensions.get({ toolCallId });
+    if (!suspension) return;
+    if (suspension.toolName !== "ask_user") {
+      this.interrupt();
+      return;
+    }
+    // Resume with a decline so the native loop persists the result and continues.
+    session.run.ensureAbortController();
+    for (const pending of session.displayState.get().pendingSuspensions.values()) {
+      if (pending.toolName === "ask_user" && session.suspensions.has({ toolCallId: pending.toolCallId })) {
+        await session.respondToToolSuspension({ toolCallId: pending.toolCallId, resumeData: { cancelled: true } });
+      }
+    }
+  }
+
   getHistory(): Promise<string[]> {
     return this.dependencies.readHistory();
   }
@@ -143,7 +190,8 @@ export class CubeRuntime {
       this.unsubscribeTools?.();
       this.dependencies.tools?.discardPreview();
       await this.memory.shutdown?.();
-      if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) session.abort();
+      if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending())
+        session.abort();
       if (session.thread.getId() !== null) {
         await session.thread.clearAndReleaseLock().catch(() => undefined);
       }

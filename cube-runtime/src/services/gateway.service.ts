@@ -604,8 +604,10 @@ export class GatewayService {
           gatewayId === "oauth/openai" &&
           cached.providers.openai?.models.some(
             (model) =>
-              model.visibility === undefined || model.visibility === "hide" ||
-              (model.reasoning_efforts?.length && model.reasoning_effort_descriptions === undefined),
+              model.visibility === undefined ||
+              model.visibility === "hide" ||
+              (model.reasoning_efforts?.length &&
+                model.reasoning_effort_descriptions === undefined),
           )
         )
       )
@@ -648,39 +650,41 @@ export class GatewayService {
       );
       const ids = this.readStringArray(payload, "models", "slug");
       const rows = (payload as { models: Array<Record<string, unknown>> }).models;
-      available = ids.filter((id) => rows.find((item) => item.slug === id)!.visibility !== "hide").map((id) => {
-        const row = rows.find((item) => item.slug === id)!;
-        const descriptions: Array<[string, string]> = [];
-        const efforts = Array.isArray(row.supported_reasoning_levels)
-          ? row.supported_reasoning_levels.flatMap((value) => {
-              const effort =
-                typeof value === "object" && value !== null
-                  ? (value as Record<string, unknown>).effort
-                  : value;
-              if (typeof effort !== "string") return [];
-              const description =
-                typeof value === "object" && value !== null
-                  ? (value as Record<string, unknown>).description
-                  : undefined;
-              if (typeof description === "string") descriptions.push([effort, description]);
-              return [effort];
-            })
-          : undefined;
-        return {
-          modelId: `openai/${id}`,
-          name: typeof row.display_name === "string" ? row.display_name : id,
-          visibility: typeof row.visibility === "string" ? row.visibility : "list",
-          ...(typeof row.context_window === "number" && row.context_window >= 0
-            ? { limit: { context: row.context_window } }
-            : {}),
-          ...(efforts ? { reasoning_efforts: efforts } : {}),
-          reasoning_effort_descriptions: Object.fromEntries(descriptions),
-          ...(Array.isArray(row.input_modalities) &&
-          row.input_modalities.every((value) => typeof value === "string")
-            ? { modalities: { input: row.input_modalities as string[] } }
-            : {}),
-        };
-      });
+      available = ids
+        .filter((id) => rows.find((item) => item.slug === id)!.visibility !== "hide")
+        .map((id) => {
+          const row = rows.find((item) => item.slug === id)!;
+          const descriptions: Array<[string, string]> = [];
+          const efforts = Array.isArray(row.supported_reasoning_levels)
+            ? row.supported_reasoning_levels.flatMap((value) => {
+                const effort =
+                  typeof value === "object" && value !== null
+                    ? (value as Record<string, unknown>).effort
+                    : value;
+                if (typeof effort !== "string") return [];
+                const description =
+                  typeof value === "object" && value !== null
+                    ? (value as Record<string, unknown>).description
+                    : undefined;
+                if (typeof description === "string") descriptions.push([effort, description]);
+                return [effort];
+              })
+            : undefined;
+          return {
+            modelId: `openai/${id}`,
+            name: typeof row.display_name === "string" ? row.display_name : id,
+            visibility: typeof row.visibility === "string" ? row.visibility : "list",
+            ...(typeof row.context_window === "number" && row.context_window >= 0
+              ? { limit: { context: row.context_window } }
+              : {}),
+            ...(efforts ? { reasoning_efforts: efforts } : {}),
+            reasoning_effort_descriptions: Object.fromEntries(descriptions),
+            ...(Array.isArray(row.input_modalities) &&
+            row.input_modalities.every((value) => typeof value === "string")
+              ? { modalities: { input: row.input_modalities as string[] } }
+              : {}),
+          };
+        });
     } else if (gatewayId === "oauth/google") {
       const credential =
         candidate.kind === "oauth" && candidate.provider === "google"

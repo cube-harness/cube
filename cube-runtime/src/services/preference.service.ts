@@ -34,21 +34,33 @@ export class PreferenceService {
     const write = this.skillWrite.then(async () => {
       if (!pending.length) return;
       const choices = await this.listSkills();
-      if (!this.skills || pending.some(({ path }) => !choices.some((skill) => skill.path === path))) {
+      if (
+        !this.skills ||
+        pending.some(({ path }) => !choices.some((skill) => skill.path === path))
+      ) {
         throw new Error("Skill is no longer available. Reopen /skills.");
       }
-      const updates = new Map(pending.map(({ path, enabled }) => [skillPathIdentity(path), enabled]));
+      const updates = new Map(
+        pending.map(({ path, enabled }) => [skillPathIdentity(path), enabled]),
+      );
       const store = ConfigStore(this.home);
       const current = await store.read();
       const aliases = new Set<string>();
       for (const item of current.skills.disabled) {
-        if (updates.has(skillPathIdentity(await realpath(item).catch(() => item)))) aliases.add(item);
+        if (updates.has(skillPathIdentity(await realpath(item).catch(() => item))))
+          aliases.add(item);
       }
-      const saved = await store.update((config) => ({ ...config,
-        skills: { disabled: [...new Set([
-          ...config.skills.disabled.filter((item) => !aliases.has(item) && !updates.has(skillPathIdentity(item))),
-          ...pending.filter(({ enabled }) => !enabled).map(({ path }) => path),
-        ])],
+      const saved = await store.update((config) => ({
+        ...config,
+        skills: {
+          disabled: [
+            ...new Set([
+              ...config.skills.disabled.filter(
+                (item) => !aliases.has(item) && !updates.has(skillPathIdentity(item)),
+              ),
+              ...pending.filter(({ enabled }) => !enabled).map(({ path }) => path),
+            ]),
+          ],
         },
       }));
       this.skills.setDisabled(saved.skills.disabled);

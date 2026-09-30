@@ -34,7 +34,12 @@ import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ThreadService } from "./services/thread.service.js";
-import type { GatewayReadiness, ModelSelection, PreferenceState, SlashCommandSuggestion } from "./types.js";
+import type {
+  GatewayReadiness,
+  ModelSelection,
+  PreferenceState,
+  SlashCommandSuggestion,
+} from "./types.js";
 import { toRuntimeNotice } from "./types.js";
 
 export type CreateCubeRuntimeOptions = {
@@ -159,7 +164,10 @@ export const prepareCubeRuntime = async (
           while (session.followUps.dequeue()) {
             /* Drop prompts queued for the removed credential. */
           }
-          if (memory.isManual()) { memory.cancel(); return; }
+          if (memory.isManual()) {
+            memory.cancel();
+            return;
+          }
           await session.abort();
         };
         const permissionNotices = await configureCubePermissions(session, config.permissions);
@@ -167,7 +175,13 @@ export const prepareCubeRuntime = async (
 
         const stopPruning = session.onBeforeAgentEnd(async (event) => {
           const threadId = session.thread.getId();
-          if (event.reason !== "complete" || !threadId || session.approval.isArmed() || session.suspensions.hasPending()) return;
+          if (
+            event.reason !== "complete" ||
+            !threadId ||
+            session.approval.isArmed() ||
+            session.suspensions.hasPending()
+          )
+            return;
           try {
             await composition!.context.prune(threadId);
           } catch (error) {
@@ -175,16 +189,22 @@ export const prepareCubeRuntime = async (
             session.emit({ type: "info", message: toRuntimeNotice(error).message });
           }
         });
-        const thread = new ThreadService(session, {
-          read: composition.agent.readInstructions,
-          install: composition.agent.installInstructions,
-          refresh: composition.agent.refreshInstructions,
-          reload: (includeDiscovered) => reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
-        }, undefined, {
-          fork: (id, title) => composition!.context.fork(id, title),
-          invalidate: () => composition!.context.invalidate(),
-          isBusy: () => memory.isBusy(),
-        });
+        const thread = new ThreadService(
+          session,
+          {
+            read: composition.agent.readInstructions,
+            install: composition.agent.installInstructions,
+            refresh: composition.agent.refreshInstructions,
+            reload: (includeDiscovered) =>
+              reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
+          },
+          undefined,
+          {
+            fork: (id, title) => composition!.context.fork(id, title),
+            invalidate: () => composition!.context.invalidate(),
+            isBusy: () => memory.isBusy(),
+          },
+        );
         composition.agent.onInstructionsDiscovered = async (snapshot) => {
           if (thread.current()) await thread.saveInstructions(snapshot);
         };
@@ -194,8 +214,15 @@ export const prepareCubeRuntime = async (
         const applyLiveModel = (modelId: string, selection: ModelSelection) => {
           // Rollback of a rejected switch is a no-op, even during an active turn.
           if (modelId === liveModelId && selection.reasoningEffort === liveEffort) return;
-          if (memory.isBusy() || session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending()) {
-            throw new Error("Finish or cancel the current turn before changing the model or gateway.");
+          if (
+            memory.isBusy() ||
+            session.run.isRunning() ||
+            session.approval.isArmed() ||
+            session.suspensions.hasPending()
+          ) {
+            throw new Error(
+              "Finish or cancel the current turn before changing the model or gateway.",
+            );
           }
           updateCubeAgentModel(composition!.agent, modelId, selection.reasoningEffort);
           liveModelId = modelId;
@@ -218,11 +245,15 @@ export const prepareCubeRuntime = async (
           },
           gateway,
         );
-        const preference = new PreferenceService(home, {
-          theme: config.theme,
-          appTitle: config.app_title,
-          statusLine: config.status_line,
-        }, composition.skills);
+        const preference = new PreferenceService(
+          home,
+          {
+            theme: config.theme,
+            appTitle: config.app_title,
+            statusLine: config.status_line,
+          },
+          composition.skills,
+        );
         const commands: SlashCommandContext = {
           thread,
           model,
@@ -250,7 +281,10 @@ export const prepareCubeRuntime = async (
           workspaceRoot: workspacePaths.root,
           readInstructionInfo: () => composition!.agent.instructionInfo,
           readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
-          shutdownResources: async () => { stopPruning(); await composition!.shutdown(); },
+          shutdownResources: async () => {
+            stopPruning();
+            await composition!.shutdown();
+          },
         });
       } catch (error) {
         await composition?.shutdown().catch(() => undefined);

@@ -6,10 +6,23 @@ import type { HomeManager } from "./home-manager.js";
 import { ConfigStore, ModelCatalogStore } from "./store/store.js";
 import { AuthStore } from "./store/auth.store.js";
 import { CubeAuthSchema, type CubeAuth } from "./schemas/auth.schema.js";
-import { ConfigSchema, GatewayIdSchema, type CubeConfigDocument, type GatewayId, type LocalGatewayId } from "./schemas/config.schema.js";
+import {
+  ConfigSchema,
+  GatewayIdSchema,
+  type CubeConfigDocument,
+  type GatewayId,
+  type LocalGatewayId,
+} from "./schemas/config.schema.js";
 import { API_KEY_PROVIDERS } from "./constants.js";
-import { CatalogModelSchema, ModelCatalogSchema, ModelCatalogCacheSchema,
-  type CatalogModel, type ModelCatalog, type ModelCatalogCache, type ModelCatalogEntry } from "./schemas/model-catalog.schema.js";
+import {
+  CatalogModelSchema,
+  ModelCatalogSchema,
+  ModelCatalogCacheSchema,
+  type CatalogModel,
+  type ModelCatalog,
+  type ModelCatalogCache,
+  type ModelCatalogEntry,
+} from "./schemas/model-catalog.schema.js";
 
 type RawModel = Partial<Omit<CatalogModel, "modelId" | "reasoning_efforts">> & {
   reasoning_options?: Array<{ type?: string; values?: unknown[] }>;
@@ -36,9 +49,15 @@ const parts = (gatewayId: GatewayId) => {
 };
 
 const reasoningEfforts = (model: RawModel): string[] | undefined => {
-  const effort = model.reasoning_options?.find(option => option.type === "effort" && Array.isArray(option.values));
-  if (effort?.values) return effort.values.flatMap(value => value === null ? ["none"] : typeof value === "string" ? [value] : []);
-  if (model.reasoning_options?.some(option => option.type === "toggle")) return ["none", "default"];
+  const effort = model.reasoning_options?.find(
+    (option) => option.type === "effort" && Array.isArray(option.values),
+  );
+  if (effort?.values)
+    return effort.values.flatMap((value) =>
+      value === null ? ["none"] : typeof value === "string" ? [value] : [],
+    );
+  if (model.reasoning_options?.some((option) => option.type === "toggle"))
+    return ["none", "default"];
   return undefined;
 };
 
@@ -46,12 +65,28 @@ const toCatalogModel = (provider: string, id: string, raw: RawModel): CatalogMod
   CatalogModelSchema.parse({
     modelId: `${provider}/${id}`,
     name: raw.name || id,
-    ...Object.fromEntries(["family", "reasoning", "tool_call", "structured_output", "attachment",
-      "open_weights", "limit", "modalities", "cost"].flatMap(key =>
-        raw[key as keyof RawModel] === undefined ? [] : [[key, raw[key as keyof RawModel]]])),
+    ...Object.fromEntries(
+      [
+        "family",
+        "reasoning",
+        "tool_call",
+        "structured_output",
+        "attachment",
+        "open_weights",
+        "limit",
+        "modalities",
+        "cost",
+      ].flatMap((key) =>
+        raw[key as keyof RawModel] === undefined ? [] : [[key, raw[key as keyof RawModel]]],
+      ),
+    ),
     ...(reasoningEfforts(raw) ? { reasoning_efforts: reasoningEfforts(raw) } : {}),
-    ...(raw.limit ? { limit: CatalogModelSchema.shape.limit.unwrap().strip().parse(raw.limit) } : {}),
-    ...(raw.modalities ? { modalities: CatalogModelSchema.shape.modalities.unwrap().strip().parse(raw.modalities) } : {}),
+    ...(raw.limit
+      ? { limit: CatalogModelSchema.shape.limit.unwrap().strip().parse(raw.limit) }
+      : {}),
+    ...(raw.modalities
+      ? { modalities: CatalogModelSchema.shape.modalities.unwrap().strip().parse(raw.modalities) }
+      : {}),
     ...(raw.cost ? { cost: CatalogModelSchema.shape.cost.unwrap().strip().parse(raw.cost) } : {}),
   });
 
@@ -77,7 +112,10 @@ export class ModelManager {
     } else if (strategy === "oauth") {
       const credential = auth.oauth[provider as keyof typeof auth.oauth];
       if (!credential) return undefined;
-      identity = ["account_id" in credential ? credential.account_id : "", credential.refresh_token];
+      identity = [
+        "account_id" in credential ? credential.account_id : "",
+        credential.refresh_token,
+      ];
       if ("project_id" in credential) identity.push(credential.project_id);
     } else {
       const endpoint = config.gateway_options[gatewayId as LocalGatewayId]?.base_url;
@@ -86,23 +124,34 @@ export class ModelManager {
       if (provider === "ollama") normalized = normalized.replace(/\/api$/, "");
       else if (!normalized.endsWith("/v1")) normalized += "/v1";
       const url = new URL(normalized);
-      if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Invalid local gateway endpoint.");
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("Invalid local gateway endpoint.");
       identity = [url.toString().replace(/\/$/, "")];
     }
-    return createHash("sha256").update(JSON.stringify([gatewayId, ...identity])).digest("hex");
+    return createHash("sha256")
+      .update(JSON.stringify([gatewayId, ...identity]))
+      .digest("hex");
   }
 
   private async readContext(): Promise<CatalogContext> {
-    const context = this.options.readContext ? await this.options.readContext() : {
-      auth: await new AuthStore(this.home).read(), config: await ConfigStore(this.home).read(),
-    };
+    const context = this.options.readContext
+      ? await this.options.readContext()
+      : {
+          auth: await new AuthStore(this.home).read(),
+          config: await ConfigStore(this.home).read(),
+        };
     return { auth: CubeAuthSchema.parse(context.auth), config: ConfigSchema.parse(context.config) };
   }
 
   private async readCache(): Promise<ModelCatalogCache> {
-    try { return await ModelCatalogStore(this.home).read(); }
-    catch (error) {
-      if (error instanceof SyntaxError || error instanceof ZodError || (error as NodeJS.ErrnoException).code === "ENOENT") {
+    try {
+      return await ModelCatalogStore(this.home).read();
+    } catch (error) {
+      if (
+        error instanceof SyntaxError ||
+        error instanceof ZodError ||
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
         return { api_key: {}, oauth: {}, local: {} };
       }
       throw new Error("Cube model catalog could not be read.", { cause: error });
@@ -115,21 +164,30 @@ export class ModelManager {
       if (this.options.writeCatalog) await this.options.writeCatalog(valid);
       else await ModelCatalogStore(this.home).write(valid);
     } catch (error) {
-      throw new Error("Cube model catalog could not be updated. Run /gateway to retry.", { cause: error });
+      throw new Error("Cube model catalog could not be updated. Run /gateway to retry.", {
+        cause: error,
+      });
     }
   }
 
   private queued<T>(operation: () => Promise<T>): Promise<T> {
     const key = this.home.getModelCatalogPath();
-    const next = (ModelManager.updates.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
+    const next = (ModelManager.updates.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(operation);
     ModelManager.updates.set(key, next);
-    void next.finally(() => {
-      if (ModelManager.updates.get(key) === next) ModelManager.updates.delete(key);
-    }).catch(() => undefined);
+    void next
+      .finally(() => {
+        if (ModelManager.updates.get(key) === next) ModelManager.updates.delete(key);
+      })
+      .catch(() => undefined);
     return next;
   }
 
-  private branch(cache: ModelCatalogCache, gatewayId: GatewayId): Record<string, ModelCatalogEntry | undefined> {
+  private branch(
+    cache: ModelCatalogCache,
+    gatewayId: GatewayId,
+  ): Record<string, ModelCatalogEntry | undefined> {
     return cache[parts(gatewayId).strategy];
   }
 
@@ -140,7 +198,10 @@ export class ModelManager {
       let changed = false;
       for (const [strategy, providers] of Object.entries(cache)) {
         for (const [provider, entry] of Object.entries(providers)) {
-          if (entry.sourceKey !== ModelManager.sourceKey(`${strategy}/${provider}` as GatewayId, context)) {
+          if (
+            entry.sourceKey !==
+            ModelManager.sourceKey(`${strategy}/${provider}` as GatewayId, context)
+          ) {
             delete (providers as Record<string, ModelCatalogEntry>)[provider];
             changed = true;
           }
@@ -152,35 +213,60 @@ export class ModelManager {
       if (!entry) return undefined;
       const age = Date.now() - Date.parse(entry.updatedAt);
       if (age < 0 || age > this.home.getModelCatalogTtlMs()) return undefined;
-      return { updatedAt: entry.updatedAt, providers: { [provider]: { name: entry.name, models: entry.models } } };
+      return {
+        updatedAt: entry.updatedAt,
+        providers: { [provider]: { name: entry.name, models: entry.models } },
+      };
     });
   }
 
   async preview(gatewayId: GatewayId, available?: readonly CatalogModel[]): Promise<ModelCatalog> {
     const { strategy, provider } = parts(gatewayId);
-    if (available === undefined && strategy !== "api_key") throw new Error("Gateway model discovery is required.");
+    if (available === undefined && strategy !== "api_key")
+      throw new Error("Gateway model discovery is required.");
     const canonical = (await this.source())[provider];
-    const known = new Map(Object.entries(canonical?.models ?? {}).map(([id, raw]) => {
-      const model = toCatalogModel(provider, id, raw);
-      return [model.modelId, model] as const;
-    }));
-    const models = [...new Map((available ?? [...known.values()]).map(input => [input.modelId, input])).values()].map(input => {
+    const known = new Map(
+      Object.entries(canonical?.models ?? {}).map(([id, raw]) => {
+        const model = toCatalogModel(provider, id, raw);
+        return [model.modelId, model] as const;
+      }),
+    );
+    const models = [
+      ...new Map(
+        (available ?? [...known.values()]).map((input) => [input.modelId, input]),
+      ).values(),
+    ].map((input) => {
       const model = CatalogModelSchema.parse(input);
-      if (!model.modelId.startsWith(`${provider}/`) || model.modelId === `${provider}/`) throw new Error("Model does not belong to the selected gateway.");
+      if (!model.modelId.startsWith(`${provider}/`) || model.modelId === `${provider}/`)
+        throw new Error("Model does not belong to the selected gateway.");
       const base = known.get(model.modelId);
-      const result: CatalogModel = { ...base, ...model,
-        name: model.name === model.modelId.slice(provider.length + 1) ? base?.name ?? model.name : model.name,
+      const result: CatalogModel = {
+        ...base,
+        ...model,
+        name:
+          model.name === model.modelId.slice(provider.length + 1)
+            ? (base?.name ?? model.name)
+            : model.name,
       };
       for (const key of ["limit", "modalities", "cost"] as const) {
-        if (base?.[key] || model[key]) Object.assign(result, { [key]: { ...base?.[key], ...model[key] } });
+        if (base?.[key] || model[key])
+          Object.assign(result, { [key]: { ...base?.[key], ...model[key] } });
       }
       if (strategy === "oauth") delete result.cost;
       return CatalogModelSchema.parse(result);
     });
-    return { updatedAt: new Date().toISOString(), providers: {
-      [provider]: { name: canonical?.name ?? API_KEY_PROVIDERS[provider as keyof typeof API_KEY_PROVIDERS]
-        ?? (provider === "lmstudio" ? "LM Studio" : "Ollama"), models },
-    } };
+    return {
+      updatedAt: new Date().toISOString(),
+      providers: {
+        [provider]: {
+          name:
+            canonical?.name ??
+            API_KEY_PROVIDERS[provider as keyof typeof API_KEY_PROVIDERS] ??
+            (provider === "lmstudio" ? "LM Studio" : "Ollama"),
+          models,
+        },
+      },
+    };
   }
 
   publish(gatewayId: GatewayId, expectedSourceKey: string, view: ModelCatalog): Promise<boolean> {
@@ -189,9 +275,14 @@ export class ModelManager {
       if (ModelManager.sourceKey(gatewayId, context) !== expectedSourceKey) return false;
       const { provider } = parts(gatewayId);
       const valid = ModelCatalogSchema.parse(view);
-      if (Object.keys(valid.providers).length !== 1 || !valid.providers[provider]) throw new Error("Invalid gateway catalog view.");
+      if (Object.keys(valid.providers).length !== 1 || !valid.providers[provider])
+        throw new Error("Invalid gateway catalog view.");
       const cache = await this.readCache();
-      this.branch(cache, gatewayId)[provider] = { ...valid.providers[provider], updatedAt: valid.updatedAt, sourceKey: expectedSourceKey };
+      this.branch(cache, gatewayId)[provider] = {
+        ...valid.providers[provider],
+        updatedAt: valid.updatedAt,
+        sourceKey: expectedSourceKey,
+      };
       await this.writeCache(cache);
       return true;
     });
@@ -203,7 +294,11 @@ export class ModelManager {
       const cache = await this.readCache();
       const branch = this.branch(cache, gatewayId);
       const { provider } = parts(gatewayId);
-      if (!branch[provider] || (expectedSourceKey && branch[provider]?.sourceKey !== expectedSourceKey)) return;
+      if (
+        !branch[provider] ||
+        (expectedSourceKey && branch[provider]?.sourceKey !== expectedSourceKey)
+      )
+        return;
       delete branch[provider];
       await this.writeCache(cache);
     });
