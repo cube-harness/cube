@@ -37,15 +37,15 @@ export const CUBE_KEYBINDINGS = {
     description: "Toggle reasoning and expanded tool transcripts",
   },
   "cube.approval.approve": {
-    defaultKeys: ["y", "shift+y", "1"],
+    defaultKeys: "y",
     description: "Approve the pending tool call",
   },
   "cube.approval.approvePrefix": {
-    defaultKeys: ["p", "shift+p", "2"],
+    defaultKeys: "p",
     description: "Approve and remember the tool",
   },
   "cube.approval.decline": {
-    defaultKeys: ["n", "shift+n", "3"],
+    defaultKeys: "n",
     description: "Decline the pending tool call",
   },
   "cube.gateway.removeCredential": {
