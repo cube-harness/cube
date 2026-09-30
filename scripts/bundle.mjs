@@ -59,31 +59,10 @@ export async function bundleApp(stageDir, target = `${process.platform}-${proces
 
   // 2. Bundle package-smoke.mjs into app/package-smoke.mjs
   console.log(`[bundle] Bundling standalone package-smoke runner...`);
-  const smokePlugin = {
-    name: "smoke-meta-resolve",
-    setup(build) {
-      build.onLoad({ filter: /package-smoke\.mjs$/ }, async (args) => {
-        const { readFile } = await import("node:fs/promises");
-        let text = await readFile(args.path, "utf8");
-        const initProcFile = path.join(root, "cube-agent/src/processors/initialize.processor.ts").replace(/\\/g, "/");
-        const targetPattern = /const\s*\{\s*loadInitializePrompt\s*\}\s*=\s*await\s*import\([^;]+;/;
-        if (!targetPattern.test(text)) {
-          throw new Error("Failed to match loadInitializePrompt in package-smoke.mjs");
-        }
-        text = text.replace(
-          targetPattern,
-          `const { loadInitializePrompt } = await import("${initProcFile}");`
-        );
-        return { contents: text, loader: "js" };
-      });
-    },
-  };
-
   await esbuild.build({
     ...commonEsbuildConfig,
     entryPoints: [path.join(root, "scripts/package-smoke.mjs")],
     outfile: path.join(appDir, "package-smoke.mjs"),
-    plugins: [smokePlugin],
   });
 
   // 3. Write package.json for the deployed app
