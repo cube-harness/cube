@@ -44,6 +44,9 @@ jobs:
           version: 11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm package:app
+      - name: Verify R2 publish and retention safety
+        if: runner.os == 'Windows'
+        run: node --test scripts/r2-publish.test.mjs
       - name: Verify Unix installer
         if: runner.os != 'Windows'
         run: node scripts/install-smoke.mjs build/${{ matrix.output }}/cube-${{ matrix.target }}.tar.gz
@@ -86,12 +89,14 @@ jobs:
           $windows = 'packages/cube-windows-x64'
           $manifest = Get-Content "$windows/latest.json" -Raw | ConvertFrom-Json
           $manifest.file = "releases/$($manifest.sha256.Substring(0,16))/cube-windows-x64.zip"
+          $currentKeys = @($manifest.file)
           $manifest | ConvertTo-Json | Set-Content "$windows/latest.json" -Encoding utf8
           Upload "$windows/cube-windows-x64.zip" $manifest.file 'public,max-age=31536000,immutable' 'application/zip'
           $unixTargets = @('linux-x64', 'darwin-arm64', 'darwin-x64')
           foreach ($target in $unixTargets) {
             $directory = "packages/cube-$target"
             $remoteFile = ((Get-Content "$directory/latest-$target.txt" -Raw).Trim() -split '\s+')[1]
+            $currentKeys += $remoteFile
             Upload "$directory/cube-$target.tar.gz" $remoteFile 'public,max-age=31536000,immutable' 'application/gzip'
           }
           Upload "$windows/install.ps1" 'install.ps1' 'no-cache' 'text/plain; charset=utf-8'
@@ -99,4 +104,26 @@ jobs:
           Upload "$windows/latest.json" 'latest.json' 'no-cache' 'application/json'
           foreach ($target in $unixTargets) {
             Upload "packages/cube-$target/latest-$target.txt" "latest-$target.txt" 'no-cache' 'text/plain; charset=utf-8'
+          }
+          # Only reached after all builds, installers and manifests were published successfully.
+          $listing = aws s3api list-objects-v2 --bucket $env:R2_BUCKET --prefix 'releases/' --endpoint-url $env:R2_ENDPOINT --output json
+          if ($LASTEXITCODE) { throw 'Cannot list R2 releases; cleanup was not started.' }
+          $objects = @(($listing -join "`n" | ConvertFrom-Json).Contents)
+          $deleteKeys = @()
+          foreach ($currentKey in $currentKeys) {
+            if ($currentKey -cnotmatch '^releases/[a-f0-9]{16}/cube-(windows-x64\.zip|(?:linux-x64|darwin-arm64|darwin-x64)\.tar\.gz)$') {
+              throw "Invalid active archive key; cleanup was not started: $currentKey"
+            }
+            $archive = $currentKey.Split('/')[-1]
+            $pattern = '^releases/[a-f0-9]{16}/' + [regex]::Escape($archive) + '$'
+            $versions = @($objects | Where-Object { $_.Key -cmatch $pattern } | Sort-Object LastModified -Descending)
+            if ($versions.Key -cnotcontains $currentKey) { throw "Active archive missing; cleanup was not started: $currentKey" }
+            $previous = $versions | Where-Object { $_.Key -cne $currentKey } | Select-Object -First 1
+            $deleteKeys += $versions | Where-Object { $_.Key -cne $currentKey -and $_.Key -cne $previous.Key } | Select-Object -ExpandProperty Key
+          }
+          # Validate every active platform before the first delete; never delete a whole prefix.
+          foreach ($key in $deleteKeys) {
+            Write-Host "Deleting old R2 archive: $key"
+            aws s3api delete-object --bucket $env:R2_BUCKET --key $key --endpoint-url $env:R2_ENDPOINT | Out-Null
+            if ($LASTEXITCODE) { throw "Cannot delete old R2 archive: $key" }
           }
