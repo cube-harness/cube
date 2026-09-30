@@ -34,7 +34,7 @@ export class WorkspaceManager {
   ) {}
 
   async resolveRoot(): Promise<string> {
-    return this.cwd
+    return this.cwd;
   }
 
   private async exists(p: string): Promise<boolean> {
@@ -99,7 +99,11 @@ export class WorkspaceManager {
   }
 
   /** Discover only ancestors of touched paths; cache both loaded files and misses. */
-  async discoverContextFiles(paths: readonly string[], explored: Set<string>, root: string): Promise<ContextFile[]> {
+  async discoverContextFiles(
+    paths: readonly string[],
+    explored: Set<string>,
+    root: string,
+  ): Promise<ContextFile[]> {
     const sources: ContextFile[] = [];
     let realRoot: string | undefined;
     for (const input of paths) {

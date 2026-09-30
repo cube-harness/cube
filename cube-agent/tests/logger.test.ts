@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import { InMemoryStore } from "@mastra/core/storage";
 import { ObservationalMemory } from "@mastra/memory/processors";
 import { APICallError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
+import { resolveAgentSkills } from "@mastra/core/skills";
 
 const loadLogging = async () => {
   const module = await import("../src/logger.js").catch(() => ({}));
@@ -100,6 +101,48 @@ test("routes global and thread logs to separate JSONL files", async () => {
     assert.equal(threadLog.includes("runtime started"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed skills log diagnostics without writing into the terminal", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cube-skill-logger-test-"));
+  const terminal: unknown[][] = [];
+  const error = t.mock.method(console, "error", (...args: unknown[]) => terminal.push(args));
+  const warn = t.mock.method(console, "warn", (...args: unknown[]) => terminal.push(args));
+  const { createCubeLogger, runWithCubeLogContext } = await import("../src/logger.js");
+  const logging = await createCubeLogger(CubeHome({ cubeHome: root }));
+  let closed = false;
+  try {
+    const skillsDir = path.join(root, "skills");
+    for (const [name, description] of [["valid", "Valid skill"], ["broken", "Milestones: C1"]]) {
+      const dir = path.join(skillsDir, name!);
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\nInstructions.`);
+    }
+    // First discovery can happen in a picker before a thread exists.
+    assert.deepEqual((await resolveAgentSkills([skillsDir]).list()).map((skill) => skill.name), ["valid"]);
+    await runWithCubeLogContext({ threadId: "skill-thread" }, async () => {
+      assert.equal((await resolveAgentSkills([skillsDir]).list()).length, 1);
+      console.warn("[WorkspaceSkills] Test skill warning");
+    });
+    assert.deepEqual(terminal, []);
+    console.error("Unrelated CLI diagnostic");
+    assert.deepEqual(terminal, [["Unrelated CLI diagnostic"]]);
+    await logging.close();
+    closed = true;
+    assert.equal(console.error, error);
+    assert.equal(console.warn, warn);
+    const globalLog = await readFile(path.join(root, "logs", "cube.log"), "utf8");
+    const threadLog = await readFile(path.join(root, "logs", "threads", "skill-thread.log"), "utf8");
+    for (const log of [globalLog, threadLog]) {
+      assert.match(log, /\[WorkspaceSkills\] Failed to load skill/);
+    }
+    assert.match(globalLog, /incomplete explicit mapping pair/);
+    assert.match(threadLog, /Test skill warning/);
+  } finally {
+    if (!closed) await logging.close();
+    t.mock.restoreAll();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

@@ -118,7 +118,10 @@ export const createCubeAgent = async (
   config: CubeConfig,
   logger?: IMastraLogger,
   tools?: CubeTools,
-  contextManager?: { context: CubeContext; readModel: (modelId: string) => Promise<{ limits: ContextLimits }> },
+  contextManager?: {
+    context: CubeContext;
+    readModel: (modelId: string) => Promise<{ limits: ContextLimits }>;
+  },
 ) => {
   let snapshot = await loadInstructionSnapshot(home, workspace);
   const startupSnapshot = structuredClone(snapshot);
@@ -168,8 +171,15 @@ export const createCubeAgent = async (
         },
         (message) => contextManager?.context.protectedMessages.add(message),
       ),
-      ...(contextManager ? [createContextProcessor(contextManager.context, () => contextManager.readModel(activeModel),
-        () => JSON.stringify({ activeModel, snapshot }))] : []),
+      ...(contextManager
+        ? [
+            createContextProcessor(
+              contextManager.context,
+              () => contextManager.readModel(activeModel),
+              () => JSON.stringify({ activeModel, snapshot }),
+            ),
+          ]
+        : []),
     ],
     workspace: mastraWorkspace,
     skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,

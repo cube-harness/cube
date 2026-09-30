@@ -1,110 +1,76 @@
+import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { stat, readdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, readdir, mkdtemp, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { measure, quick, report } from "./harness.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = fileURLToPath(new URL("..", import.meta.url));
 const windows = process.platform === "win32";
-const zipName = windows ? "cube-windows-x64.zip" : `cube-${process.platform}-${process.arch}.tar.gz`;
-const archivePath = path.join(root, "build", windows ? "windows" : `${process.platform}-${process.arch}`, zipName);
+const target = windows ? "windows" : `${process.platform}-${process.arch}`;
+const filename = windows ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`;
+const archiveArgument = process.argv.find((argument) => argument.startsWith("--archive="));
+const archive = path.resolve(archiveArgument?.slice("--archive=".length) ?? path.join(root, "build", target, filename));
+const preload = new URL("./harness.mjs", import.meta.url).href;
+const archiveInfo = await stat(archive).catch((cause) => {
+  throw new Error(`Archive unavailable: ${archive}. Build it with pnpm package:app first.`, { cause });
+});
+const scratch = await mkdtemp(path.join(os.tmpdir(), "cube-package-bench-"));
+let extraction;
+let inventory;
+let index = 0;
 
-async function walk(dir) {
-  let files = [];
-  let totalBytes = 0;
-  let dirCount = 0;
-  const entries = await readdir(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
+function run(command, args, cwd) {
+  const result = spawnSync(command, args, {
+    cwd, encoding: "utf8", windowsHide: true, timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr || result.stdout || `Process exited with ${result.status}`);
+  return result.stdout;
+}
+
+async function inspect(directory) {
+  const result = { files: 0, directories: 0, bytes: 0 };
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const location = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      dirCount += 1;
-      const sub = await walk(fullPath);
-      files.push(...sub.files);
-      totalBytes += sub.totalBytes;
-      dirCount += sub.dirCount;
+      const child = await inspect(location);
+      result.files += child.files;
+      result.directories += child.directories + 1;
+      result.bytes += child.bytes;
     } else {
-      const s = await stat(fullPath);
-      files.push({ path: path.relative(dir, fullPath), size: s.size });
-      totalBytes += s.size;
+      result.files++;
+      result.bytes += (await lstat(location)).size;
     }
   }
-  return { files, totalBytes, dirCount };
+  return result;
 }
 
-async function runBenchmark() {
-  console.log("=== Cube Package Benchmark ===");
-  console.log(`Target archive: ${archivePath}`);
-
-  // 1. Archive Stat
-  let archiveStat;
-  try {
-    archiveStat = await stat(archivePath);
-  } catch (err) {
-    console.error(`Archive not found at ${archivePath}. Run 'pnpm package:app' first.`);
-    process.exit(1);
-  }
-
-  const archiveMB = (archiveStat.size / (1024 * 1024)).toFixed(2);
-  console.log(`Archive size: ${archiveMB} MB (${archiveStat.size.toLocaleString()} bytes)`);
-
-  // 2. Extraction Benchmark
-  const tempExtractDir = await mkdtemp(path.join(tmpdir(), "cube-bench-extract-"));
-  console.log(`Extracting to temp directory: ${tempExtractDir}`);
-
-  const startExtract = performance.now();
-  const tarCmd = windows ? "tar.exe" : "tar";
-  const tarArgs = windows ? ["-xf", archivePath, "-C", tempExtractDir] : ["-xzf", archivePath, "-C", tempExtractDir];
-  const extractResult = spawnSync(tarCmd, tarArgs, { stdio: "inherit" });
-  const extractTimeMs = performance.now() - startExtract;
-
-  if (extractResult.status !== 0) {
-    throw new Error(`Extraction failed with exit code ${extractResult.status}`);
-  }
-  console.log(`Extraction latency: ${(extractTimeMs / 1000).toFixed(3)}s (${extractTimeMs.toFixed(1)}ms)`);
-
-  // 3. Inspect Extracted Files
-  const stats = await walk(tempExtractDir);
-  const unpackedMB = (stats.totalBytes / (1024 * 1024)).toFixed(2);
-  console.log(`Unpacked file count: ${stats.files.length}`);
-  console.log(`Unpacked directory count: ${stats.dirCount}`);
-  console.log(`Unpacked total size: ${unpackedMB} MB (${stats.totalBytes.toLocaleString()} bytes)`);
-
-  console.log("\nUnpacked files list:");
-  for (const f of stats.files) {
-    const sizeKB = (f.size / 1024).toFixed(1);
-    console.log(`  - ${f.path.padEnd(50)} (${sizeKB.padStart(8)} KB)`);
-  }
-
-  // 4. Smoke Test in Extracted Location
-  console.log("\nTesting execution in isolated extracted directory...");
-  const nodeBinary = path.join(tempExtractDir, "runtime", windows ? "node.exe" : "node");
-  const smokeScript = path.join(tempExtractDir, "app", "package-smoke.mjs");
-
-  const startSmoke = performance.now();
-  const smokeResult = spawnSync(nodeBinary, [smokeScript], {
-    cwd: tempExtractDir,
-    stdio: "inherit",
-    windowsHide: true,
+try {
+  await measure("package.extract", () => run(windows ? "tar.exe" : "tar",
+    windows ? ["-xf", archive, "-C", extraction] : ["-xzf", archive, "-C", extraction], scratch),
+  async () => {
+    inventory = await inspect(extraction);
+    assert.ok(inventory.files > 0);
+    assert.ok((await stat(path.join(extraction, "runtime", windows ? "node.exe" : "node"))).isFile());
+  }, { iterations: quick ? 1 : 3, warmup: 0, prepare: async () => {
+    extraction = await mkdtemp(path.join(scratch, `extract-${index++}-`));
+  } });
+  const runtime = path.join(extraction, "runtime", windows ? "node.exe" : "node");
+  const app = path.join(extraction, "app");
+  // The CLI bundle starts its TUI on import. Parse it without executing the app.
+  await measure("package.syntax.main", () => run(runtime, [
+    "--import", preload, "--check", path.join(app, "dist", "main.js"),
+  ], app), (output) => assert.equal(output, ""), { iterations: quick ? 1 : 3, warmup: 1 });
+  await measure("package.smoke.local", () => run(runtime, [
+    "--import", preload, path.join(app, "package-smoke.mjs"),
+  ], extraction), (output) => assert.match(output, /package-smoke:/), { iterations: quick ? 1 : 3, warmup: 1 });
+  report({
+    suite: "package", archive, archiveBytes: archiveInfo.size,
+    archiveModifiedAt: archiveInfo.mtime.toISOString(), unpacked: inventory,
+    exclusions: ["provider/model latency", "full interactive application boot", "unmeasured historical baselines"],
   });
-  const smokeTimeMs = performance.now() - startSmoke;
-
-  if (smokeResult.status !== 0) {
-    throw new Error(`Smoke test in isolated extraction failed with code ${smokeResult.status}`);
-  }
-  console.log(`Smoke test execution time: ${(smokeTimeMs / 1000).toFixed(3)}s (${smokeTimeMs.toFixed(1)}ms)`);
-
-  // Clean up
-  await rm(tempExtractDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  console.log("\n=== Benchmark Summary ===");
-  console.log(`| Metric                  | Baseline (pnpm deploy) | Single-Bundle (esbuild) | Improvement |`);
-  console.log(`| ----------------------- | ---------------------- | ----------------------- | ----------- |`);
-  console.log(`| File Count              | ~15,200 files          | ${stats.files.length} files               | -${((1 - stats.files.length / 15200) * 100).toFixed(1)}%     |`);
-  console.log(`| Unpacked Disk Footprint | ~360 MB                | ${unpackedMB} MB                | -${((1 - (stats.totalBytes / (1024 * 1024)) / 360) * 100).toFixed(1)}%     |`);
-  console.log(`| Archive Size            | ~81 MB                 | ${archiveMB} MB                 | ${(1 - (archiveStat.size / (1024 * 1024)) / 81) >= 0 ? "-" : "+"}${Math.abs((1 - (archiveStat.size / (1024 * 1024)) / 81) * 100).toFixed(1)}%     |`);
-  console.log(`| Extraction Latency      | ~25 - 40s (Defender)   | ${(extractTimeMs / 1000).toFixed(2)}s                   | -${((1 - (extractTimeMs / 1000) / 30) * 100).toFixed(1)}%     |`);
+} finally {
+  await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
-
-runBenchmark().catch((err) => {
-  console.error("Benchmark failed:", err);
-  process.exit(1);
-});

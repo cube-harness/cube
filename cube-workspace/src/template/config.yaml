@@ -98,7 +98,7 @@ memory:
     manual_min_ratio: 0.30
     # Fraction of conversation capacity retained after reserving instructions
     # and the new summary. Tool exchanges are never split.
-    keep_recent_ratio: 0.25
+    keep_recent_ratio: 0.20
     # Generation/counting reserve, not a fixed summary length.
     reserve_tokens: 16384
 

@@ -7,12 +7,22 @@ export class MemoryService {
 
   constructor(
     private readonly session: Session,
-    private readonly context: Pick<CubeContext, "compactManual" | "cancel" | "drain" | "isCompacting">,
+    private readonly context: Pick<
+      CubeContext,
+      "compactManual" | "cancel" | "drain" | "isCompacting"
+    >,
   ) {}
 
-  isBusy(): boolean { return this.pending !== undefined || this.context.isCompacting(); }
-  isManual(): boolean { return this.pending !== undefined; }
-  cancel(): void { this.abortController?.abort(); this.context.cancel(); }
+  isBusy(): boolean {
+    return this.pending !== undefined || this.context.isCompacting();
+  }
+  isManual(): boolean {
+    return this.pending !== undefined;
+  }
+  cancel(): void {
+    this.abortController?.abort();
+    this.context.cancel();
+  }
 
   async shutdown(): Promise<void> {
     this.closing = true;
@@ -24,9 +34,16 @@ export class MemoryService {
   compact(): Promise<CompactResult> {
     const threadId = this.session.thread.getId();
     if (!threadId) return Promise.reject(new Error("No active thread to compact"));
-    if (this.closing || this.isBusy() || this.session.run.isRunning() ||
-        this.session.approval.isArmed() || this.session.suspensions.hasPending()) {
-      return Promise.reject(new Error("Finish or cancel the active turn, approval, or suspension before compacting"));
+    if (
+      this.closing ||
+      this.isBusy() ||
+      this.session.run.isRunning() ||
+      this.session.approval.isArmed() ||
+      this.session.suspensions.hasPending()
+    ) {
+      return Promise.reject(
+        new Error("Finish or cancel the active turn, approval, or suspension before compacting"),
+      );
     }
     this.abortController = this.session.run.ensureAbortController();
     const signal = this.abortController.signal;
