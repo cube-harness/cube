@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readlink, realpath, rm, symlink, writeFile } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { prepareCubeUpdate } from "../cube-runtime/dist/services/update.service.js";
 
 if (process.platform === "win32") throw new Error("Run the Unix installer smoke on Linux or macOS.");
 const archive = path.resolve(process.argv[2]);
@@ -49,6 +50,34 @@ try {
   assert.deepEqual(observed.args, ["argument with spaces", "literal;$value"]);
   assert.equal(await realpath(observed.node), await realpath(node));
 
+  // Exercise the update handoff without a provider call, TUI or a real download.
+  const updateProbe = path.join(scratch, "update-probe.mjs");
+  await writeFile(updateProbe, `
+if (process.argv[1]?.endsWith('/app/dist/main.js')) {
+  if (process.env.CUBE_SKIP_UPDATE !== '1') process.exit(75);
+  console.log(JSON.stringify({cwd:process.cwd(),args:process.argv.slice(2),node:process.execPath,error:process.env.CUBE_UPDATE_ERROR}));
+  process.exit(0);
+}
+`);
+  const packageBytes = await readFile(archive);
+  const installerText = await readFile(installer, "utf8");
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+    await prepareCubeUpdate({
+      installDir: install, launcher, target: `${process.platform}-${process.arch}`,
+      currentBuild: sha256.slice(0, 16), sha256, file: `releases/${sha256.slice(0, 16)}/cube-${process.platform}-${process.arch}.tar.gz`,
+    }, { fetch: async (url) => new Response(String(url).endsWith("install.sh") ? installerText : packageBytes) });
+  } finally { process.chdir(previousCwd); }
+  const updated = JSON.parse(run(launcher, ["argument with spaces", "literal;$value"], {
+    cwd, env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(updateProbe).href}` },
+  }));
+  assert.equal(await realpath(updated.cwd), cwd);
+  assert.deepEqual(updated.args, ["argument with spaces", "literal;$value"]);
+  assert.equal(updated.error, undefined);
+  assert.equal(await realpath(updated.node), await realpath(node));
+  await assert.rejects(readFile(path.join(install, ".update/run.sh")));
+
   // An unrelated executable/symlink must never be replaced by the installer.
   await rm(launcher);
   await writeFile(launcher, "unrelated executable");
@@ -58,7 +87,7 @@ try {
   await symlink("/unrelated/cube", launcher);
   assert.notEqual(spawnSync("sh", args).status, 0);
   assert.equal(await readlink(launcher), "/unrelated/cube");
-  console.log("install-smoke: install/reinstall, checksum rejection, bundled launcher, spaces and ownership OK");
+  console.log("install-smoke: install/reinstall, checksum rejection, update handoff, bundled launcher, spaces and ownership OK");
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

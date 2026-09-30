@@ -1,8 +1,11 @@
-import { Text, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
-import type { CubeBootstrap, GatewaySelection, RuntimeNotice } from "@cube/runtime";
+import { CancellableLoader, Container, SelectList, Text, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
+import type { CubeBootstrap, CubeUpdate, GatewaySelection, RuntimeNotice } from "@cube/runtime";
 import { GatewaySetupComponent } from "../components/gateway-picker.js";
 import { MessageList } from "../components/message-list.js";
 import { Card } from "../components/card.js";
+import { KeyHint } from "../components/key-hint.js";
+import { createSelectListTheme } from "../themes/pi-tui.theme.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export class OnBoardScreen {
   private readonly title = new Text("Set up Cube\nChoose how to connect to a model.", 0, 1);
@@ -36,6 +39,48 @@ export class OnBoardScreen {
     this.messages.addMessage({ role: "system", content: notice.message,
       status: notice.level === "error" ? "error" : "done" });
     this.tui.requestRender();
+  }
+
+  async pickUpdate(update: CubeUpdate): Promise<"update" | "continue" | null> {
+    this.title.setText("Update Cube\nA new build is available.");
+    try {
+      return await this.show<"update" | "continue" | null>((finish) => {
+        const content = new Container();
+        content.addChild(new Text(`${update.currentBuild} → ${update.sha256.slice(0, 16)}`, 0, 0));
+        const choices = new SelectList([
+          { value: "update", label: "Update", description: "Install the latest build and restart Cube" },
+          { value: "continue", label: "Continue", description: "Use the current build" },
+          { value: "cancel", label: "Cancel", description: "Exit Cube" },
+        ], 3, createSelectListTheme());
+        choices.onSelect = (item) => finish(item.value === "cancel" ? null : item.value as "update" | "continue");
+        choices.onCancel = () => finish(null);
+        content.addChild(choices);
+        content.addChild(new KeyHint([{ key: "↑/↓", label: "Navigate" }, { key: "Enter", label: "Select" }, { key: "Esc/ctrl+c", label: "Exit" }]));
+        return Object.assign(content, { handleInput: (data: string) => {
+          if (matchesKey(data, "ctrl+c")) finish(null);
+          else choices.handleInput(data);
+        } });
+      });
+    } finally { this.title.setText("Set up Cube\nChoose how to connect to a model."); }
+  }
+
+  async downloadUpdate(work: (signal: AbortSignal) => Promise<void>): Promise<boolean> {
+    this.title.setText("Update Cube");
+    const result = await this.show<boolean | Error>((finish) => {
+      const loader = new CancellableLoader(this.tui, appTheme.ui.primary, appTheme.ui.muted, "Downloading Cube update…");
+      const handleInput = loader.handleInput.bind(loader);
+      loader.handleInput = (data) => handleInput(matchesKey(data, "ctrl+c") ? "\x1b" : data);
+      void work(loader.signal).then(() => {
+        loader.stop();
+        finish(true);
+      }, (error: unknown) => {
+        loader.stop();
+        finish(loader.aborted ? false : error instanceof Error ? error : new Error(String(error)));
+      });
+      return loader;
+    });
+    if (result instanceof Error) throw result;
+    return result;
   }
 
   async pickGateway(gateway: CubeBootstrap["gateway"]): Promise<GatewaySelection | null> {

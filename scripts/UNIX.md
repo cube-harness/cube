@@ -59,4 +59,12 @@ curl -fsSL https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev/install.sh | sh
 ```
 
 Run this inside WSL for Linux, or Terminal for macOS. The URL will not serve these
-new targets until you explicitly publish the combined workflow. No auto-update service.
+new targets until you explicitly publish the combined workflow.
+
+Installed Cube checks its platform's `latest-<target>.txt` on startup, with a
+3-second timeout. A different checksum opens the onboarding Update/Continue/Cancel
+picker. Update verifies the archive and hands control back to the launcher after
+the old Node process exits; the existing installer updates the symlink and reopens
+Cube in the same workspace. Errors become system notices in the previous build,
+not raw installer output. Config, auth and history under `~/.cube` remain untouched.
+Source/development runs skip the check. There is no background updater.

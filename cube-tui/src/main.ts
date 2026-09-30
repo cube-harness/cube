@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { openExternalUrl, prepareCubeRuntime } from "@cube/runtime";
+import { checkCubeUpdate, prepareCubeUpdate, openExternalUrl, prepareCubeRuntime, type RuntimeNotice } from "@cube/runtime";
 import { ProcessTerminal, TuiAltScreen } from "@earendil-works/pi-tui";
 import { copyToClipboard } from "./clipboard.js";
 import { startPreparedCube, type PreparedCube } from "./app.js";
@@ -14,9 +14,32 @@ export const startTui = async (): Promise<void> => {
     },
   });
   const onboarding = new OnBoardScreen(tui);
+  const updateNotices: RuntimeNotice[] = [];
+  const updateError = process.env.CUBE_UPDATE_ERROR;
+  const skipUpdate = process.env.CUBE_SKIP_UPDATE === "1";
+  delete process.env.CUBE_UPDATE_ERROR;
+  delete process.env.CUBE_SKIP_UPDATE;
+  if (updateError) updateNotices.push({ level: "error", message: updateError });
+  try {
+    const update = skipUpdate ? null : await checkCubeUpdate();
+    if (update) {
+      const decision = await onboarding.pickUpdate(update);
+      if (!decision) { onboarding.stopTerminal(); return; }
+      if (decision === "update") {
+        const prepared = await onboarding.downloadUpdate((signal) => prepareCubeUpdate(update, { signal }));
+        if (prepared) onboarding.showNotice({ level: "info", message: "Update verified. Restarting Cube…" });
+        onboarding.stopTerminal();
+        process.exitCode = prepared ? 75 : 0;
+        return;
+      }
+    }
+  } catch (error) {
+    updateNotices.push({ level: "error", message: `${error instanceof Error ? error.message : String(error)} Using the current Cube build.` });
+    onboarding.stopTerminal();
+  }
   const createScreen = (bootstrap: Awaited<ReturnType<typeof prepareCubeRuntime>>) => {
     const model = bootstrap.readiness.ready ? bootstrap.readiness.model : undefined;
-    return new ChatScreen({
+    const screen = new ChatScreen({
       tui,
       basePath: bootstrap.workspaceRoot,
       initialHistory: bootstrap.history,
@@ -34,6 +57,8 @@ export const startTui = async (): Promise<void> => {
         threadId: "new thread",
       },
     });
+    for (const notice of updateNotices) screen.showNotice(notice);
+    return screen;
   };
 
   let launched: PreparedCube | null = null;
