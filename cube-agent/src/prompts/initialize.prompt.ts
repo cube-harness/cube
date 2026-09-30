@@ -1,20 +1,17 @@
-export const INITIALIZE_PROMPT = `Please analyze this codebase and create (or update) an AGENTS.md file that will be given to future instances of you when working in this repository.
-    Before writing:
-    - If AGENTS.md already exists, treat this as an improvement pass — merge in anything missing, don't blindly overwrite what's already correct.
-    - Check for and fold in the important parts of any existing .cursor/rules/, .cursorrules, .github/copilot-instructions.md, or README.md — don't duplicate them elsewhere in the file.
-    What to include:
-    1. Project Structure — where source, tests, and packages live (this is a monorepo: cube-agent, cube-cli, cube-tui, cube-workspace — note what each package owns and how they depend on each other).
-    2. Build/Test/Dev Commands — how to build, lint, typecheck, and run tests, especially how to run a single test file/case. Briefly note what each command does.
-    3. Code Style & Naming Conventions — import style, formatting/linting tools in use, naming patterns, error-handling conventions.
-    4. Architecture Overview — the big-picture design that requires reading multiple files to understand (e.g. Mastra framework usage, AgentController/Session lifecycle, tool system, workspace config model). Focus on what would take a new contributor a while to piece together on their own.
-    5. Commit & PR Guidelines — conventions found in git history; PR requirements if any.
-    6. (Optional) Security/Config Tips or Agent-Specific Instructions, only if something genuinely repo-specific applies.
-    Constraints:
-    - Keep it concise — aim for 200–400 words, roughly 20-40 lines. Don't pad.
-    - Don't include generic advice ("write unit tests", "don't commit secrets", "handle errors gracefully") — only repo-specific facts.
-    - Don't enumerate every file or component; only structure that isn't obvious from \`ls\`.
-    - Don't invent sections like "Common Development Tasks" or "Tips" unless the info is actually drawn from files you read.
-    - Use clear Markdown headings. Professional, instructional tone — this is a reference doc, not a tutorial.
-    - Prefix the file with:
-    # AGENTS.md
-    This file provides guidance to AI coding agents when working with code in this repository.`;
+export const INITIALIZE_PROMPT = `Please analyze this codebase and create or update AGENTS.md at the workspace root to guide future coding agents.
+
+Before writing, inspect the actual project structure, build/config files and relevant source code.
+If AGENTS.md already exists, preserve correct guidance and improve it rather than blindly overwriting it.
+Read applicable README.md, .cursor/rules/, .cursorrules and .github/copilot-instructions.md when present; avoid duplicating existing guidance.
+
+Include only verified, project-specific facts:
+- Project structure, important modules and their responsibilities.
+- Build, development, lint, typecheck and test commands, including running a single test where supported.
+- Code style, naming conventions and architecture that is not obvious from a file listing.
+- Commit/PR conventions when evidenced by repository history or documentation.
+
+Keep it concise: aim for 200–400 words. Omit unsupported sections and generic advice.
+Do not assume any language, framework, package names or monorepo structure. Do not invent commands or claim verification you did not perform.
+Use the available file tools and follow the existing approval policy. Do not modify unrelated files.
+Start with # AGENTS.md and a brief statement that the file guides coding agents working in this repository.
+After writing, briefly report the path and what changed.`;

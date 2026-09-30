@@ -69,7 +69,7 @@ export const deriveWorkingIndicatorState = (
     const suffix = state.pendingApproval.toolName ? `: ${state.pendingApproval.toolName}` : "";
     return {
       visible: true,
-      spinning: false,
+      spinning: true,
       phase: "approval",
       message: `Waiting for approval${suffix}`,
     };

@@ -260,6 +260,7 @@ export const prepareCubeRuntime = async (
           preference,
           memory,
           gateway,
+          prompt: { initialize: () => prompt.initialize() },
         };
         const prompt = new PromptService(home, session, thread, commands, (callback) => {
           const threadId = session.thread.getId();

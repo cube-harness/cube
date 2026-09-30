@@ -10,6 +10,8 @@ import { Markdown } from "./markdown.js";
 import { formatBinding } from "../keybindings.js";
 import type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 import { fileChanges, commandResult, renderToolDiff, toolText } from "./tool-diff.js";
+import { getSyntaxTheme } from "../themes/syntax.theme.js";
+import type { RuntimeDisplayState } from "@cube/runtime";
 
 export type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 
@@ -165,6 +167,7 @@ const mapSessionMessage = (
   raw: SessionMessageLike,
   streaming: boolean,
   reasoningDurationMs?: number,
+  pendingApproval?: RuntimeDisplayState["pendingApproval"],
 ): ChatMessage[] => {
   const sourceMessageId = raw.id ?? `message-${Date.now()}`;
   const timestamp = raw.createdAt ? new Date(raw.createdAt) : new Date();
@@ -243,13 +246,18 @@ const mapSessionMessage = (
     const toolName = typeof invocation.toolName === "string" ? invocation.toolName : undefined;
     if (!toolCallId || !toolName) continue;
     const invocationStatus = sessionToolStatus(invocation);
+    const approval =
+      (invocationStatus === "running" || invocationStatus === "waiting_approval") &&
+      pendingApproval?.toolCallId === toolCallId
+        ? pendingApproval
+        : undefined;
     const invocationResult =
       invocation.result ?? invocation.output ?? invocation.error ?? asRecord(invocation.approval)?.reason;
     const tool: DisplayTool = {
       id: toolCallId,
       name: toolName,
-      args: invocation.args ?? invocation.input ?? {},
-      status: invocationStatus,
+      args: approval?.args ?? invocation.args ?? invocation.input ?? {},
+      status: approval ? "waiting_approval" : invocationStatus,
       result: invocationResult,
     };
     if (!shouldRenderActiveTool(tool)) continue;
@@ -265,6 +273,7 @@ const mapSessionMessage = (
 export class MessageList implements Component {
   private entries: CachedEntry[] = [];
   private transcriptExpanded = false;
+  private syntaxTheme = getSyntaxTheme();
 
   invalidate(): void {
     for (const entry of this.entries) {
@@ -330,15 +339,17 @@ export class MessageList implements Component {
     message: SessionMessageLike,
     streaming: boolean,
     reasoningDurationMs?: number,
+    pendingApproval?: RuntimeDisplayState["pendingApproval"],
   ): void {
-    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs).map((item) =>
-      item.tool
-        ? {
-            ...createToolMessage(item.tool),
-            sourceMessageId: item.sourceMessageId,
-            timestamp: item.timestamp,
-          }
-        : item,
+    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval).map(
+      (item) =>
+        item.tool
+          ? {
+              ...createToolMessage(item.tool),
+              sourceMessageId: item.sourceMessageId,
+              timestamp: item.timestamp,
+            }
+          : item,
     );
     if (!message.id) {
       for (const item of mapped) this.upsertMessage(item);
@@ -454,11 +465,11 @@ export class MessageList implements Component {
         });
       }
 
-      const changes = fileChanges(tool?.result);
+      const changes =
+        fileChanges(tool?.result) ??
+        (tool?.status === "waiting_approval" ? fileChanges(asRecord(tool.args)?.preview) : undefined);
       if (changes) {
-        for (const line of renderToolDiff(changes, contentWidth, this.transcriptExpanded)) {
-          lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
-        }
+        lines.push(...renderToolDiff(changes, availableWidth, this.transcriptExpanded, prefixWidth));
         lines.push("");
         return lines;
       }
@@ -564,6 +575,11 @@ export class MessageList implements Component {
   }
 
   render(width: number): string[] {
+    const syntaxTheme = getSyntaxTheme();
+    if (this.syntaxTheme !== syntaxTheme) {
+      this.syntaxTheme = syntaxTheme;
+      this.invalidate();
+    }
     if (this.entries.length === 0) {
       return [];
     }

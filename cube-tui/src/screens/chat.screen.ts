@@ -201,15 +201,12 @@ export class ChatScreen {
       reasoningDurationMs = this.reasoningTiming.durationMs;
     }
     if (state.currentMessage) {
-      if (reasoningDurationMs && reasoningDurationMs > 0) {
-        this.messageList.applySessionMessage(
-          state.currentMessage,
-          state.isRunning,
-          reasoningDurationMs,
-        );
-      } else {
-        this.messageList.applySessionMessage(state.currentMessage, state.isRunning);
-      }
+      this.messageList.applySessionMessage(
+        state.currentMessage,
+        state.isRunning,
+        reasoningDurationMs,
+        state.pendingApproval,
+      );
     }
     if (!state.isRunning && !reasoning.present) this.reasoningTiming = undefined;
     const indicator = this.workingIndicator.sync(state, approvalPending);
