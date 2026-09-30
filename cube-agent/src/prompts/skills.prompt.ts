@@ -5,5 +5,5 @@ const escapeXml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&
   .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function formatActivatedSkill(skill: Skill): string {
-  return `The following skill instructions are already loaded in full. Use them directly; do not call skill or reread SKILL.md merely to activate them. Read supporting files when needed.\n<skill_instructions name="${escapeXml(skill.name)}" source="${escapeXml(join(skill.path, "SKILL.md"))}">\n${escapeXml(formatSkillActivation(skill))}\n</skill_instructions>`;
+  return `This skill's main instructions are already loaded in full; use them directly and do not reload this skill. Use skill_read to read related files when needed, with paths relative to this skill's root. Use skill to load other relevant skills whose instructions are not already in context.\n<skill_instructions name="${escapeXml(skill.name)}" source="${escapeXml(join(skill.path, "SKILL.md"))}">\n${escapeXml(formatSkillActivation(skill))}\n</skill_instructions>`;
 }
