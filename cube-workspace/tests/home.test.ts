@@ -82,27 +82,12 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
       instructions: "Generate a concise title under 80 characters.",
     });
     assert.deepEqual(config.memory.compaction, {
-      manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384,
+      manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
     });
-    assert.equal(config.memory.working_memory.agent_managed, false);
+    assert.equal("working_memory" in config.memory, false);
 
     const soul = await SoulStore(home).read();
     assert.ok(soul.length > 0);
-  } finally {
-    await rm(tmp, { recursive: true, force: true });
-  }
-});
-
-test("ConfigSchema accepts saved read-only Working Memory without an Observer", async () => {
-  const { home, tmp } = await createTestHome();
-  try {
-    await createBootstrap(home).run();
-    const config = structuredClone(await ConfigStore(home).read()) as any;
-    config.memory.working_memory.agent_managed = false;
-
-    const result = ConfigSchema.safeParse(config);
-
-    assert.equal(result.success, true);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

@@ -112,7 +112,7 @@ The model catalog is cached in `model-catalog.json` for 24 hours. `/model` and `
 
 One LibSQL file: `~/.cube/memories/memory.sqlite`. It holds Mastra threads, messages, and optional vectors. Threads are keyed by workspace root as `resourceId`.
 
-Memory keeps the full thread (`lastMessages` is unbounded) and drops incomplete tool calls. Title generation, working memory, and semantic recall follow `config.yaml` and are off unless explicitly enabled. Semantic recall requires both vector and embedder. Embedder requires vector. The title model may be `inherit`, which uses the active agent model.
+Memory keeps the full thread (`lastMessages` is unbounded) and drops incomplete tool calls. Observational Memory and Working Memory are disabled; Cube manages context through compaction and tool-output pruning. Title generation and semantic recall follow `config.yaml` and are off unless explicitly enabled. Semantic recall requires both vector and embedder. Embedder requires vector. The title model may be `inherit`, which uses the active agent model.
 
 Compaction is separate from Mastra's message window. `CubeContext` estimates tokens as `ceil(chars / 4)` and refuses to estimate when a message contains media. Budget comes from the catalog context window minus `reserve_tokens` (and any requested output). A second agent, `cube-compactor`, summarizes with the same model and no tools.
 

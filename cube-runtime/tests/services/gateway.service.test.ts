@@ -52,7 +52,6 @@ const baseConfig = (): CubeConfigDocument => ({
     embedder: { enabled: false, model: null },
     generate_title: { enabled: false, model: "google/gemini-test", instructions: "title" },
     semantic_recall: { enabled: false, top_k: 1, message_range: { before: 0, after: 0 }, scope: "resource", threshold: null },
-    working_memory: { enabled: false, scope: "resource", use_state_signals: false, agent_managed: false, template: "memory" },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
   permissions: { require_approval_for: [] },
