@@ -26,7 +26,7 @@ const fixture = async (target = "win32-x64") => {
 const manifestFetch = (target: string, hash = sha256, file?: string) => {
   const windows = target === "win32-x64";
   const archive = windows ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`;
-  const remoteFile = file ?? `releases/${hash.slice(0, 16)}/${archive}`;
+  const remoteFile = file ?? `releases/1.0.0/${archive}`;
   return (async (url: string | URL | Request, options: RequestInit) => {
     assert.match(String(url), new RegExp(windows ? "/latest.json$" : `/latest-${target}.txt$`));
     assert.equal(options.cache, "no-store");
@@ -35,13 +35,14 @@ const manifestFetch = (target: string, hash = sha256, file?: string) => {
   }) as typeof fetch;
 };
 
-test("startup checks the published platform checksum rather than the fixed package version", async () => {
+test("startup accepts version-named releases while comparing the installed checksum", async () => {
   for (const target of ["win32-x64", "linux-x64", "darwin-arm64", "darwin-x64"]) {
     const installation = await fixture(target);
     try {
       const update = await checkCubeUpdate({ ...installation, fetch: manifestFetch(target) });
       assert.equal(update.currentBuild, currentBuild);
       assert.equal(update.sha256, sha256);
+      assert.equal(update.file, `releases/1.0.0/${target === "win32-x64" ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`}`);
       assert.equal(update.installDir, installation.root);
       const same = await checkCubeUpdate({ ...installation, fetch: manifestFetch(target, currentBuild + "0".repeat(48)) });
       assert.equal(same, null);
@@ -54,6 +55,7 @@ test("source development skips update requests and invalid publication never bec
   const installation = await fixture();
   try {
     await assert.rejects(checkCubeUpdate({ ...installation, fetch: manifestFetch("win32-x64", sha256, "../unsafe.zip") }), /manifest/i);
+    await assert.rejects(checkCubeUpdate({ ...installation, fetch: manifestFetch("win32-x64", sha256, "releases/2.0.0/cube-windows-x64.zip") }), /manifest/i);
     await assert.rejects(checkCubeUpdate({ ...installation, fetch: async () => new Response("offline", { status: 503 }) }), /503/);
   } finally { await rm(installation.root, { recursive: true, force: true }); }
 });

@@ -54,7 +54,10 @@ if [ -z "$archive" ]; then
   # Validate the exact immutable path before using anything from the manifest.
   read -r sha256 remote_file extra < "$staging/latest.txt" || fail 'Invalid package manifest.'
   [ -z "$extra" ] || fail 'Invalid package manifest.'
-  expected_file="releases/$(printf '%.16s' "$sha256")/cube-$target.tar.gz"
+  release_version=${remote_file#releases/}
+  release_version=${release_version%%/*}
+  printf '%s\n' "$release_version" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail 'Invalid release version.'
+  expected_file="releases/$release_version/cube-$target.tar.gz"
   [ "$remote_file" = "$expected_file" ] || fail 'Invalid package path.'
   archive=$staging/cube.tar.gz
 else

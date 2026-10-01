@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import { prepareCubeUpdate } from "../cube-runtime/dist/services/update.service.
 if (process.platform === "win32") throw new Error("Run the Unix installer smoke on Linux or macOS.");
 const archive = path.resolve(process.argv[2]);
 const sha256 = (await readFile(`${archive}.sha256`, "utf8")).trim();
+const { file } = JSON.parse(await readFile(path.join(path.dirname(archive), "latest.json"), "utf8"));
 const installer = fileURLToPath(new URL("./install.sh", import.meta.url));
 const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-install-smoke-")));
 function run(command, args, options = {}) {
@@ -26,6 +27,40 @@ try {
   const first = await readlink(launcher);
   run("sh", args);
   assert.equal(await readlink(launcher), first, "reinstall should keep the verified version");
+  // Exercise the version-named manifest/download path without contacting R2.
+  const network = path.join(scratch, "mock-network");
+  const manifest = path.join(network, "latest.txt");
+  await mkdir(network);
+  await writeFile(manifest, `${sha256} ${file}\n`);
+  await writeFile(path.join(network, "curl"), `#!/bin/sh
+set -eu
+url= output=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output=$2; shift ;;
+    https://*) url=$1 ;;
+  esac
+  shift
+done
+case "$url" in
+  "https://cube.example.invalid/latest-$CUBE_SMOKE_TARGET.txt") cp "$CUBE_SMOKE_MANIFEST" "$output" ;;
+  "https://cube.example.invalid/$CUBE_SMOKE_FILE") cp "$CUBE_SMOKE_ARCHIVE" "$output" ;;
+  *) exit 1 ;;
+esac
+`);
+  await chmod(path.join(network, "curl"), 0o755);
+  const env = { ...process.env, PATH: `${network}:${process.env.PATH}`,
+    CUBE_SMOKE_TARGET: `${process.platform}-${process.arch}`, CUBE_SMOKE_MANIFEST: manifest,
+    CUBE_SMOKE_FILE: file, CUBE_SMOKE_ARCHIVE: archive };
+  const remoteArgs = [installer, "--base-url", "https://cube.example.invalid", "--install-dir", install, "--bin-dir", bin];
+  run("sh", remoteArgs, { env });
+  assert.equal(await readlink(launcher), first, "manifest download must retain the checksum-based local version");
+  await writeFile(manifest, `${sha256} releases/../cube-${process.platform}-${process.arch}.tar.gz\n`);
+  const unsafe = spawnSync("sh", remoteArgs, { cwd: scratch, env, encoding: "utf8", timeout: 30_000 });
+  assert.ifError(unsafe.error);
+  assert.notEqual(unsafe.status, 0);
+  assert.match(unsafe.stderr, /Invalid release version/);
+  assert.equal(await readlink(launcher), first, "invalid remote path must not replace the installation");
   const badHash = [...args];
   badHash[4] = "0".repeat(64);
   const rejected = spawnSync("sh", badHash, { encoding: "utf8" });
@@ -66,7 +101,7 @@ if (process.argv[1]?.endsWith('/app/dist/main.js')) {
     process.chdir(cwd);
     await prepareCubeUpdate({
       installDir: install, launcher, target: `${process.platform}-${process.arch}`,
-      currentBuild: sha256.slice(0, 16), sha256, file: `releases/${sha256.slice(0, 16)}/cube-${process.platform}-${process.arch}.tar.gz`,
+      currentBuild: sha256.slice(0, 16), sha256, file,
     }, { fetch: async (url) => new Response(String(url).endsWith("install.sh") ? installerText : packageBytes) });
   } finally { process.chdir(previousCwd); }
   const updated = JSON.parse(run(launcher, ["argument with spaces", "literal;$value"], {
@@ -87,7 +122,7 @@ if (process.argv[1]?.endsWith('/app/dist/main.js')) {
   await symlink("/unrelated/cube", launcher);
   assert.notEqual(spawnSync("sh", args).status, 0);
   assert.equal(await readlink(launcher), "/unrelated/cube");
-  console.log("install-smoke: install/reinstall, checksum rejection, update handoff, bundled launcher, spaces and ownership OK");
+  console.log("install-smoke: install/reinstall, version manifest, checksum rejection, update handoff, bundled launcher, spaces and ownership OK");
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

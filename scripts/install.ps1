@@ -25,7 +25,7 @@ try {
     if (-not $BaseUrl -or ([uri]$BaseUrl).Scheme -ne 'https') { throw 'Provide an HTTPS -BaseUrl or a local -ArchivePath with -Sha256.' }
     $base = $BaseUrl.TrimEnd('/')
     $manifest = Invoke-RestMethod "$base/latest.json"
-    if ($manifest.platform -ne 'win32-x64' -or $manifest.file -notmatch '^releases/[a-zA-Z0-9._-]+/cube-windows-x64\.zip$') {
+    if ($manifest.platform -ne 'win32-x64' -or $manifest.version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$' -or $manifest.file -cne "releases/$($manifest.version)/cube-windows-x64.zip") {
       throw 'Invalid Windows package manifest.'
     }
     $Sha256 = $manifest.sha256

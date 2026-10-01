@@ -49,7 +49,12 @@ Unix installs use a two-field text manifest (SHA-256 and immutable relative arch
 path), so installing does not require a JSON parser, Node, Python or jq. Manifests
 are named `latest-linux-x64.txt`, `latest-darwin-arm64.txt`, `latest-darwin-x64.txt`.
 Publishing uploads all archives before installer/manifests, including the existing
-Windows `latest.json` and `install.ps1`. Unix manifests remain separate. A checksum detects damage, not a compromised
+Windows `latest.json` and `install.ps1`. The version comes from `cube-tui/package.json`,
+which the maintainer bumps manually. Archives use `releases/<version>/<filename>`;
+an existing version fails publishing before any upload. Cleanup runs only after all
+uploads succeed and keeps the active archive plus newest previous archive per platform.
+Local installations still use checksum-named directories and verify SHA-256.
+Unix manifests remain separate. A checksum detects damage, not a compromised
 download host; these packages are not independently signed.
 
 After a verified build has been published:
