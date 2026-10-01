@@ -12,15 +12,12 @@ gateway_options:
 theme: default
 
 app_title:
-  - model
   - workspace
   - threadId
 
 status_line:
-  - model
   - workspace
-  - agentMd
-  - threadId
+  - model
 
 telemetry: false
 

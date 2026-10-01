@@ -39,6 +39,7 @@ import { ThreadPickerOverlay } from "../components/thread-picker.js";
 import { TitlePickerComponent } from "../components/title-picker.js";
 import { renderUsageBoxToString } from "../components/usage-box.js";
 import { WorkingIndicator } from "../components/working-indicator.js";
+import { PetPanel } from "../components/pet.js";
 
 export type ChatScreenOptions = {
   tui: TUI;
@@ -48,6 +49,7 @@ export type ChatScreenOptions = {
   statusLine?: string[];
   initialInfo?: InfoBoxContent;
   getSkills?: () => Promise<SkillChoice[]>;
+  petCacheDir?: string;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -88,6 +90,7 @@ export class ChatScreen {
 
   private mounted = false;
   private dock?: VStack;
+  private inputPanel?: PetPanel;
   private transcript?: ScrollView;
   private onSubmit?: (content: string) => void | Promise<void>;
   private reasoningTiming?: {
@@ -127,7 +130,14 @@ export class ChatScreen {
     this.options.tui.addChild(this.promptEditor);
     this.options.tui.addChild(this.footer);
     if (isViewportTUI(this.options.tui)) {
-      this.dock = new VStack([this.promptEditor, { component: this.footer, shrink: 0 }]);
+      this.inputPanel = new PetPanel(
+        this.options.tui, this.options.petCacheDir,
+        () => this.promptEditor.getText(),
+        () => this.inputPanel?.children.includes(this.promptEditor) ? this.promptEditor.getCardStartRow() : 0,
+      );
+      this.inputPanel.addChild(this.promptEditor);
+      this.dock = new VStack([this.inputPanel, { component: this.footer, shrink: 0 }]);
+      void this.inputPanel.start();
       this.transcript = new ScrollView(this.messageList, { follow: "end", primary: true });
       const welcome: Component = {
         invalidate: () => { this.banner.invalidate(); this.infoBox.invalidate(); },
@@ -156,11 +166,13 @@ export class ChatScreen {
 
   unmount(): void {
     this.promptEditor.focused = false;
+    this.inputPanel?.stop();
     this.workingIndicator.stop();
     if (!this.mounted) return;
     this.mounted = false;
     if (isViewportTUI(this.options.tui)) this.options.tui.setLayoutRoot(undefined);
     this.dock = undefined;
+    this.inputPanel = undefined;
     this.transcript = undefined;
     this.options.tui.removeChild(this.footer);
     this.options.tui.removeChild(this.promptEditor);
@@ -210,6 +222,7 @@ export class ChatScreen {
     }
     if (!state.isRunning && !reasoning.present) this.reasoningTiming = undefined;
     const indicator = this.workingIndicator.sync(state, approvalPending);
+    this.inputPanel?.sync(indicator);
     this.promptEditor.setCursorBlinking(!indicator.spinning);
     this.footer.setStatus(state.isRunning ? "Busy" : "Idle");
     this.requestRender();
@@ -421,7 +434,7 @@ export class ChatScreen {
     onClose?: () => void,
   ): Promise<T> {
     return new Promise<T>((resolve) => {
-      const host = this.dock ?? this.options.tui;
+      const host = this.inputPanel ?? this.dock ?? this.options.tui;
       let closed = false;
       let overlay: Component;
       const finish = (value: T): void => {
@@ -430,7 +443,7 @@ export class ChatScreen {
         host.removeChild(this.footer);
         host.removeChild(overlay);
         host.addChild(this.promptEditor);
-        host.addChild(this.footer);
+        if (host !== this.inputPanel) host.addChild(this.footer);
         this.options.tui.setFocus(this.promptEditor);
         this.requestRender();
         onClose?.();
@@ -442,7 +455,7 @@ export class ChatScreen {
       host.removeChild(this.footer);
       host.removeChild(this.promptEditor);
       host.addChild(overlay);
-      host.addChild(this.footer);
+      if (host !== this.inputPanel) host.addChild(this.footer);
       this.options.tui.setFocus(overlay);
       this.requestRender();
     });
