@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { checkCubeUpdate, prepareCubeUpdate, openExternalUrl, prepareCubeRuntime, type RuntimeNotice } from "@cube/runtime";
-import { ProcessTerminal, TuiAltScreen } from "@earendil-works/pi-tui";
+import { TuiAltScreen } from "@earendil-works/pi-tui";
 import { copyToClipboard } from "./clipboard.js";
 import { startPreparedCube, type PreparedCube } from "./app.js";
 import { ChatScreen } from "./screens/chat.screen.js";
 import { OnBoardScreen } from "./screens/on-board.screen.js";
+import { join } from "node:path";
+import { PetTerminal } from "./components/pet.js";
 
 export const startTui = async (): Promise<void> => {
-  const tui = new TuiAltScreen(new ProcessTerminal(), undefined, undefined, {
+  const tui = new TuiAltScreen(new PetTerminal(), undefined, undefined, {
     copySelection: copyToClipboard,
     openUrl: (url) => {
       if (/^https?:\/\//i.test(url)) void openExternalUrl(url).catch(() => undefined);
@@ -42,6 +44,7 @@ export const startTui = async (): Promise<void> => {
     const screen = new ChatScreen({
       tui,
       basePath: bootstrap.workspaceRoot,
+      petCacheDir: join(bootstrap.home.getRoot(), "cache", "tui-pet", "cube"),
       initialHistory: bootstrap.history,
       slashCommands: bootstrap.suggestions,
       statusLine: bootstrap.preference.statusLine,
