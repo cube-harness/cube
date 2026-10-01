@@ -49,7 +49,7 @@ Unix installs use a two-field text manifest (SHA-256 and immutable relative arch
 path), so installing does not require a JSON parser, Node, Python or jq. Manifests
 are named `latest-linux-x64.txt`, `latest-darwin-arm64.txt`, `latest-darwin-x64.txt`.
 Publishing uploads all archives before installer/manifests, including the existing
-Windows `latest.json` and `install.ps1`. The version comes from `cube-tui/package.json`,
+Windows `latest.json` and `install.ps1`. The version comes from the root `package.json`,
 which the maintainer bumps manually. Archives use `releases/<version>/<filename>`;
 an existing version fails publishing before any upload. Cleanup runs only after all
 uploads succeed and keeps the active archive plus newest previous archive per platform.

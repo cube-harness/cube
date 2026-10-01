@@ -37,7 +37,7 @@ Run the single `Cube package` workflow (`.github/workflows/package.yml`) for all
 four targets: Windows, Linux/WSL, macOS Apple Silicon and Intel. It publishes only
 after every target passes and `publish` is selected; otherwise it only saves artifacts.
 
-Release version comes from `cube-tui/package.json`; bump it manually before publishing.
+Release version comes from the root `package.json`; bump it manually before publishing.
 Archives live at `releases/<version>/cube-<target>.<extension>`. If any object already
 exists under that version, publishing fails before uploading anything, including after
 a partial publish. All platform artifacts must declare the same version.

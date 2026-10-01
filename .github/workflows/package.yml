@@ -102,7 +102,7 @@ jobs:
           # Never overwrite an existing version, even if a previous publish was incomplete.
           $existing = aws s3api list-objects-v2 --bucket $env:R2_BUCKET --prefix "releases/$version/" --max-keys 1 --no-paginate --endpoint-url $env:R2_ENDPOINT --output json
           if ($LASTEXITCODE) { throw 'Cannot check existing R2 version; nothing was uploaded.' }
-          if (($existing -join "`n" | ConvertFrom-Json).KeyCount -ne 0) { throw "Release $version already exists. Bump cube-tui/package.json version before publishing." }
+          if (($existing -join "`n" | ConvertFrom-Json).KeyCount -ne 0) { throw "Release $version already exists. Bump the root package.json version before publishing." }
           # Upload every immutable archive before updating any installer/manifest.
           foreach ($key in $currentKeys) {
             $archive = $key.Split('/')[-1]
