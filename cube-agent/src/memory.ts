@@ -39,7 +39,6 @@ const toSemanticRecall = (config: CubeConfig["memory"]["semantic_recall"]) => {
 
 export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
   const memoryConfig = config.memory;
-  const wm = memoryConfig.working_memory;
 
   const vector = memoryConfig.vector.enabled
     ? new LibSQLVector({
@@ -59,16 +58,6 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
         instructions: memoryConfig.generate_title.instructions,
       };
 
-  const workingMemory = !wm.enabled
-    ? { enabled: false as const }
-    : {
-        enabled: true as const,
-        scope: wm.scope,
-        useStateSignals: wm.use_state_signals,
-        agentManaged: wm.agent_managed,
-        template: wm.template,
-      };
-
   return new Memory({
     vector,
     embedder,
@@ -78,7 +67,7 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
       lastMessages: Number.MAX_SAFE_INTEGER,
       filterIncompleteToolCalls: true,
       generateTitle: generateTitle as MastraMemoryOptions["generateTitle"],
-      workingMemory: workingMemory as MastraMemoryOptions["workingMemory"],
+      workingMemory: { enabled: false },
       observationalMemory: false,
       semanticRecall: toSemanticRecall(
         memoryConfig.semantic_recall,

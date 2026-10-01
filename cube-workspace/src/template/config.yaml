@@ -62,34 +62,6 @@ memory:
     # null disables similarity-score filtering.
     threshold: null
 
-  working_memory:
-    enabled: true
-    scope: thread
-    # With state signals, the main-agent tool is named setWorkingMemory when
-    # agent_managed is enabled.
-    use_state_signals: true
-    # Saved state is read-only by default. Set true to expose the main-agent
-    # Working Memory tool. Compaction does not update working memory.
-    agent_managed: false
-    template: |
-      # Thread Task State
-
-      ## Objective
-
-      ## Success Criteria
-
-      ## Constraints
-
-      ## Decisions
-
-      ## Progress
-
-      ## Working Set
-
-      ## Blockers
-
-      ## Next Action
-
   compaction:
     # /compact requires this fraction of the model context plus a safe cut.
     manual_min_ratio: 0.30

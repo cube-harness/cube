@@ -170,7 +170,6 @@ test("startup reuses prepared resources and reads the committed model", { timeou
         embedder: { ...config.memory.embedder, enabled: false },
         semantic_recall: { ...config.memory.semantic_recall, enabled: false },
         generate_title: { ...config.memory.generate_title, enabled: false },
-        working_memory: { ...config.memory.working_memory, enabled: false },
       },
     }));
     const runtime = await prepared.start();

@@ -23,7 +23,7 @@ test("fresh home uses one unversioned schema from onboarding through persisted s
     assert.equal("fallback_model" in raw, false);
     assert.equal("observational_memory" in raw.memory, false);
     assert.deepEqual(raw.memory.compaction, {
-      manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384,
+      manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
     });
     assert.equal(ConfigSchema.safeParse({ ...raw, memory: { ...raw.memory, observational_memory: {} } }).success, false);
     assert.equal(ConfigSchema.safeParse(raw).success, true);

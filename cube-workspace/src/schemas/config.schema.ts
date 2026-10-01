@@ -67,16 +67,6 @@ const semanticRecall = z
   })
   .strict();
 
-const workingMemory = z
-  .object({
-    enabled: z.boolean(),
-    scope: z.enum(["resource", "thread"]),
-    use_state_signals: z.boolean(),
-    agent_managed: z.boolean(),
-    template: z.string().min(1),
-  })
-  .strict();
-
 const compaction = z
   .object({
     manual_min_ratio: z.number().gt(0).lt(1),
@@ -92,7 +82,6 @@ const memory = z
     embedder,
     generate_title: generateTitle,
     semantic_recall: semanticRecall,
-    working_memory: workingMemory,
     compaction,
   })
   .strict()
