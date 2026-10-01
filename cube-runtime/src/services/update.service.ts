@@ -45,16 +45,18 @@ export async function checkCubeUpdate(options: {
   });
   if (!response.ok) throw new Error(`Update check failed: HTTP ${response.status}.`);
   const text = (await response.text()).replace(/^\uFEFF/, "").trim();
-  let manifest: { platform: string; sha256: string; file: string };
+  let manifest: { version?: string; platform: string; sha256: string; file: string };
   try {
     const [sha256, file, extra] = text.split(/\s+/);
     if (!windows && extra) throw new Error("Extra manifest fields");
     manifest = windows ? JSON.parse(text) : { platform: target, sha256, file };
-    if (!manifest || typeof manifest.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(manifest.sha256))
+    if (!manifest || typeof manifest.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(manifest.sha256) || typeof manifest.file !== "string")
       throw new Error("Invalid checksum");
   } catch { throw new Error("Invalid Cube update manifest."); }
   const filename = windows ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`;
-  if (manifest.platform !== target || manifest.file !== `releases/${manifest.sha256.slice(0, 16)}/${filename}`)
+  const version = windows ? manifest.version : manifest.file.split("/")[1];
+  if (typeof version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) ||
+      manifest.platform !== target || manifest.file !== `releases/${version}/${filename}`)
     throw new Error("Invalid Cube update manifest.");
   if (manifest.sha256.slice(0, 16) === currentBuild) return null;
   return { installDir, launcher: launcherPath, target, currentBuild, sha256: manifest.sha256, file: manifest.file };

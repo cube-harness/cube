@@ -12,6 +12,10 @@ if (!["win32-x64", "linux-x64", "darwin-arm64", "darwin-x64"].includes(target)) 
   throw new Error(`Unsupported build host: ${target}. Build natively on a supported target.`);
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const { version } = JSON.parse(await readFile(path.join(root, "cube-tui/package.json"), "utf8"));
+if (typeof version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+  throw new Error("Set a valid release version in cube-tui/package.json before packaging.");
+}
 const pnpm = process.env.npm_execpath;
 if (!pnpm || !/\.(?:c?js|mjs)$/i.test(pnpm)) {
   throw new Error("Run this script with pnpm package:app.");
@@ -53,13 +57,13 @@ run(windows ? "tar.exe" : "tar", windows
 const hash = createHash("sha256");
 for await (const chunk of createReadStream(archive)) hash.update(chunk);
 const sha256 = hash.digest("hex");
-const { version } = JSON.parse(await readFile(path.join(root, "cube-tui/package.json"), "utf8"));
-await writeFile(path.join(output, "latest.json"), JSON.stringify({ version, platform: target, file: filename, sha256 }, null, 2) + "\n");
+const file = `releases/${version}/${filename}`;
+await writeFile(path.join(output, "latest.json"), JSON.stringify({ version, platform: target, file, sha256 }, null, 2) + "\n");
 await writeFile(`${archive}.sha256`, sha256 + "\n");
 const installer = windows ? "install.ps1" : "install.sh";
 await cp(path.join(root, `scripts/${installer}`), path.join(output, installer));
 if (!windows) {
   // Shell-readable pointer: installing must not require Node, Python or jq.
-  await writeFile(path.join(output, `latest-${target}.txt`), `${sha256} releases/${sha256.slice(0, 16)}/${filename}\n`);
+  await writeFile(path.join(output, `latest-${target}.txt`), `${sha256} ${file}\n`);
 }
 console.log(`${target} package: ${archive}\nSHA256: ${sha256}\nUnpacked: ${stage}`);

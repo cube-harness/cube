@@ -37,7 +37,14 @@ Run the single `Cube package` workflow (`.github/workflows/package.yml`) for all
 four targets: Windows, Linux/WSL, macOS Apple Silicon and Intel. It publishes only
 after every target passes and `publish` is selected; otherwise it only saves artifacts.
 
-The workflow uploads immutable checksum-named archives first, then `latest.json`.
+Release version comes from `cube-tui/package.json`; bump it manually before publishing.
+Archives live at `releases/<version>/cube-<target>.<extension>`. If any object already
+exists under that version, publishing fails before uploading anything, including after
+a partial publish. All platform artifacts must declare the same version.
+The workflow uploads all immutable archives first, then installers and manifests.
+Only after every upload succeeds does cleanup keep the active archive and newest
+previous archive per platform. Failed builds/uploads never delete old releases.
+SHA-256 still verifies the downloaded file; local `versions` directories remain hash-named.
 Do not cache `latest.json` or `install.ps1` as immutable. A checksum detects a damaged
 download; it is not an independent signature if the download host is compromised.
 
@@ -51,7 +58,7 @@ No CI workflow or upload has been executed just by adding these files. Validate 
 ZIP installer locally before enabling publishing.
 
 Installed Cube checks `latest.json` on startup (3-second timeout), comparing the
-published checksum with the running build rather than the fixed package version.
+published checksum with the running build; release version names do not replace checksum verification.
 Onboarding offers Update, Continue, or Cancel (Esc/Ctrl+C exits). Update downloads
 and verifies the archive, exits the old Node process, then the launcher runs the
 installer and opens Cube again in the same workspace. Installer output is captured;
