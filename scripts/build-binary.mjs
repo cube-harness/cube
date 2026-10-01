@@ -12,9 +12,9 @@ if (!["win32-x64", "linux-x64", "darwin-arm64", "darwin-x64"].includes(target)) 
   throw new Error(`Unsupported build host: ${target}. Build natively on a supported target.`);
 }
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const { version } = JSON.parse(await readFile(path.join(root, "cube-tui/package.json"), "utf8"));
+const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 if (typeof version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-  throw new Error("Set a valid release version in cube-tui/package.json before packaging.");
+  throw new Error("Set a valid release version in the root package.json before packaging.");
 }
 const pnpm = process.env.npm_execpath;
 if (!pnpm || !/\.(?:c?js|mjs)$/i.test(pnpm)) {
