@@ -98,6 +98,7 @@ export class PromptEditor implements Component, Focusable {
   private readonly tui: TUI;
   private readonly queuedPrompts: string[] = [];
   private autocompleteLines: string[] = [];
+  private cardStartRow = 0;
   private skillNames = new Set<string>();
   private readonly commandNames: Set<string>;
   private readonly history: string[] = [];
@@ -279,6 +280,7 @@ export class PromptEditor implements Component, Focusable {
 
   render(width: number): string[] {
     const boxLines = this.card.render(width);
+    this.cardStartRow = this.autocompleteLines.length;
     const promptLines = [
       ...this.autocompleteLines.map((line) => {
         const row = truncateToWidth(`  ${line}`, width);
@@ -306,8 +308,11 @@ export class PromptEditor implements Component, Focusable {
       );
     }
     queueLines.push("");
+    this.cardStartRow += queueLines.length;
     return [...queueLines, ...promptLines];
   }
+
+  getCardStartRow(): number { return this.cardStartRow; }
 
   handleInput(data: string): void {
     this.onUserTyping();

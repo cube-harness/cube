@@ -35,13 +35,6 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
       scope: "resource",
       threshold: null,
     },
-    working_memory: {
-      enabled: true,
-      scope: "thread",
-      use_state_signals: true,
-      agent_managed: false,
-      template: "# Thread Task State\n\n## Objective\n",
-    },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
   permissions: { require_approval_for: ["execute_command"] },
@@ -72,7 +65,7 @@ test("keeps code-owned Memory options fixed outside public YAML", async () => {
   }
 });
 
-test("disables OM and keeps saved working memory read-only", async () => {
+test("disables OM and Working Memory tools and state injection", async () => {
   const { home, root } = await createTestHome();
   try {
     const memory = createMemory(createConfig(), home);
@@ -80,7 +73,9 @@ test("disables OM and keeps saved working memory read-only", async () => {
     assert.equal(merged.observationalMemory, false);
     assert.equal(memory.listTools().recall, undefined);
     assert.equal(memory.listTools().setWorkingMemory, undefined);
-    assert.equal(merged.workingMemory?.agentManaged, false);
+    assert.equal(merged.workingMemory?.enabled, false);
+    assert.equal(memory.listTools().updateWorkingMemory, undefined);
+    assert.equal(await memory.createWorkingMemoryStateProcessor(), null);
   } finally { await removeTestHome(root); }
 });
 
