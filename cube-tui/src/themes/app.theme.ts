@@ -1,6 +1,8 @@
 // cube-tui/src/themes/app.theme.ts
 import chalk, { type ChalkInstance } from "chalk";
 
+const primaryColor = "#38BDF8";
+
 /**
  * AppTheme — Mathematically verified, harmonious design tokens for the Cube TUI application.
  *
@@ -25,6 +27,7 @@ export interface AppTheme {
   };
   ui: {
     primary: ChalkInstance;
+    selected: ChalkInstance;
     secondary: ChalkInstance;
     tertiary: ChalkInstance;
     border: ChalkInstance;
@@ -64,7 +67,8 @@ export const appTheme: AppTheme = {
     info: chalk.hex("#7DD3FC"),
   },
   ui: {
-    primary: chalk.hex("#38BDF8"),
+    primary: chalk.hex(primaryColor),
+    selected: chalk.bgHex(primaryColor).black,
     secondary: chalk.hex("#BC97FF"),
     tertiary: chalk.hex("#FEBC2E"),
     border: chalk.hex("#313131"),

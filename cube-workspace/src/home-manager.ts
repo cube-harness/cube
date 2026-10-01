@@ -135,4 +135,3 @@ export class HomeManager {
 export function CubeHome(options?: HomeOptions): HomeManager {
   return new HomeManager(options);
 }
-

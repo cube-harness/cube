@@ -23,6 +23,7 @@ export { createCubeMastra, type CubeMastraComposition } from "./bootstrap.js";
 export { CubeContext, type CompactResult, type ContextLimits } from "./context.js";
 export { cubeAskUserTool } from "./tools/ask-user.tool.js";
 export type { CubeTools } from "./tools/cube-tools.js";
+export { skillPathIdentity, type CubeSkills, type SkillChoice } from "./skills.js";
 export type { FileMutationResult, FileChange } from "./tools/file.tools.js";
 export type { CommandResult } from "./tools/command.tools.js";
 export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";

@@ -21,8 +21,9 @@ Build output is `build/windows/cube-windows-x64.zip`, its `.sha256` checksum,
 
 Then open a terminal in another project and run `cube`. Installation uses
 `%LOCALAPPDATA%\cube`; personal configuration stays in `~/.cube`. On a clean home,
-the normal onboarding screen requests credentials. Old installations are retained
-under `versions` instead of being deleted during an upgrade. For an isolated test,
+the normal onboarding screen requests credentials. Successful installation switches
+the launcher before removing older checksum-named directories under `versions`.
+For an isolated test,
 pass `-InstallDir <temporary-directory> -NoPathUpdate`.
 
 ## Private CI and public downloads
@@ -36,7 +37,14 @@ Run the single `Cube package` workflow (`.github/workflows/package.yml`) for all
 four targets: Windows, Linux/WSL, macOS Apple Silicon and Intel. It publishes only
 after every target passes and `publish` is selected; otherwise it only saves artifacts.
 
-The workflow uploads immutable checksum-named archives first, then `latest.json`.
+Release version comes from the root `package.json`; bump it manually before publishing.
+Archives live at `releases/<version>/cube-<target>.<extension>`. If any object already
+exists under that version, publishing fails before uploading anything, including after
+a partial publish. All platform artifacts must declare the same version.
+The workflow uploads all immutable archives first, then installers and manifests.
+Only after every upload succeeds does cleanup keep the active archive and newest
+previous archive per platform. Failed builds/uploads never delete old releases.
+SHA-256 still verifies the downloaded file; local `versions` directories remain hash-named.
 Do not cache `latest.json` or `install.ps1` as immutable. A checksum detects a damaged
 download; it is not an independent signature if the download host is compromised.
 
@@ -47,4 +55,13 @@ irm https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev/install.ps1 | iex
 ```
 
 No CI workflow or upload has been executed just by adding these files. Validate the
-ZIP installer locally before enabling publishing. There is no auto-update service.
+ZIP installer locally before enabling publishing.
+
+Installed Cube checks `latest.json` on startup (3-second timeout), comparing the
+published checksum with the running build; release version names do not replace checksum verification.
+Onboarding offers Update, Continue, or Cancel (Esc/Ctrl+C exits). Update downloads
+and verifies the archive, exits the old Node process, then the launcher runs the
+installer and opens Cube again in the same workspace. Installer output is captured;
+failure returns to the previous build with a system notice. `~/.cube` is unchanged.
+Source/development runs and portable archives outside `versions` skip this check.
+There is no background updater, and publication remains manual opt-in.

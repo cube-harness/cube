@@ -51,6 +51,10 @@ export class CubeApp {
     this.nativeQueuedFollowUps = runtime.getDisplayState().queuedFollowUps ?? 0;
     this.currentModel = runtime.model.current();
     this.preferences = runtime.preference.get();
+    this.screen.setSkillProvider(async () => {
+      try { return await this.runtime.preference.listSkills(); }
+      catch (error) { this.screen.showNotice(toRuntimeNotice(error)); return []; }
+    });
   }
 
   async start(options: CubeAppStartOptions = {}): Promise<void> {
@@ -136,6 +140,9 @@ export class CubeApp {
 
   async handlePromptResult(result: PromptResult): Promise<void> {
     switch (result.kind) {
+      case "skills":
+        await this.screen.pickSkills(result.skills, (changes) => this.runtime.preference.setSkillsEnabled(changes));
+        return;
       case "ignored":
       case "submitted":
         return;
@@ -296,7 +303,7 @@ export class CubeApp {
             if (resolution.kind === "dismissed") return;
             if (resolution.kind === "cancel") {
               this.suspensionQueueCancelled = true;
-              this.runtime.interrupt();
+              await this.runtime.cancelSuspension(event.toolCallId);
               return;
             }
             await this.runtime.respondToSuspension({

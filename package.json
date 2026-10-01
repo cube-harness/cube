@@ -1,6 +1,6 @@
 {
   "name": "cube-monorepo",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
   "type": "module",
@@ -8,6 +8,8 @@
     "package:app": "node scripts/build-binary.mjs",
     "package:windows": "node scripts/build-binary.mjs",
     "bench:internal": "tsx benchmarks/internal-latency.ts",
+    "bench:package": "node benchmarks/package-benchmark.mjs",
+    "bench:test": "node --test benchmarks/benchmark.test.mjs",
     "dev": "pnpm --filter @cube/tui dev",
     "dev:factory": "pnpm --filter @cube/factory-ui dev",
     "studio": "pnpm --filter @cube/agent studio",

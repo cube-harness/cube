@@ -33,7 +33,9 @@ export const getOpenAISubscriptionUsage = async (
   if (!response.ok) {
     const body = await response.json().catch(() => undefined);
     const message = body?.error?.message ?? body?.detail ?? body?.message;
-    throw new Error(`OpenAI usage (HTTP ${response.status})${typeof message === "string" ? `: ${message}` : ""}`);
+    throw new Error(
+      `OpenAI usage (HTTP ${response.status})${typeof message === "string" ? `: ${message}` : ""}`,
+    );
   }
 
   const object = (value: unknown): Record<string, unknown> => {
@@ -60,20 +62,22 @@ export const getOpenAISubscriptionUsage = async (
     }
     return {
       name,
-      allowed: data.allowed == null ? undefined : data.allowed as boolean,
-      limitReached: data.limit_reached == null ? undefined : data.limit_reached as boolean,
+      allowed: data.allowed == null ? undefined : (data.allowed as boolean),
+      limitReached: data.limit_reached == null ? undefined : (data.limit_reached as boolean),
       windows: (["primary_window", "secondary_window"] as const).flatMap((key) => {
         if (data[key] == null) return [];
         const window = object(data[key]);
         const resetsAt = number(window.reset_at);
         if (resetsAt !== undefined && !Number.isFinite(new Date(resetsAt * 1000).getTime()))
           throw new Error("Invalid OpenAI usage reset time.");
-        return [{
-          name: key === "primary_window" ? "Primary" : "Secondary",
-          usedPercent: number(window.used_percent),
-          windowSeconds: number(window.limit_window_seconds),
-          resetsAt,
-        }];
+        return [
+          {
+            name: key === "primary_window" ? "Primary" : "Secondary",
+            usedPercent: number(window.used_percent),
+            windowSeconds: number(window.limit_window_seconds),
+            resetsAt,
+          },
+        ];
       }),
     };
   };
@@ -83,10 +87,16 @@ export const getOpenAISubscriptionUsage = async (
   return {
     provider: "OpenAI",
     plan: string(payload.plan_type),
-    limits: [limit("Codex", payload.rate_limit), ...additional.map((value) => {
-      const data = object(value);
-      return limit(string(data.limit_name) ?? string(data.metered_feature) ?? "Additional", data.rate_limit);
-    })],
+    limits: [
+      limit("Codex", payload.rate_limit),
+      ...additional.map((value) => {
+        const data = object(value);
+        return limit(
+          string(data.limit_name) ?? string(data.metered_feature) ?? "Additional",
+          data.rate_limit,
+        );
+      }),
+    ],
   };
 };
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { INITIALIZE_PROMPT } from "../cube-agent/dist/prompts/initialize.prompt.js";
 
 // This file runs inside the deployed app, never resolves dependencies via the repo.
 await import("@cube/runtime");
@@ -9,7 +10,6 @@ const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSch
 const { createCubeAgent } = await import("@cube/agent");
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { LibSQLStore } = await import("@mastra/libsql");
-const { loadInitializePrompt } = await import(new URL("./processors/initialize.processor.js", import.meta.resolve("@cube/agent")));
 const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-package-smoke-")));
 const cwd = process.cwd();
 let agent;
@@ -22,7 +22,7 @@ try {
   const home = CubeHome({ cubeHome: path.join(scratch, "home"), userHome: scratch });
   await createBootstrap(home).run();
   assert.deepEqual(JSON.parse(await readFile(home.getAuthPath(), "utf8")), { api_keys: {}, oauth: {} });
-  assert.ok(loadInitializePrompt().length > 0);
+  assert.ok(INITIALIZE_PROMPT.length > 0);
   const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
   agent = await createCubeAgent(home, CubeWorkspace(home, project), config);
   const workspace = await agent.getWorkspace();

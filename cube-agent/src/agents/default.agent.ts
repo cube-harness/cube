@@ -15,6 +15,9 @@ import {
 import { createAgentsMdProcessor } from "../processors/agents-md.processor.js";
 import { createContextProcessor } from "../processors/context.processor.js";
 import type { CubeContext, ContextLimits } from "../context.js";
+import { createCubeSkills } from "../skills.js";
+import { createSkillsProcessor } from "../processors/skills.processor.js";
+import { createInitializeProcessor } from "../processors/initialize.processor.js";
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
@@ -116,7 +119,10 @@ export const createCubeAgent = async (
   config: CubeConfig,
   logger?: IMastraLogger,
   tools?: CubeTools,
-  contextManager?: { context: CubeContext; readModel: (modelId: string) => Promise<{ limits: ContextLimits }> },
+  contextManager?: {
+    context: CubeContext;
+    readModel: (modelId: string) => Promise<{ limits: ContextLimits }>;
+  },
 ) => {
   let snapshot = await loadInstructionSnapshot(home, workspace);
   const startupSnapshot = structuredClone(snapshot);
@@ -135,7 +141,8 @@ export const createCubeAgent = async (
   ].join("\n");
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
-  const mastraWorkspace = await createMastraWorkspace(workspace);
+  const skills = await createCubeSkills(home, workspace, config.skills.disabled);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
 
   const agent = createCodingAgent({
     id: "cube-agent",
@@ -146,6 +153,8 @@ export const createCubeAgent = async (
       { role: "system", content: executionInstructions },
     ],
     inputProcessors: [
+      createInitializeProcessor(),
+      createSkillsProcessor(skills),
       createAgentsMdProcessor(
         () => context,
         async (targets) => {
@@ -164,11 +173,18 @@ export const createCubeAgent = async (
         },
         (message) => contextManager?.context.protectedMessages.add(message),
       ),
-      ...(contextManager ? [createContextProcessor(contextManager.context, () => contextManager.readModel(activeModel),
-        () => JSON.stringify({ activeModel, snapshot }))] : []),
+      ...(contextManager
+        ? [
+            createContextProcessor(
+              contextManager.context,
+              () => contextManager.readModel(activeModel),
+              () => JSON.stringify({ activeModel, snapshot }),
+            ),
+          ]
+        : []),
     ],
     workspace: mastraWorkspace,
-    skills: [home.getSkillDir()],
+    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
     basePath: paths.root,
     tools: () => ({
       ...cubeTools.forModel(activeModel),
@@ -212,6 +228,7 @@ export const createCubeAgent = async (
 
   if (logger) agent.__registerPrimitives({ logger });
   const result = Object.assign(agent, {
+    cubeSkills: skills,
     setToolModel: (modelId: string) => {
       activeModel = modelId;
       contextManager?.context.invalidate();

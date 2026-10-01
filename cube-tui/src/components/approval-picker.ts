@@ -7,7 +7,7 @@ import {
 import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 import { formatBinding, matchesBinding } from "../keybindings.js";
-import { fileChanges, renderToolDiff, toolText } from "./tool-diff.js";
+import { fileChanges, toolText } from "./tool-diff.js";
 import type { FileMutationResult } from "@cube/runtime";
 
 export type ToolApprovalDecision = "approve" | "decline" | "approve_prefix";
@@ -60,7 +60,6 @@ export class ApprovalPicker implements Component, Focusable {
   focused = true;
   private readonly list: SelectList;
   private readonly parsed: ParsedApprovalArgs;
-  private expanded = false;
 
   constructor(private readonly options: ApprovalPickerOptions) {
     this.parsed = this.parseArgs(options.args);
@@ -161,7 +160,6 @@ export class ApprovalPicker implements Component, Focusable {
   }
 
   handleInput(data: string): void {
-    if (matchesBinding(data, "cube.transcript.toggle")) { this.expanded = !this.expanded; return; }
     if (this.parsed.preview?.status === "failed" && (matchesBinding(data, "cube.approval.approve") || matchesBinding(data, "cube.approval.approvePrefix"))) return;
     if (matchesBinding(data, "cube.approval.approve")) {
       this.options.onDecision("approve");
@@ -196,7 +194,12 @@ export class ApprovalPicker implements Component, Focusable {
     const cardContentLines: string[] = [];
 
     if (this.parsed.preview) {
-      cardContentLines.push(appTheme.ui.text.bold("Proposed file changes"), "", ...renderToolDiff(this.parsed.preview, width, this.expanded));
+      cardContentLines.push(
+        appTheme.ui.text.bold("Would you like to apply the proposed file changes?"),
+        (this.parsed.preview.status === "failed" ? appTheme.status.error : appTheme.ui.muted)(
+          toolText(this.parsed.preview.summary),
+        ),
+      );
     } else if (this.parsed.command) {
       cardContentLines.push(
         appTheme.ui.text.bold("Would you like to run the following command?"),

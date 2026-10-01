@@ -10,6 +10,8 @@ import { Markdown } from "./markdown.js";
 import { formatBinding } from "../keybindings.js";
 import type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 import { fileChanges, commandResult, renderToolDiff, toolText } from "./tool-diff.js";
+import { getSyntaxTheme } from "../themes/syntax.theme.js";
+import type { RuntimeDisplayState } from "@cube/runtime";
 
 export type { ChatMessage, DisplayTool, MessageRole } from "../types/view.types.js";
 
@@ -86,7 +88,7 @@ type SessionMessageLike = {
   id?: string;
   role?: string;
   createdAt?: Date | string;
-  content?: string | { parts?: unknown[] };
+  content?: string | { parts?: unknown[]; metadata?: Record<string, unknown> };
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -144,7 +146,8 @@ const sessionToolStatus = (invocation: Record<string, unknown>): DisplayTool["st
     return invocation.isError === true ? "error" : "completed";
   }
   if (state === "error" || state === "output-error") return "error";
-  if (state === "declined" || state === "approval-rejected") return "declined";
+  if (state === "declined" || state === "approval-rejected" || state === "output-denied")
+    return "declined";
   if (state.includes("approval")) return "waiting_approval";
   return "running";
 };
@@ -164,6 +167,7 @@ const mapSessionMessage = (
   raw: SessionMessageLike,
   streaming: boolean,
   reasoningDurationMs?: number,
+  pendingApproval?: RuntimeDisplayState["pendingApproval"],
 ): ChatMessage[] => {
   const sourceMessageId = raw.id ?? `message-${Date.now()}`;
   const timestamp = raw.createdAt ? new Date(raw.createdAt) : new Date();
@@ -183,7 +187,14 @@ const mapSessionMessage = (
       : [];
   }
 
-  const parts = raw.content?.parts ?? [];
+  const metadata = raw.content?.metadata;
+  const signalType = asRecord(metadata?.signal)?.type;
+  const userAuthored = raw.role === "user" || (raw.role === "signal" && ["user", "user-message"].includes(String(signalType)));
+  const displayText = userAuthored ? asRecord(metadata?.cube)?.displayText : undefined;
+  const originalParts = raw.content?.parts ?? [];
+  const parts = typeof displayText === "string"
+    ? [{ type: "text", text: displayText }, ...originalParts.filter((part) => asRecord(part)?.type !== "text")]
+    : originalParts;
   const messages: ChatMessage[] = [];
   let textIndex = 0;
   let reasoningRendered = false;
@@ -235,12 +246,18 @@ const mapSessionMessage = (
     const toolName = typeof invocation.toolName === "string" ? invocation.toolName : undefined;
     if (!toolCallId || !toolName) continue;
     const invocationStatus = sessionToolStatus(invocation);
-    const invocationResult = invocation.result ?? invocation.output ?? invocation.error;
+    const approval =
+      (invocationStatus === "running" || invocationStatus === "waiting_approval") &&
+      pendingApproval?.toolCallId === toolCallId
+        ? pendingApproval
+        : undefined;
+    const invocationResult =
+      invocation.result ?? invocation.output ?? invocation.error ?? asRecord(invocation.approval)?.reason;
     const tool: DisplayTool = {
       id: toolCallId,
       name: toolName,
-      args: invocation.args ?? invocation.input ?? {},
-      status: invocationStatus,
+      args: approval?.args ?? invocation.args ?? invocation.input ?? {},
+      status: approval ? "waiting_approval" : invocationStatus,
       result: invocationResult,
     };
     if (!shouldRenderActiveTool(tool)) continue;
@@ -256,6 +273,7 @@ const mapSessionMessage = (
 export class MessageList implements Component {
   private entries: CachedEntry[] = [];
   private transcriptExpanded = false;
+  private syntaxTheme = getSyntaxTheme();
 
   invalidate(): void {
     for (const entry of this.entries) {
@@ -321,15 +339,17 @@ export class MessageList implements Component {
     message: SessionMessageLike,
     streaming: boolean,
     reasoningDurationMs?: number,
+    pendingApproval?: RuntimeDisplayState["pendingApproval"],
   ): void {
-    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs).map((item) =>
-      item.tool
-        ? {
-            ...createToolMessage(item.tool),
-            sourceMessageId: item.sourceMessageId,
-            timestamp: item.timestamp,
-          }
-        : item,
+    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval).map(
+      (item) =>
+        item.tool
+          ? {
+              ...createToolMessage(item.tool),
+              sourceMessageId: item.sourceMessageId,
+              timestamp: item.timestamp,
+            }
+          : item,
     );
     if (!message.id) {
       for (const item of mapped) this.upsertMessage(item);
@@ -422,33 +442,13 @@ export class MessageList implements Component {
     const contentWidth = Math.max(1, availableWidth - prefixWidth);
     const lines: string[] = [];
 
-    if (msg.role === "assistant" && msg.status !== "streaming") {
+    if (msg.role === "assistant") {
       const markdown = new Markdown(msg.content);
       const renderedLines = markdown.render(contentWidth);
       renderedLines.forEach((line, index) => {
         const combined = `${index === 0 ? prefix : indent}${line}`;
         lines.push(truncateToWidth(combined, availableWidth));
       });
-      lines.push("");
-      return lines;
-    }
-
-    if (msg.role === "assistant") {
-      const contentLines = msg.content.split(/\r?\n/);
-      for (let index = 0; index < contentLines.length; index++) {
-        const wrapped = wrapTextWithAnsi(
-          appTheme.role.assistant(contentLines[index]),
-          contentWidth,
-        );
-        if (wrapped.length === 0) {
-          lines.push(index === 0 ? truncateToWidth(prefix, availableWidth) : "");
-        } else {
-          wrapped.forEach((wLine, wIdx) => {
-            const linePrefix = index === 0 && wIdx === 0 ? prefix : indent;
-            lines.push(truncateToWidth(`${linePrefix}${wLine}`, availableWidth));
-          });
-        }
-      }
       lines.push("");
       return lines;
     }
@@ -465,11 +465,11 @@ export class MessageList implements Component {
         });
       }
 
-      const changes = fileChanges(tool?.result);
+      const changes =
+        fileChanges(tool?.result) ??
+        (tool?.status === "waiting_approval" ? fileChanges(asRecord(tool.args)?.preview) : undefined);
       if (changes) {
-        for (const line of renderToolDiff(changes, contentWidth, this.transcriptExpanded)) {
-          lines.push(truncateToWidth(`${indent}${line}`, availableWidth));
-        }
+        lines.push(...renderToolDiff(changes, availableWidth, this.transcriptExpanded, prefixWidth));
         lines.push("");
         return lines;
       }
@@ -575,6 +575,11 @@ export class MessageList implements Component {
   }
 
   render(width: number): string[] {
+    const syntaxTheme = getSyntaxTheme();
+    if (this.syntaxTheme !== syntaxTheme) {
+      this.syntaxTheme = syntaxTheme;
+      this.invalidate();
+    }
     if (this.entries.length === 0) {
       return [];
     }

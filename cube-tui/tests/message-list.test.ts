@@ -6,6 +6,25 @@ import { MessageList } from "../src/components/message-list.js";
 import { appTheme } from "../src/themes/app.theme.js";
 import { Markdown } from "../src/components/markdown.js";
 
+test("skill display metadata hides injected parts only on user-authored messages live and restored", () => {
+  for (const role of ["user", "signal"]) {
+    const message = { id: "skill-message", role, content: {
+      parts: [{ type: "text", text: "INJECTED PRIVATE BODY" }, { type: "text", text: "Use $review" }],
+      metadata: { cube: { displayText: "Use $review" }, signal: { type: "user" } },
+    } };
+    const live = new MessageList(), restored = new MessageList();
+    live.applySessionMessage(message, false);
+    restored.setSessionMessages([JSON.parse(JSON.stringify(message))]);
+    assert.deepEqual(live.getMessages().map((item) => item.content), ["Use $review"]);
+    assert.deepEqual(restored.render(80), live.render(80));
+  }
+  const list = new MessageList();
+  list.setSessionMessages([{ role: "user", content: { parts: [{ type: "text", text: "<skill_instructions>example</skill_instructions>" }] } }]);
+  assert.match(list.getMessages()[0]!.content, /example/);
+  list.setSessionMessages([{ role: "assistant", content: { parts: [{ type: "text", text: "visible" }], metadata: { cube: { displayText: "hidden" } } } }]);
+  assert.equal(list.getMessages()[0]!.content, "visible");
+});
+
 test("stored mutation diffs and command reasons render identically live and after restore", () => {
   const tool = {
     toolCallId: "edit", toolName: "edit_file", state: "result", args: { path: "文件.txt" },

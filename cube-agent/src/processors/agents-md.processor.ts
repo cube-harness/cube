@@ -28,7 +28,9 @@ export const createAgentsMdProcessor = (
           seen.add(call.toolCallId);
           const input = call.args as Record<string, unknown> | undefined;
           if (!input) continue;
-          if (["read_file", "list_files", "grep", "edit_file", "write_file"].includes(call.toolName)) {
+          if (
+            ["read_file", "list_files", "grep", "edit_file", "write_file"].includes(call.toolName)
+          ) {
             const value = typeof input.path === "string" ? input.path : ".";
             paths.push(isGlobPattern(value) ? extractGlobBase(value) : value);
           } else if (call.toolName === "apply_patch" && typeof input.patch === "string") {
@@ -37,7 +39,9 @@ export const createAgentsMdProcessor = (
                 paths.push(hunk.path);
                 if (hunk.type === "update" && hunk.move_path) paths.push(hunk.move_path);
               }
-            } catch { /* A rejected malformed patch has no reliable paths to discover. */ }
+            } catch {
+              /* A rejected malformed patch has no reliable paths to discover. */
+            }
           }
         }
       }
@@ -48,13 +52,18 @@ export const createAgentsMdProcessor = (
     if (latest) state.userId = latest.id;
     const messages = messageList.get.all.db();
     const index = messages.findIndex((message) => message.id === state.userId);
-    state.usersFromAnchor = index < 0 ? 0 : convertMessages(messages.slice(index))
-      .to("AIV5.Model")
-      .filter((message) => message.role === "user" && (
-        typeof message.content === "string"
-          ? message.content.length > 0
-          : message.content.some((part) => part.type !== "text" || part.text.length > 0)
-      )).length;
+    state.usersFromAnchor =
+      index < 0
+        ? 0
+        : convertMessages(messages.slice(index))
+            .to("AIV5.Model")
+            .filter(
+              (message) =>
+                message.role === "user" &&
+                (typeof message.content === "string"
+                  ? message.content.length > 0
+                  : message.content.some((part) => part.type !== "text" || part.text.length > 0)),
+            ).length;
   },
 
   processLLMRequest({ prompt, state }) {
@@ -76,11 +85,7 @@ export const createAgentsMdProcessor = (
     const injected = { role: "user" as const, content: [{ type: "text" as const, text: context }] };
     protect?.(injected);
     return {
-      prompt: [
-        ...prompt.slice(0, index),
-        injected,
-        ...prompt.slice(index),
-      ],
+      prompt: [...prompt.slice(0, index), injected, ...prompt.slice(index)],
     };
   },
 });

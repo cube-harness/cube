@@ -33,33 +33,53 @@ export class PromptService {
     try {
       const command = parseSlashCommand(trimmed);
       if (command) {
-        await this.appendHistory(trimmed, this.thread.current() ?? "new thread");
+        if (command.name !== "/init")
+          await this.appendHistory(trimmed, this.thread.current() ?? "new thread");
         return executeSlashCommand(command.name, command.argument, this.commands);
       }
 
-      if (!(await this.commands.gateway.readiness()).ready) {
-        return {
-          kind: "gateways",
-          request: { choices: await this.commands.gateway.listChoices() },
-        };
-      }
-      const threadId = await this.thread.ensureForPrompt(trimmed);
-      await this.appendHistory(trimmed, threadId);
-      const warn = console.warn;
-      // ponytail: process-global during one queued turn; add a logger bridge if runtimes become concurrent.
-      console.warn = () => undefined;
-      try {
-        await this.runWithThreadLogContext(() => {
-          onDispatch?.(this.session.run.isRunning());
-          return this.session.followUp({ content: trimmed });
-        });
-      } finally {
-        console.warn = warn;
-      }
-      return { kind: "submitted" };
+      return await this.dispatch(trimmed, onDispatch);
     } catch (error) {
       return { kind: "notice", notice: toRuntimeNotice(error) };
     }
+  }
+
+  initialize(): Promise<PromptResult> {
+    if (
+      this.session.run.isRunning() ||
+      this.session.approval.isArmed() ||
+      this.session.suspensions.hasPending() ||
+      this.commands.memory.isBusy()
+    ) {
+      throw new Error("Finish or cancel the active turn before running /init.");
+    }
+    return this.dispatch("/init");
+  }
+
+  private async dispatch(
+    trimmed: string,
+    onDispatch?: (queued: boolean) => void,
+  ): Promise<PromptResult> {
+    if (!(await this.commands.gateway.readiness()).ready) {
+      return {
+        kind: "gateways",
+        request: { choices: await this.commands.gateway.listChoices() },
+      };
+    }
+    const threadId = await this.thread.ensureForPrompt(trimmed);
+    await this.appendHistory(trimmed, threadId);
+    const warn = console.warn;
+    // ponytail: process-global during one queued turn; add a logger bridge if runtimes become concurrent.
+    console.warn = () => undefined;
+    try {
+      await this.runWithThreadLogContext(() => {
+        onDispatch?.(this.session.run.isRunning());
+        return this.session.followUp({ content: trimmed });
+      });
+    } finally {
+      console.warn = warn;
+    }
+    return { kind: "submitted" };
   }
 
   cancelLatestQueued(): string | null {

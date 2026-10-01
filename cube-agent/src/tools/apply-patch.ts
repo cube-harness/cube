@@ -2,19 +2,19 @@
  * Adapted from OpenCode ebb7b76eca82342642c78645109e865614533827
  * packages/opencode/src/patch/index.ts
  * MIT License
- * 
+ *
  * Copyright (c) 2025 opencode
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,9 +26,9 @@
 
 // Cube: retain EOF marker parsing; preserve terminal-newline convention in the adapter.
 export type Hunk =
-  | { type: "add"; path: string; contents: string; }
-  | { type: "delete"; path: string; }
-  | { type: "update"; path: string; move_path?: string; chunks: UpdateFileChunk[]; };
+  | { type: "add"; path: string; contents: string }
+  | { type: "delete"; path: string }
+  | { type: "update"; path: string; move_path?: string; chunks: UpdateFileChunk[] };
 
 export interface UpdateFileChunk {
   old_lines: string[];
@@ -41,7 +41,7 @@ export interface UpdateFileChunk {
 function parsePatchHeader(
   lines: string[],
   startIdx: number,
-): { filePath: string; movePath?: string; nextIdx: number; } | null {
+): { filePath: string; movePath?: string; nextIdx: number } | null {
   const line = lines[startIdx];
 
   if (line.startsWith("*** Add File:")) {
@@ -72,12 +72,19 @@ function parsePatchHeader(
   return null;
 }
 
-function parseUpdateFileChunks(lines: string[], startIdx: number): { chunks: UpdateFileChunk[]; nextIdx: number; } {
+function parseUpdateFileChunks(
+  lines: string[],
+  startIdx: number,
+): { chunks: UpdateFileChunk[]; nextIdx: number } {
   const chunks: UpdateFileChunk[] = [];
   let i = startIdx;
 
   while (i < lines.length && !lines[i].startsWith("***")) {
-    if (lines[i] === "@@" || lines[i].startsWith("@@ ") || (chunks.length === 0 && /^[ +\-]/.test(lines[i]))) {
+    if (
+      lines[i] === "@@" ||
+      lines[i].startsWith("@@ ") ||
+      (chunks.length === 0 && /^[ +\-]/.test(lines[i]))
+    ) {
       // Parse context line
       const hasHeader = lines[i].startsWith("@@");
       const contextLine = hasHeader ? lines[i].substring(2).trim() : "";
@@ -88,7 +95,11 @@ function parseUpdateFileChunks(lines: string[], startIdx: number): { chunks: Upd
       let isEndOfFile = false;
 
       // Parse change lines
-      while (i < lines.length && !lines[i].startsWith("@@") && (!lines[i].startsWith("***") || lines[i] === "*** End of File")) {
+      while (
+        i < lines.length &&
+        !lines[i].startsWith("@@") &&
+        (!lines[i].startsWith("***") || lines[i] === "*** End of File")
+      ) {
         const changeLine = lines[i];
 
         if (changeLine === "*** End of File") {
@@ -130,7 +141,10 @@ function parseUpdateFileChunks(lines: string[], startIdx: number): { chunks: Upd
   return { chunks, nextIdx: i };
 }
 
-function parseAddFileContent(lines: string[], startIdx: number): { content: string; nextIdx: number; } {
+function parseAddFileContent(
+  lines: string[],
+  startIdx: number,
+): { content: string; nextIdx: number } {
   let content = "";
   let i = startIdx;
 
@@ -151,7 +165,7 @@ function parseAddFileContent(lines: string[], startIdx: number): { content: stri
   return { content, nextIdx: i };
 }
 
-export function parsePatch(patchText: string): { hunks: Hunk[]; } {
+export function parsePatch(patchText: string): { hunks: Hunk[] } {
   const cleaned = patchText.trim();
   const lines = cleaned.split("\n");
   const hunks: Hunk[] = [];
@@ -255,7 +269,9 @@ function computeReplacements(
       replacements.push([found, pattern.length, newSlice]);
       lineIndex = found + pattern.length;
     } else {
-      throw new Error(`Failed to find expected lines in ${filePath}:\n${chunk.old_lines.join("\n")}`);
+      throw new Error(
+        `Failed to find expected lines in ${filePath}:\n${chunk.old_lines.join("\n")}`,
+      );
     }
   }
 
@@ -265,7 +281,10 @@ function computeReplacements(
   return replacements;
 }
 
-function applyReplacements(lines: string[], replacements: Array<[number, number, string[]]>): string[] {
+function applyReplacements(
+  lines: string[],
+  replacements: Array<[number, number, string[]]>,
+): string[] {
   // Apply replacements in reverse order to avoid index shifting
   const result = [...lines];
 
@@ -296,7 +315,13 @@ function normalizeUnicode(str: string): string {
 
 type Comparator = (a: string, b: string) => boolean;
 
-function tryMatch(lines: string[], pattern: string[], startIndex: number, compare: Comparator, eof: boolean): number {
+function tryMatch(
+  lines: string[],
+  pattern: string[],
+  startIndex: number,
+  compare: Comparator,
+  eof: boolean,
+): number {
   // If EOF anchor, try matching from end of file first
   if (eof) {
     const fromEnd = lines.length - pattern.length;
@@ -354,7 +379,7 @@ function seekSequence(lines: string[], pattern: string[], startIndex: number, eo
 }
 
 // Cube adapts I/O and byte fidelity outside this pure engine.
-export function applyFilePatch(source: string, change: Extract<Hunk, { type: "update"; }>): string {
+export function applyFilePatch(source: string, change: Extract<Hunk, { type: "update" }>): string {
   const lines = source.split("\n");
   const terminalNewline = source.endsWith("\n");
   if (terminalNewline) lines.pop();

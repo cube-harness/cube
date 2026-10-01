@@ -93,6 +93,45 @@ test("PromptService cancels native follow-ups newest first without changing FIFO
   ]);
 });
 
+test("/init dispatches without echo, records history once, and requires an idle configured session", async () => {
+  const history: string[] = [];
+  const sent: string[] = [];
+  let echoes = 0;
+  let created = 0;
+  let ready = true;
+  let busy = false;
+  const session = {
+    run: { isRunning: () => busy },
+    approval: { isArmed: () => false },
+    suspensions: { hasPending: () => false },
+    followUp: async ({ content }: { content: string }) => { sent.push(content); },
+  } as unknown as Session;
+  const commands = {
+    gateway: { readiness: async () => ({ ready }), listChoices: () => [] },
+    memory: { isBusy: () => false },
+    prompt: { initialize: () => service.initialize() },
+  } as unknown as SlashCommandContext;
+  const service = new PromptService(
+    {} as Home, session,
+    { current: () => null, ensureForPrompt: async () => { created++; return "init-thread"; } } as unknown as ThreadService,
+    commands, (callback) => callback(), async (text) => { history.push(text); },
+  );
+  assert.ok(slashCommandSuggestions.some((command) => command.name === "/init"));
+  assert.deepEqual(await service.submit("/init", () => { echoes++; }), { kind: "submitted" });
+  assert.deepEqual(history, ["/init"]);
+  assert.deepEqual(sent, ["/init"]);
+  assert.equal(echoes, 0);
+  assert.equal(created, 1);
+  ready = false;
+  assert.deepEqual(await service.submit("/init"), { kind: "gateways", request: { choices: [] } });
+  assert.equal(created, 1);
+  ready = true;
+  busy = true;
+  const blocked = await service.submit("/init");
+  assert.equal(blocked.kind, "notice");
+  assert.equal(sent.length, 1);
+});
+
 test("PromptService converts provider failures into one safe system notice", async () => {
   const session = {
     followUp: async () => {

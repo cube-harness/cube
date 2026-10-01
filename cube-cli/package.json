@@ -1,0 +1,17 @@
+{
+  "name": "@cube-harness/cli",
+  "version": "1.0.1",
+  "description": "Cube CLI - Production-Grade Interactive Coding Agent",
+  "type": "module",
+  "bin": {
+    "cube": "./bin/cube.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

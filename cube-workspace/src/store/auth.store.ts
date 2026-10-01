@@ -30,15 +30,18 @@ export class AuthStore {
   update(mutator: (current: CubeAuth) => CubeAuth): Promise<CubeAuth> {
     const authPath = this.home.getAuthPath();
     const next = (AuthStore.updates.get(authPath) ?? Promise.resolve())
-      .catch(() => undefined).then(async () => {
+      .catch(() => undefined)
+      .then(async () => {
         const auth = CubeAuthSchema.parse(mutator(await this.read()));
         await this.writeFile(authPath, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
         return auth;
       });
     AuthStore.updates.set(authPath, next);
-    void next.finally(() => {
-      if (AuthStore.updates.get(authPath) === next) AuthStore.updates.delete(authPath);
-    }).catch(() => undefined);
+    void next
+      .finally(() => {
+        if (AuthStore.updates.get(authPath) === next) AuthStore.updates.delete(authPath);
+      })
+      .catch(() => undefined);
     return next;
   }
 
@@ -60,9 +63,7 @@ export class AuthStore {
     return (await this.read()).oauth.openai;
   }
 
-  async replaceOpenAIOAuth(
-    credential: OpenAIOAuthCredential,
-  ): Promise<void> {
+  async replaceOpenAIOAuth(credential: OpenAIOAuthCredential): Promise<void> {
     await this.update((current) => ({
       ...current,
       oauth: {

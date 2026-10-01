@@ -47,8 +47,9 @@ export const formatAgentsContext = (sources: readonly ContextFile[]): string => 
     "Apply instructions only within their source scope. When instructions conflict, " +
       "the project scope closest to the file or directory takes precedence over parent and global scopes. " +
       "Keep all non-conflicting guidance. Equal-scope instructions are additive; ask about unresolved conflicts.",
-    ...sources.map((source) =>
-      `<instruction source="${attribute(source.path)}" scope="${attribute(source.scope)}">\n${source.content}\n</instruction>`,
+    ...sources.map(
+      (source) =>
+        `<instruction source="${attribute(source.path)}" scope="${attribute(source.scope)}">\n${source.content}\n</instruction>`,
     ),
     "</agents_instructions>",
   ].join("\n");
@@ -62,10 +63,12 @@ export const loadInstructionSnapshot = async (
   const [soul, projectFiles, global] = await Promise.all([
     SoulStore(home).read(),
     workspace.resolveContextFiles(explored),
-    AgentsStore(home).read().catch((error) => {
-      if (error.code === "ENOENT") return "";
-      throw error;
-    }),
+    AgentsStore(home)
+      .read()
+      .catch((error) => {
+        if (error.code === "ENOENT") return "";
+        throw error;
+      }),
   ]);
   return {
     soul,
@@ -84,7 +87,7 @@ export const refreshInstructionSnapshot = async (
 ): Promise<InstructionSnapshot> => {
   if (saved === undefined) return structuredClone(base);
   const previous = snapshotSchema.parse(saved);
-  const key = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
+  const key = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
   const loaded = new Set(base.explored.map(key));
   const paths = previous.explored
     .filter((scope) => !loaded.has(key(scope)))
@@ -92,10 +95,7 @@ export const refreshInstructionSnapshot = async (
   const sources = await workspace.readContextSources(paths);
   return {
     soul: base.soul,
-    sources: [
-      ...sources,
-      ...base.sources,
-    ],
+    sources: [...sources, ...base.sources],
     explored: [...new Set([...base.explored, ...previous.explored])],
   };
 };

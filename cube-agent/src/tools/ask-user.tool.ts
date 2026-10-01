@@ -13,6 +13,9 @@ const askUserPayloadSchema = z.object({
 });
 
 const askUserAnswerSchema = z.union([z.string(), z.array(z.string())]);
+const cancelledQuestionSchema = z.object({ cancelled: z.literal(true) });
+const askUserResumeSchema = z.union([askUserAnswerSchema, cancelledQuestionSchema]);
+const declinedAnswer = "User declined to answer the question";
 
 const formatAnswer = (answer: z.infer<typeof askUserAnswerSchema>): string =>
   Array.isArray(answer) ? answer.join(", ") : answer;
@@ -23,11 +26,14 @@ export const cubeAskUserTool = createTool({
     "Ask the user a question and wait for their response. Options are optional suggestions, never restrictions: the user can always enter a custom answer. Set multiple to true when the user may combine several options and custom answers.",
   inputSchema: askUserPayloadSchema,
   suspendSchema: askUserPayloadSchema,
-  resumeSchema: askUserAnswerSchema,
+  resumeSchema: askUserResumeSchema,
   execute: async ({ question, options, multiple }, context) => {
     try {
       const resumeData = context?.agent?.resumeData;
       if (resumeData !== undefined) {
+        if (typeof resumeData === "object" && !Array.isArray(resumeData)) {
+          return declinedAnswer;
+        }
         return {
           content: `User answered: ${formatAnswer(resumeData)}`,
           isError: false,

@@ -27,6 +27,13 @@ const catalog = {
   },
 };
 
+test("/skills only lists preferences without a gateway or thread", async () => {
+  const result = await executeSlashCommand("/skills", "", {
+    preference: { listSkills: async () => [] },
+  } as unknown as SlashCommandContext);
+  assert.deepEqual(result, { kind: "skills", skills: [] });
+});
+
 const createContext = () => {
   const calls: unknown[][] = [];
   const state = {

@@ -49,7 +49,12 @@ Unix installs use a two-field text manifest (SHA-256 and immutable relative arch
 path), so installing does not require a JSON parser, Node, Python or jq. Manifests
 are named `latest-linux-x64.txt`, `latest-darwin-arm64.txt`, `latest-darwin-x64.txt`.
 Publishing uploads all archives before installer/manifests, including the existing
-Windows `latest.json` and `install.ps1`. Unix manifests remain separate. A checksum detects damage, not a compromised
+Windows `latest.json` and `install.ps1`. The version comes from the root `package.json`,
+which the maintainer bumps manually. Archives use `releases/<version>/<filename>`;
+an existing version fails publishing before any upload. Cleanup runs only after all
+uploads succeed and keeps the active archive plus newest previous archive per platform.
+Local installations still use checksum-named directories and verify SHA-256.
+Unix manifests remain separate. A checksum detects damage, not a compromised
 download host; these packages are not independently signed.
 
 After a verified build has been published:
@@ -59,4 +64,12 @@ curl -fsSL https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev/install.sh | sh
 ```
 
 Run this inside WSL for Linux, or Terminal for macOS. The URL will not serve these
-new targets until you explicitly publish the combined workflow. No auto-update service.
+new targets until you explicitly publish the combined workflow.
+
+Installed Cube checks its platform's `latest-<target>.txt` on startup, with a
+3-second timeout. A different checksum opens the onboarding Update/Continue/Cancel
+picker. Update verifies the archive and hands control back to the launcher after
+the old Node process exits; the existing installer updates the symlink and reopens
+Cube in the same workspace. Errors become system notices in the previous build,
+not raw installer output. Config, auth and history under `~/.cube` remain untouched.
+Source/development runs skip the check. There is no background updater.

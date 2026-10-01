@@ -73,6 +73,8 @@ importers:
         specifier: ^1.25.0
         version: 1.25.0(@hono/node-server@2.1.0(hono@4.13.0))(@mastra/core@1.63.2(ai@6.0.241(zod@4.4.3))(bufferutil@4.1.0)(express@5.2.1)(zod@4.4.3))(bufferutil@4.1.0)(typescript@5.7.3)(zod@4.4.3)
 
+  cube-cli: {}
+
   cube-runtime:
     dependencies:
       '@cube/agent':
