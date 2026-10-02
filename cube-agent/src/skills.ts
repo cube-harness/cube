@@ -33,7 +33,7 @@ export async function createCubeSkills(
   home: HomeManager, workspace: WorkspaceManager, disabled: readonly string[],
 ): Promise<CubeSkills> {
   const project = resolveAgentSkills((await workspace.getPaths()).skillsDirs);
-  const global = resolveAgentSkills([home.getSkillDir()]);
+  const global = resolveAgentSkills([home.getSkillDir(), join(home.getUserHome(), ".agents", "skills")]);
   let disabledPaths = [...disabled];
   const snapshots = new WeakMap<RequestContext, Promise<SkillSnapshot>>();
   const canonical = async (path: string) => resolve(await realpath(path).catch(() => path));

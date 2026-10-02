@@ -12,7 +12,7 @@ export class Bootstrap {
     await this.seedFromTemplate(HOME_FILES.CONFIG, this.home.getConfigPath());
     await this.seedFromTemplate(HOME_FILES.AUTH, this.home.getAuthPath());
     await this.seedFromTemplate(HOME_FILES.MCP, this.home.getMcpPath());
-    await this.seedFromTemplate(HOME_FILES.WORKSPACE, this.home.getWorkspacePath());
+    await this.seedFromTemplate(HOME_FILES.PERMISSION, this.home.getPermissionPath());
     await this.seedFromTemplate(HOME_FILES.SOUL, this.home.getSoulPath());
     await this.seedFromTemplate(HOME_FILES.HISTORY, this.home.getHistoryPath());
   }

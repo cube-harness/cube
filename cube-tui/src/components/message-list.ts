@@ -320,10 +320,6 @@ export class MessageList implements Component {
         return;
       }
     }
-    if (msg.status === "streaming") {
-      this.addMessage(msg);
-      return;
-    }
     this.addMessage(msg);
   }
 
@@ -341,16 +337,7 @@ export class MessageList implements Component {
     reasoningDurationMs?: number,
     pendingApproval?: RuntimeDisplayState["pendingApproval"],
   ): void {
-    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval).map(
-      (item) =>
-        item.tool
-          ? {
-              ...createToolMessage(item.tool),
-              sourceMessageId: item.sourceMessageId,
-              timestamp: item.timestamp,
-            }
-          : item,
-    );
+    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval);
     if (!message.id) {
       for (const item of mapped) this.upsertMessage(item);
       return;
@@ -382,10 +369,7 @@ export class MessageList implements Component {
 
   toggleTranscript(): boolean {
     this.transcriptExpanded = !this.transcriptExpanded;
-    for (const entry of this.entries) {
-      entry.cachedLines = undefined;
-      entry.cachedWidth = undefined;
-    }
+    this.invalidate();
     return this.transcriptExpanded;
   }
 

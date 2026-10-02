@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { createTool, type ToolPayloadTransformContext } from "@mastra/core/tools";
 import { z } from "zod";
 import { resolveWorkspacePath } from "./file.tools.js";
+import { DEFAULT_WORKSPACE_ONLY } from "@cube/workspace";
 
 const MAX_OUTPUT = 256 * 1024;
 export const commandResultSchema = z.object({
@@ -45,7 +46,7 @@ const processInput = z.object({
   tail: z.number().int().min(1).max(2000).default(200),
 });
 
-export function createCommandTools(root: string) {
+export function createCommandTools(root: string, workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY) {
   const processes = new Map<string, ProcessEntry>();
   let disposed = false;
   let disposal: Promise<void> | undefined;
@@ -128,7 +129,7 @@ export function createCommandTools(root: string) {
 
   const approval = async ({ input }: ToolPayloadTransformContext) => {
     const args = commandInput.parse(input);
-    return { ...args, cwd: await resolveWorkspacePath(root, args.cwd ?? ".") };
+    return { ...args, cwd: await resolveWorkspacePath(root, args.cwd ?? ".", workspaceOnly) };
   };
   const transform = {
     approval,
@@ -148,7 +149,7 @@ export function createCommandTools(root: string) {
     execute: async (input, context) => {
       if (disposed) throw new Error("Cube command runtime is closed.");
       context.abortSignal?.throwIfAborted();
-      const cwd = await resolveWorkspacePath(root, input.cwd ?? ".");
+      const cwd = await resolveWorkspacePath(root, input.cwd ?? ".", workspaceOnly);
       if (!(await stat(cwd)).isDirectory()) throw new Error("Command cwd must be a directory.");
       if (disposed) throw new Error("Cube command runtime is closed.");
       if ([...processes.values()].filter((p) => !p.closed).length >= 32)

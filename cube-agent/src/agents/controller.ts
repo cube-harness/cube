@@ -1,6 +1,6 @@
 import { Agent } from "@mastra/core/agent";
 import { CubeConfig, HomeManager, WorkspaceManager } from "@cube/workspace";
-import { AgentController } from "@mastra/core/agent-controller";
+import { AgentController, type AgentControllerConfig } from "@mastra/core/agent-controller";
 import type { MastraModelGatewayInterface } from "@mastra/core/llm";
 import { createMastraWorkspace } from "../workspace.js";
 import { resolveCubeToolCategory } from "../permission.js";
@@ -15,8 +15,9 @@ export const createCubeController = async (
   agent: Agent,
   gateways: MastraModelGatewayInterface[] = [],
   skills?: CubeSkills,
+  threadLock?: AgentControllerConfig["threadLock"],
 ) => {
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills, config.permissions.workspace_only);
 
   return new AgentController({
     id: "cube-controller",
@@ -35,5 +36,6 @@ export const createCubeController = async (
     workspace: mastraWorkspace,
     toolCategoryResolver: resolveCubeToolCategory,
     gateways,
+    threadLock,
   });
 };

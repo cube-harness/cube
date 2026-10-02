@@ -20,7 +20,7 @@ export interface CubeRoot {
   historyFile: string;
   mcpFile: string;
   modelCatalogFile: string;
-  workspaceFile: string;
+  permissionFile: string;
 }
 
 export class HomeManager {
@@ -85,8 +85,8 @@ export class HomeManager {
     return path.join(this.root, HOME_FILES.MODEL_CATALOG);
   }
 
-  getWorkspacePath(): string {
-    return path.join(this.root, HOME_FILES.WORKSPACE);
+  getPermissionPath(): string {
+    return path.join(this.root, HOME_FILES.PERMISSION);
   }
 
   getSoulMaxCharacters(): number {
@@ -110,7 +110,7 @@ export class HomeManager {
       historyFile: this.getHistoryPath(),
       mcpFile: this.getMcpPath(),
       modelCatalogFile: this.getModelCatalogPath(),
-      workspaceFile: this.getWorkspacePath(),
+      permissionFile: this.getPermissionPath(),
     };
   }
 

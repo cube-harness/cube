@@ -90,7 +90,7 @@ test("ThreadService lists active state and resumes with one switch and one snaps
   assert.deepEqual(snapshot.messages, messages);
 });
 
-test("ThreadService reuses startup instructions for the first lazy thread", async () => {
+test("ThreadService loads instructions only when the first lazy thread is created", async () => {
   const calls: unknown[][] = [];
   let activeId: string | null = null;
   const session = asSession({
@@ -106,13 +106,15 @@ test("ThreadService reuses startup instructions for the first lazy thread", asyn
   });
   const service = new ThreadService(
     session,
-    instructions(async () => { assert.fail("unexpected startup reread"); }),
+    instructions(async () => { calls.push(["load"]); }),
     () => "planned-1",
   );
 
+  assert.deepEqual(calls, []);
   assert.equal(await service.ensureForPrompt("  hello   runtime  "), "planned-1");
   assert.equal(await service.ensureForPrompt("second prompt"), "planned-1");
   assert.deepEqual(calls, [
+    ["load"],
     ["create", "planned-1", "hello runtime"],
   ]);
 });
@@ -264,6 +266,34 @@ test("ThreadService validates and renames the active native thread", async () =>
   await assert.rejects(service.rename("   "), /Thread title is required/);
 });
 
+test("a failed new thread is retained for a queued retry and committed once history exists", async () => {
+  let active: string | null = null;
+  let queued = 1;
+  const messages: unknown[] = [];
+  const session = asSession({
+    run: { isRunning: () => false },
+    followUps: { count: () => queued },
+    approval: { isArmed: () => false },
+    suspensions: { hasPending: () => false },
+    thread: {
+      getId: () => active,
+      create: async ({ id }: { id: string }) => { active = id; return { id }; },
+      listMessages: async () => messages,
+      delete: async () => { active = null; },
+    },
+  });
+  const service = new ThreadService(session, instructions(), () => "queued-thread");
+  await service.ensureForPrompt("rejected");
+  await service.finishRun("error");
+  assert.equal(service.current(), "queued-thread", "the queued retry must not lose its thread");
+  queued = 0;
+  messages.push({ role: "user", content: "retry" });
+  await service.finishRun("complete");
+  messages.length = 0;
+  await service.finishRun("error");
+  assert.equal(service.current(), "queued-thread", "a committed conversation is never a creation rollback target");
+});
+
 test("explicit reload includes discovered scopes, persists metadata and rejects active turns", async () => {
   let running = true;
   const saved: unknown[] = [];
@@ -337,14 +367,15 @@ test("thread snapshots isolate resume/fork, refresh on restart, and retry a fail
   const scoped = { soul: "Cube", sources: [{ path: "a/AGENTS.md", scope: "a", content: "A" }], explored: ["a"] };
   await service.saveInstructions(scoped); binding.install(scoped);
   await service.fork();
+  assert.equal(binding.read().soul, "restarted", "fork loads fresh instructions instead of copying the source snapshot");
   const changed = binding.read(); changed.sources[0]!.content = "fork only";
   await service.saveInstructions(changed); binding.install(changed);
   await service.resume("thread-1");
   assert.equal(binding.read().sources[0]?.content, "A");
-  assert.equal(refreshes, 0);
-  assert.equal(reloads, 0);
+  assert.equal(refreshes, 1);
+  assert.equal(reloads, 1);
   await service.create();
-  assert.equal(reloads, 0);
+  assert.equal(reloads, 1);
   failReload = true;
   await assert.rejects(service.ensureForPrompt("next"), /EACCES/);
   assert.equal(active, null);
@@ -354,11 +385,11 @@ test("thread snapshots isolate resume/fork, refresh on restart, and retry a fail
   assert.deepEqual(binding.read().sources, []);
   await service.resume("fork");
   assert.equal(binding.read().sources[0]?.content, "fork only");
-  assert.equal(refreshes, 0);
+  assert.equal(refreshes, 1);
   const restarted = new ThreadService(session, binding);
   await restarted.resume("thread-1");
-  assert.equal(refreshes, 1);
+  assert.equal(refreshes, 2);
   assert.equal(binding.read().soul, "restarted");
   await restarted.resume("thread-1");
-  assert.equal(refreshes, 1);
+  assert.equal(refreshes, 2);
 });

@@ -120,10 +120,7 @@ const definitions: SlashCommandDefinition[] = [
         kind: "notice",
         notice: {
           level: "info",
-          message:
-            result.status === "compacted"
-              ? `Context compacted (estimated ${result.before} → ${result.after} tokens).`
-              : result.reason,
+          message: result.status === "compacted" ? "Context compacted." : result.reason,
         },
       };
     },

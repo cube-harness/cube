@@ -295,14 +295,14 @@ export class PromptEditor implements Component, Focusable {
 
     const queueLines = wrapTextWithAnsi(
       appTheme.ui.muted(
-        `• Messages to be submitted after the current turn (${formatBinding("cube.turn.interrupt")} to cancel next queued prompt)`,
+        ` • Messages to be submitted after the current turn (${formatBinding("cube.turn.interrupt")} to cancel next queued prompt)`,
       ),
       width,
     );
     for (const prompt of this.queuedPrompts) {
       queueLines.push(
         ...wrapTextWithAnsi(
-          `${appTheme.ui.primary("  ↳")} ${appTheme.role.assistant(prompt.replace(/\r?\n/g, " "))}`,
+          `${appTheme.ui.primary("   ↳")} ${appTheme.role.assistant(prompt.replace(/\r?\n/g, " "))}`,
           width,
         ),
       );

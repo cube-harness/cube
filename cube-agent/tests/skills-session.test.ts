@@ -22,7 +22,7 @@ test("native signals persist skill parts once; queues load at dispatch and store
     const skillDir = join(project, ".agents", "skills", "review");
     await mkdir(skillDir, { recursive: true });
     await writeFile(join(skillDir, "SKILL.md"), "---\nname: review\ndescription: Review code\n---\nUNIQUE LOADED INSTRUCTIONS");
-    const home = new Home({ cubeHome: join(root, "home") });
+    const home = new Home({ cubeHome: join(root, "home"), userHome: root });
     await createBootstrap(home).run();
     const workspace = new WorkspaceManager(home, project);
     const requests: string[] = [];

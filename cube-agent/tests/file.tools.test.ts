@@ -6,6 +6,29 @@ import { join } from "node:path";
 import { promises as fs } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { createFileTools, resolveWorkspacePath } from "../src/tools/file.tools.js";
+import { CubeHome, CubeWorkspace } from "@cube/workspace";
+import { createMastraWorkspace } from "../src/workspace.js";
+
+test("workspace_only false permits external writes without disabling validation or changing relative paths", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "cube-uncontained-"));
+  t.after(() => rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const root = join(parent, "workspace");
+  await mkdir(root);
+  await assert.rejects(resolveWorkspacePath(root, "../outside.txt"), /Permission denied/);
+  const tools = createFileTools(root, false).tools;
+  const result = await tools.write_file.execute!({ path: "../outside.txt", content: "allowed" }, {} as never) as any;
+  assert.equal(result.status, "applied");
+  assert.equal(await readFile(join(parent, "outside.txt"), "utf8"), "allowed");
+  const workspace = CubeWorkspace(CubeHome({ cubeHome: parent }), root);
+  const restricted = await createMastraWorkspace(workspace);
+  const unrestricted = await createMastraWorkspace(workspace, undefined, false);
+  await assert.rejects(restricted.filesystem!.readFile("../outside.txt"), /Permission denied/);
+  assert.equal(String(await unrestricted.filesystem!.readFile("../outside.txt")), "allowed");
+  assert.equal(String(await unrestricted.filesystem!.readFile(join(parent, "outside.txt"))), "allowed");
+  assert.equal(await resolveWorkspacePath(root, "inside.txt", false), join(root, "inside.txt"));
+  await assert.rejects(resolveWorkspacePath(root, "file:stream", false), /Permission denied/);
+  await assert.rejects(resolveWorkspacePath(root, "bad\0path", false), /NUL/);
+});
 
 test("file tools preserve bytes, reject stale approvals and never partially apply an invalid patch", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "cube-files-"));
@@ -94,8 +117,8 @@ test("mutation path boundary rejects traversal, ADS and outside junctions", asyn
   t.after(() => rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const root = join(parent, "workspace"), outside = join(parent, "outside");
   await mkdir(root); await mkdir(outside);
-  await assert.rejects(resolveWorkspacePath(root, "../outside"), /outside/);
-  await assert.rejects(resolveWorkspacePath(root, "file:stream"), /stream/);
+  await assert.rejects(resolveWorkspacePath(root, "../outside"), { message: "Permission denied: access on ../outside" });
+  await assert.rejects(resolveWorkspacePath(root, "file:stream"), { message: "Permission denied: access on file:stream" });
   await symlink(outside, join(root, "link"), process.platform === "win32" ? "junction" : "dir");
-  await assert.rejects(resolveWorkspacePath(root, "link/secret.txt"), /outside/);
+  await assert.rejects(resolveWorkspacePath(root, "link/secret.txt"), { message: "Permission denied: access on link/secret.txt" });
 });

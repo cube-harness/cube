@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { RequestFrame } from "./processors/context.processor.js";
 import { buildCompactPrompt, COMPACT_SYSTEM_PROMPT } from "./prompts/compact.prompt.js";
 
-export type ContextPolicy = CubeConfig["memory"]["compaction"];
+export type ContextPolicy = Omit<CubeConfig["memory"]["compaction"], "model">;
 export type ContextLimits = { context?: number; input?: number; output?: number };
 export type ContextBudget = { context: number; input: number; reserve: number; summary: number };
 export type CompactResult =

@@ -7,7 +7,7 @@ export const resolveCubeToolCategory = (_toolName: string): ToolCategory =>
 
 export const configureCubePermissions = async (
   session: Session,
-  permissions: CubeConfig["permissions"],
+  permissions: Pick<CubeConfig["permissions"], "require_approval_for">,
 ): Promise<string[]> => {
   await session.permissions.setForCategory({
     category: "other",

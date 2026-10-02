@@ -12,7 +12,7 @@ import { createAgentsMdProcessor } from "../src/processors/agents-md.processor.j
 
 const context = "<agents_instructions>Use pnpm.</agents_instructions>";
 
-test("native Session user signals anchor AGENTS without adding a transcript row", async () => {
+test("native Session keeps AGENTS at the request prefix without adding a transcript row", async () => {
   const requests: any[][] = [];
   const model = new MockLanguageModelV3({ doStream: async ({ prompt }) => {
     requests.push(prompt);
@@ -47,7 +47,11 @@ test("native Session user signals anchor AGENTS without adding a transcript row"
     assert.ok(prompt);
     const index = prompt.findIndex((message) => JSON.stringify(message).includes("Use pnpm."));
     assert.ok(index >= 0);
+    assert.equal(index, prompt.findIndex((message) => message.role !== "system"));
     assert.match(JSON.stringify(prompt[index + 1]), /actual user request/);
+    await session.followUp({ content: "second request" });
+    assert.deepEqual(requests.at(-1)!.slice(0, index + 1), prompt.slice(0, index + 1));
+    assert.match(JSON.stringify(requests.at(-1)![index + 1]), /actual user request/);
     const messages = await session.thread.listMessages({ threadId: "session-thread" });
     assert.doesNotMatch(JSON.stringify(messages), /Use pnpm|agents_instructions/);
   } finally {
@@ -57,7 +61,7 @@ test("native Session user signals anchor AGENTS without adding a transcript row"
   }
 });
 
-test("AGENTS stays before the real user across native reminders, tool steps and compact", async () => {
+test("AGENTS stays before history across native reminders and tool steps", async () => {
   const list = new MessageList();
   list.addSystem({ role: "system", content: "Cube" });
   list.add({ id: "older", role: "user", createdAt: new Date(1000), content: {
@@ -67,7 +71,6 @@ test("AGENTS stays before the real user across native reminders, tool steps and 
   const id = list.get.input.db().at(-1)!.id;
   const state = {};
   const processor = createAgentsMdProcessor(() => context);
-  await processor.processInput!({ messageList: list, state } as any);
   list.addSignal(createSignal({ type: "reactive", createdAt: new Date(3000), tagName: "system-reminder", contents: "native reminder" }));
   // Native signals assign delivery time themselves; supplied createdAt becomes
   // acceptedAt. Keep this tool response after their actual stored timestamps.
@@ -88,8 +91,8 @@ test("AGENTS stays before the real user across native reminders, tool steps and 
     const result = await processor.processLLMRequest!({ prompt, state } as any);
     assert.ok(result?.prompt);
     const injected = result.prompt.findIndex((message) => JSON.stringify(message).includes("Use pnpm."));
-    assert.equal(injected, 2);
-    assert.match(JSON.stringify(result.prompt[injected + 1]), /user text/);
+    assert.equal(injected, 1);
+    assert.match(JSON.stringify(result.prompt[injected + 1]), /older prompt/);
     assert.deepEqual(result.prompt.filter((_, index) => index !== injected), original);
     assert.deepEqual(prompt, original);
     assert.deepEqual(list.get.all.db(), before);
@@ -157,13 +160,17 @@ for (const enabled of [false, true]) {
       }) },
       inputProcessors: [createAgentsMdProcessor(() => context)],
     });
+    let prefix: any[] | undefined;
     for (const text of ["first", "second"]) {
       await agent.generate(text, { memory: { thread: "thread", resource: "workspace" } });
       const prompt = requests.at(-1) as any[];
       const matches = prompt.filter((message) => JSON.stringify(message).includes("Use pnpm."));
       assert.equal(matches.length, 1);
       const index = prompt.indexOf(matches[0]);
-      assert.match(JSON.stringify(prompt[index + 1]), new RegExp(text));
+      assert.equal(index, prompt.findIndex((message) => message.role !== "system"));
+      assert.match(JSON.stringify(prompt[index + 1]), /first/);
+      if (prefix) assert.deepEqual(prompt.slice(0, index + 1), prefix);
+      prefix = prompt.slice(0, index + 1);
     }
     assert.equal(requests.length, 3);
     const continuation = requests[1] as any[];

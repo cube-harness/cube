@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createCommandTools } from "../src/tools/command.tools.js";
+
+test("workspace_only controls explicit command cwd while the default cwd remains the workspace", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "cube-command-cwd-"));
+  const root = join(parent, "workspace");
+  await mkdir(root);
+  const restricted = createCommandTools(root), unrestricted = createCommandTools(root, false);
+  t.after(async () => {
+    await Promise.all([restricted.dispose(), unrestricted.dispose()]);
+    await rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+  const args = { command: 'node -e "process.stdout.write(process.cwd())"', reason: "Check cwd", cwd: ".." };
+  await assert.rejects(restricted.tools.execute_command.execute!(args as never, {} as never) as Promise<unknown>, /Permission denied/);
+  const result = await unrestricted.tools.execute_command.execute!(args as never, {} as never) as any;
+  assert.equal(result.cwd, parent);
+  assert.equal(result.output, parent);
+  const defaultCwd = await unrestricted.tools.execute_command.execute!({ ...args, cwd: undefined } as never, {} as never) as any;
+  assert.equal(defaultCwd.output, root);
+});
 
 test("commands require a reason, capture bounded output and retain exit status", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "cube-command-"));

@@ -319,6 +319,7 @@ const createOnboarding = () => {
     mount: () => { calls.push(["mount"]); },
     stopTerminal: () => { calls.push(["stop"]); },
     showNotice: (notice: unknown) => { calls.push(["notice", notice]); },
+    pickTrust: async () => true,
     pickGateway: async () => ({ draftId: "draft-1", model: { modelId: "google/new" } }),
     waitForRetry: async () => false,
   };
@@ -342,6 +343,7 @@ test("startup mounts onboarding before setup and only constructs chat after comm
     preparations++;
     return {
       readiness: { ready },
+      permission: { trusted: true },
       gateway: { commitInitial: async () => { order.push("commit"); ready = true; } },
       start: async () => { order.push("runtime"); return runtime; },
     };
@@ -361,6 +363,7 @@ test("startup bypasses onboarding when persisted readiness is complete", async (
   const onboarding = createOnboarding();
   const launched = await startPreparedCube(async () => ({
     readiness: { ready: true },
+    permission: { trusted: true },
     start: async () => runtime,
   }) as never, () => screen, { onExitRequested: () => undefined }, onboarding as never);
   assert.equal(onboarding.calls.some(([name]) => name === "mount"), false);
@@ -390,6 +393,7 @@ test("onboarding cancellation never starts a runtime or creates chat", async () 
   const onboarding = { ...createOnboarding(), pickGateway: async () => null };
   const result = await startPreparedCube(async () => ({
     readiness: { ready: false }, gateway: {},
+    permission: { trusted: true },
     start: async () => { throw new Error("runtime must not be started"); },
   }) as never, () => { throw new Error("chat must not be created"); },
   { onExitRequested: () => undefined }, onboarding as never);

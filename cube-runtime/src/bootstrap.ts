@@ -19,6 +19,7 @@ import {
   RunnableConfigSchema,
   createBootstrap,
   type HomeManager,
+  type WorkspacePermission,
 } from "@cube/workspace";
 import { CubeRuntime } from "./runtime.js";
 import { slashCommandSuggestions, type SlashCommandContext } from "./slash-commands.js";
@@ -55,6 +56,8 @@ export type CubeBootstrap = {
   preference: PreferenceState;
   suggestions: SlashCommandSuggestion[];
   readiness: GatewayReadiness;
+  permission: WorkspacePermission | undefined;
+  setTrust(trusted: boolean): Promise<void>;
   gateway: Pick<
     GatewayService,
     | "readiness"
@@ -94,6 +97,7 @@ export const prepareCubeRuntime = async (
   await createBootstrap(home).run();
   const workspace = CubeWorkspace(home, workspacePath);
   const workspacePaths = await workspace.getPaths();
+  const permission = await workspace.getPermission();
   const configStore = ConfigStore(home);
   const config = await configStore.read().catch((cause) => {
     throw new Error("Invalid config.yaml. Check its contents and file permissions, then retry.", {
@@ -129,12 +133,25 @@ export const prepareCubeRuntime = async (
       statusLine: [...config.status_line],
     },
     suggestions: slashCommandSuggestions,
-    readiness: await gateway.readiness(),
+    permission,
+    readiness: permission?.trusted
+      ? await gateway.readiness()
+      : { ready: false, reason: "Workspace is not trusted." },
+    setTrust: async (trusted) => {
+      await workspace.setTrust(trusted);
+      startup.permission = await workspace.getPermission();
+      startup.readiness = trusted
+        ? await gateway.readiness()
+        : { ready: false, reason: "Workspace is not trusted." };
+    },
     gateway,
     start: async () => {
+      const permission = await workspace.getPermission();
+      if (!permission?.trusted) throw new Error("Workspace is not trusted.");
       startup.readiness = await gateway.readiness();
       if (!startup.readiness.ready) throw new Error(startup.readiness.reason);
       const config = RunnableConfigSchema.parse(await configStore.read());
+      config.permissions = { ...config.permissions, ...permission.permissions };
       startup.preference = {
         theme: config.theme,
         appTitle: [...config.app_title],
@@ -154,7 +171,10 @@ export const prepareCubeRuntime = async (
           fetch: options.fetch,
         });
         gatewayDependencies.adapters = gateways.byGatewayId;
-        composition = await createCubeMastra(home, workspace, config, { gateways });
+        composition = await createCubeMastra(home, workspace, config, {
+          gateways,
+          deferInstructions: true,
+        });
         const session = await composition.controller.createSession({
           resourceId: workspacePaths.root,
         });
@@ -173,22 +193,6 @@ export const prepareCubeRuntime = async (
         const permissionNotices = await configureCubePermissions(session, config.permissions);
         await normalizeStartupSession(session);
 
-        const stopPruning = session.onBeforeAgentEnd(async (event) => {
-          const threadId = session.thread.getId();
-          if (
-            event.reason !== "complete" ||
-            !threadId ||
-            session.approval.isArmed() ||
-            session.suspensions.hasPending()
-          )
-            return;
-          try {
-            await composition!.context.prune(threadId);
-          } catch (error) {
-            composition!.logger.error("Context pruning failed", { threadId, error });
-            session.emit({ type: "info", message: toRuntimeNotice(error).message });
-          }
-        });
         const thread = new ThreadService(
           session,
           {
@@ -203,8 +207,30 @@ export const prepareCubeRuntime = async (
             fork: (id, title) => composition!.context.fork(id, title),
             invalidate: () => composition!.context.invalidate(),
             isBusy: () => memory.isBusy(),
+            drain: () => composition!.drain(),
+            onActivated: () => composition!.durableMemory.check(),
           },
         );
+        const stopThreadEnd = session.onBeforeAgentEnd(async (event) => {
+          try {
+            await thread.finishRun(event.reason);
+            const threadId = session.thread.getId();
+            if (
+              event.reason === "complete" &&
+              threadId &&
+              !session.approval.isArmed() &&
+              !session.suspensions.hasPending()
+            ) {
+              await composition!.context.prune(threadId);
+            }
+          } catch (error) {
+            composition!.logger.error("Thread finalization failed", {
+              threadId: session.thread.getId(),
+              error,
+            });
+            session.emit({ type: "info", message: toRuntimeNotice(error).message });
+          }
+        });
         composition.agent.onInstructionsDiscovered = async (snapshot) => {
           if (thread.current()) await thread.saveInstructions(snapshot);
         };
@@ -267,7 +293,7 @@ export const prepareCubeRuntime = async (
           return runWithCubeLogContext(threadId ? { threadId } : {}, callback);
         });
 
-        return new CubeRuntime({
+        const runtime = new CubeRuntime({
           session,
           tools: composition.tools,
           context: composition.context,
@@ -283,10 +309,13 @@ export const prepareCubeRuntime = async (
           readInstructionInfo: () => composition!.agent.instructionInfo,
           readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
           shutdownResources: async () => {
-            stopPruning();
+            stopThreadEnd();
             await composition!.shutdown();
           },
         });
+        composition.setMemoryNotice(message => runtime.notify(message));
+        composition.durableMemory.check();
+        return runtime;
       } catch (error) {
         await composition?.shutdown().catch(() => undefined);
         throw error;

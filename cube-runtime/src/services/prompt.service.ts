@@ -76,6 +76,13 @@ export class PromptService {
         onDispatch?.(this.session.run.isRunning());
         return this.session.followUp({ content: trimmed });
       });
+    } catch (error) {
+      try {
+        await this.thread.finishRun("error");
+      } catch (cleanupError) {
+        this.session.emit({ type: "info", message: toRuntimeNotice(cleanupError).message });
+      }
+      throw error;
     } finally {
       console.warn = warn;
     }

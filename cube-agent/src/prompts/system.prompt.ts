@@ -1,9 +1,11 @@
 import {
   AgentsStore,
+  ConfigStore,
   SoulStore,
   type HomeManager,
   type WorkspaceManager,
   type ContextFile,
+  type MemorySnapshot,
 } from "@cube/workspace";
 import path from "node:path";
 import { z } from "zod";
@@ -25,6 +27,7 @@ export type InstructionSnapshot = {
   soul: string;
   sources: ContextFile[];
   explored: string[];
+  durableMemory?: MemorySnapshot;
 };
 
 const snapshotSchema = z.object({
@@ -58,10 +61,12 @@ export const formatAgentsContext = (sources: readonly ContextFile[]): string => 
 export const loadInstructionSnapshot = async (
   home: HomeManager,
   workspace: WorkspaceManager,
+  readMemory?: () => Promise<MemorySnapshot>,
 ): Promise<InstructionSnapshot> => {
   const explored = new Set<string>();
-  const [soul, projectFiles, global] = await Promise.all([
-    SoulStore(home).read(),
+  const config = await ConfigStore(home).read();
+  const [soul, projectFiles, global, durableMemory] = await Promise.all([
+    SoulStore(home, config.soul.max_characters).read(),
     workspace.resolveContextFiles(explored),
     AgentsStore(home)
       .read()
@@ -69,6 +74,7 @@ export const loadInstructionSnapshot = async (
         if (error.code === "ENOENT") return "";
         throw error;
       }),
+    readMemory?.(),
   ]);
   return {
     soul,
@@ -77,6 +83,7 @@ export const loadInstructionSnapshot = async (
       ...(global.trim() ? [{ path: home.getAgentsPath(), scope: "global", content: global }] : []),
     ],
     explored: [...explored],
+    ...(readMemory ? { durableMemory: durableMemory ?? null } : {}),
   };
 };
 
@@ -94,6 +101,7 @@ export const refreshInstructionSnapshot = async (
     .map((scope) => path.join(scope, "AGENTS.md"));
   const sources = await workspace.readContextSources(paths);
   return {
+    ...base,
     soul: base.soul,
     sources: [...sources, ...base.sources],
     explored: [...new Set([...base.explored, ...previous.explored])],

@@ -97,7 +97,7 @@ export class CubeRuntime {
       if (result?.status === "compacted")
         void listener({
           type: "info",
-          message: `Context compacted (estimated ${result.before} → ${result.after} tokens).`,
+          message: "Context compacted.",
         });
     });
     if (!this.noticesDelivered) {
@@ -161,6 +161,11 @@ export class CubeRuntime {
 
   respondToSuspension(input: ToolSuspensionResponse): Promise<void> {
     return this.dependencies.session.respondToToolSuspension(input);
+  }
+
+  notify(message: string): void {
+    if (!this.noticesDelivered) (this.dependencies.notices ??= []).push(message);
+    else this.dependencies.session.emit({ type: "info", message });
   }
 
   async cancelSuspension(toolCallId: string): Promise<void> {

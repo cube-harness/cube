@@ -1,5 +1,13 @@
 import { z } from "zod";
 import { ApiKeyProviderSchema } from "./auth.schema.js";
+import {
+  DEFAULT_OLLAMA_URL,
+  DEFAULT_LMSTUDIO_URL,
+  DEFAULT_WORKSPACE_ONLY,
+  HOME_LIMITS,
+  DURABLE_MEMORY_DEFAULTS,
+  INHERIT_MODEL,
+} from "../constants.js";
 
 export const GATEWAY_IDS = [
   ...ApiKeyProviderSchema.options.map((provider) => `api_key/${provider}` as const),
@@ -24,65 +32,71 @@ const modelReference = z.string().min(1);
 
 const storage = z
   .object({
-    provider: z.literal("sqlite"),
-    mode: z.literal("local"),
+    provider: z.literal("sqlite").default("sqlite"),
+    mode: z.literal("local").default("local"),
   })
   .strict();
 
 const vector = z
   .object({
-    enabled: z.boolean(),
-    provider: z.literal("sqlite"),
-    mode: z.literal("local"),
+    enabled: z.boolean().default(false),
+    provider: z.literal("sqlite").default("sqlite"),
+    mode: z.literal("local").default("local"),
   })
   .strict();
 
 const embedder = z
   .object({
-    enabled: z.boolean(),
+    enabled: z.boolean().default(false),
     model: nullableString,
   })
   .strict();
 
 const generateTitle = z
   .object({
-    enabled: z.boolean(),
-    model: modelReference,
-    instructions: z.string().min(1),
+    enabled: z.boolean().default(false),
+    model: modelReference.default(INHERIT_MODEL),
+    instructions: z.string().min(1).default("Generate a concise title under 80 characters."),
   })
   .strict();
 
 const semanticRecall = z
   .object({
-    enabled: z.boolean(),
-    top_k: positiveInteger,
+    enabled: z.boolean().default(false),
+    top_k: positiveInteger.default(4),
     message_range: z
       .object({
-        before: nonNegativeInteger,
-        after: nonNegativeInteger,
+        before: nonNegativeInteger.default(1),
+        after: nonNegativeInteger.default(1),
       })
-      .strict(),
-    scope: z.enum(["resource", "thread"]),
-    threshold: z.number().min(0).max(1).nullable(),
+      .strict().default({ before: 1, after: 1 }),
+    scope: z.enum(["resource", "thread"]).default("resource"),
+    threshold: z.number().min(0).max(1).nullable().default(null),
   })
   .strict();
 
 const compaction = z
   .object({
-    manual_min_ratio: z.number().gt(0).lt(1),
-    keep_recent_ratio: z.number().gt(0).lt(1),
-    reserve_tokens: positiveInteger,
+    model: modelReference.default(INHERIT_MODEL),
+    manual_min_ratio: z.number().gt(0).lt(1).default(0.30),
+    keep_recent_ratio: z.number().gt(0).lt(1).default(0.20),
+    reserve_tokens: positiveInteger.default(16384),
   })
   .strict();
 
 const memory = z
   .object({
-    storage,
-    vector,
-    embedder,
-    generate_title: generateTitle,
-    semantic_recall: semanticRecall,
-    compaction,
+    storage: storage.default(storage.parse({})),
+    vector: vector.default(vector.parse({})),
+    embedder: embedder.default(embedder.parse({})),
+    generate_title: generateTitle.default(generateTitle.parse({})),
+    semantic_recall: semanticRecall.default(semanticRecall.parse({})),
+    compaction: compaction.default(compaction.parse({})),
+    durable: z.object({
+      enabled: z.boolean().default(DURABLE_MEMORY_DEFAULTS.enabled),
+      model: modelReference.default(DURABLE_MEMORY_DEFAULTS.model),
+      min_idle_hours: z.number().finite().min(0).max(720).default(DURABLE_MEMORY_DEFAULTS.min_idle_hours),
+    }).strict().default(DURABLE_MEMORY_DEFAULTS),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -127,43 +141,50 @@ export const ModelConfigSchema = z
   })
   .strict();
 
+export const PermissionsSchema = z
+  .object({
+    workspace_only: z.boolean().default(DEFAULT_WORKSPACE_ONLY),
+    require_approval_for: z.array(z.string().min(1)).default([
+      "execute_command", "edit_file", "write_file", "apply_patch",
+    ]),
+  })
+  .strict();
+
+const soul = z
+  .object({
+    max_characters: z.number().int().min(1).max(1_000_000).default(HOME_LIMITS.SOUL_MAX_CHARACTERS),
+  })
+  .strict();
+
 const configSettingsShape = {
   skills: z
     .object({ disabled: z.array(z.string().min(1)).default([]) })
     .strict()
     .default({ disabled: [] }),
-  model_config: ModelConfigSchema.nullish().transform((val) => val ?? {}),
+  model_config: ModelConfigSchema.default({}),
   theme: z.string().min(1).default("default"),
-  app_title: z.array(z.string().min(1)).min(1).default(["model", "workspace", "threadId"]),
+  app_title: z.array(z.string().min(1)).min(1).default(["workspace", "threadId"]),
   status_line: z
     .array(z.string().min(1))
     .min(1)
-    .default(["model", "workspace", "agentMd", "threadId"]),
-  telemetry: z.boolean(),
-  soul: z
-    .object({
-      max_characters: z.number().int().min(1).max(1_000_000),
-    })
-    .strict(),
-  memory,
-  permissions: z
-    .object({
-      require_approval_for: z.array(z.string().min(1)),
-    })
-    .strict(),
+    .default(["workspace", "model"]),
+  telemetry: z.boolean().default(false),
+  soul: soul.default(soul.parse({})),
+  memory: memory.default(memory.parse({})),
+  permissions: PermissionsSchema.default(PermissionsSchema.parse({})),
 };
 
 const gatewayOptions = z
   .object({
     "local/ollama": z
       .object({
-        base_url: z.string().url(),
+        base_url: z.string().url().default(DEFAULT_OLLAMA_URL),
       })
       .strict()
       .optional(),
     "local/lmstudio": z
       .object({
-        base_url: z.string().url(),
+        base_url: z.string().url().default(DEFAULT_LMSTUDIO_URL),
       })
       .strict()
       .optional(),

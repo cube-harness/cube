@@ -41,6 +41,29 @@ export class OnBoardScreen {
     this.tui.requestRender();
   }
 
+  async pickTrust(workspaceRoot: string): Promise<boolean | null> {
+    this.title.setText("Trust this workspace?");
+    try {
+      return await this.show<boolean | null>((finish) => {
+        const content = new Container();
+        content.addChild(new Text(workspaceRoot, 0, 0));
+        content.addChild(new Text("Cube can read project files and request file changes or commands.\nCommands run on your computer, not in an OS sandbox. Trust does not skip tool approval.", 0, 1));
+        const choices = new SelectList([
+          { value: "trust", label: "Trust", description: "Save this choice and continue" },
+          { value: "reject", label: "Don't Trust", description: "Save this choice and exit Cube" },
+        ], 2, createSelectListTheme());
+        choices.onSelect = (item) => finish(item.value === "trust");
+        choices.onCancel = () => finish(null);
+        content.addChild(choices);
+        content.addChild(new KeyHint([{ key: "↑/↓", label: "Navigate" }, { key: "Enter", label: "Select" }, { key: "Esc/ctrl+c", label: "Exit" }]));
+        return Object.assign(content, { handleInput: (data: string) => {
+          if (matchesKey(data, "ctrl+c")) finish(null);
+          else choices.handleInput(data);
+        } });
+      });
+    } finally { this.title.setText("Set up Cube\nChoose how to connect to a model."); }
+  }
+
   async pickUpdate(update: CubeUpdate): Promise<"update" | "continue" | null> {
     this.title.setText("Update Cube\nA new build is available.");
     try {

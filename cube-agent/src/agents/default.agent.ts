@@ -1,6 +1,8 @@
 import { createCodingAgent } from "@mastra/core/coding-agent";
 import type { IMastraLogger } from "@mastra/core/logger";
-import { type CubeConfig, type HomeManager, type WorkspaceManager } from "@cube/workspace";
+import { type CubeConfig, type HomeManager, type WorkspaceManager, type MemorySnapshot } from "@cube/workspace";
+import type { createMemoryRecall } from "../tools/memory-recall.tool.js";
+import { createMemoryProcessor } from "../processors/memory.processor.js";
 import { createMastraWorkspace } from "../workspace.js";
 import { webFetchTool, webSearchTool } from "@mastra/core/tools";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
@@ -105,7 +107,7 @@ export const reloadCubeAgentInstructions = async (
   workspace: WorkspaceManager,
   includeDiscovered = false,
 ): Promise<void> => {
-  const base = await loadInstructionSnapshot(home, workspace);
+  const base = await agent.loadInstructions();
   agent.installInstructions(
     includeDiscovered
       ? await refreshInstructionSnapshot(workspace, base, agent.readInstructions())
@@ -122,16 +124,20 @@ export const createCubeAgent = async (
   contextManager?: {
     context: CubeContext;
     readModel: (modelId: string) => Promise<{ limits: ContextLimits }>;
+    readMemory?: () => Promise<MemorySnapshot>;
+    recallTool?: ReturnType<typeof createMemoryRecall>["tool"];
   },
+  deferInstructions = false,
 ) => {
-  let snapshot = await loadInstructionSnapshot(home, workspace);
-  const startupSnapshot = structuredClone(snapshot);
+  let snapshot: InstructionSnapshot = deferInstructions
+    ? { soul: "", sources: [], explored: [] }
+    : await loadInstructionSnapshot(home, workspace, contextManager?.readMemory);
   let context = formatAgentsContext(snapshot.sources);
   const paths = await workspace.getPaths();
-  const cubeTools = tools ?? createCubeTools(paths.root);
+  const cubeTools = tools ?? createCubeTools(paths.root, config.permissions.workspace_only);
   let activeModel = config.model;
   const executionInstructions = [
-    `Workspace: ${paths.root}. File tools are restricted to this root; commands run on the host and are NOT an OS sandbox.`,
+    `Workspace: ${paths.root}. ${config.permissions.workspace_only ? "File paths and command cwd are restricted to this root." : "File paths and command cwd outside this root are allowed."} Commands run on the host and are NOT an OS sandbox.`,
     process.platform === "win32"
       ? `execute_command uses ${process.env.ComSpec || "cmd.exe"}. Use cmd syntax (dir, %VAR%, date /t, time /t).`
       : "execute_command uses /bin/sh. Use POSIX shell syntax.",
@@ -142,7 +148,7 @@ export const createCubeAgent = async (
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
   const skills = await createCubeSkills(home, workspace, config.skills.disabled);
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills, config.permissions.workspace_only);
 
   const agent = createCodingAgent({
     id: "cube-agent",
@@ -173,6 +179,7 @@ export const createCubeAgent = async (
         },
         (message) => contextManager?.context.protectedMessages.add(message),
       ),
+      ...(contextManager?.readMemory ? [createMemoryProcessor(() => snapshot.durableMemory, contextManager.context.protectedMessages)] : []),
       ...(contextManager
         ? [
             createContextProcessor(
@@ -188,6 +195,7 @@ export const createCubeAgent = async (
     basePath: paths.root,
     tools: () => ({
       ...cubeTools.forModel(activeModel),
+      ...(contextManager?.recallTool ? { memory_recall: contextManager.recallTool } : {}),
       fetch: webFetchTool,
     }),
     defaultOptions: ({ requestContext }) => {
@@ -229,6 +237,8 @@ export const createCubeAgent = async (
   if (logger) agent.__registerPrimitives({ logger });
   const result = Object.assign(agent, {
     cubeSkills: skills,
+    getActiveModelId: () => activeModel,
+    loadInstructions: () => loadInstructionSnapshot(home, workspace, contextManager?.readMemory),
     setToolModel: (modelId: string) => {
       activeModel = modelId;
       contextManager?.context.invalidate();
@@ -251,8 +261,8 @@ export const createCubeAgent = async (
       context = formatted;
       result.instructionInfo = instructionInfo(replacement);
     },
-    refreshInstructions: (saved: unknown) =>
-      refreshInstructionSnapshot(workspace, startupSnapshot, saved),
+    refreshInstructions: async (saved: unknown) =>
+      refreshInstructionSnapshot(workspace, await result.loadInstructions(), saved),
   });
   return result;
 };

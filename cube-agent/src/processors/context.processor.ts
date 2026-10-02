@@ -126,7 +126,9 @@ export function makeRequestFrame(input: {
       new Set(checkpoint.prunedToolCallIds),
     );
     if (!checkpoint.summary) return prompt;
-    let position = prompt.findIndex((message) => message.role !== "system");
+    let position = prompt.findIndex(
+      (message) => message.role !== "system" && !input.protectedMessages.has(message),
+    );
     if (position < 0) position = prompt.length;
     prompt.splice(position, 0, {
       role: "user",

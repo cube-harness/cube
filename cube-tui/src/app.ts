@@ -348,6 +348,12 @@ export class CubeApp {
         this.locallyCancelledQueueTransitions = 0;
         this.updateTerminalTitle();
         return;
+      case "thread_deleted":
+        if (!this.runtime.thread.current()) {
+          this.screen.setInfo({ threadId: "new thread", threadTitle: undefined });
+          this.updateTerminalTitle();
+        }
+        return;
       case "error":
         this.screen.workingIndicator.stop();
         this.screen.showNotice(toRuntimeNotice(event.error));
@@ -454,13 +460,24 @@ export const startPreparedCube = async (
   options: CubeAppOptions,
   onboarding: Pick<
     OnBoardScreen,
-    "mount" | "stopTerminal" | "showNotice" | "pickGateway" | "waitForRetry"
+    "mount" | "stopTerminal" | "showNotice" | "pickTrust" | "pickGateway" | "waitForRetry"
   >,
 ): Promise<PreparedCube | null> => {
   while (true) {
     let runtime: CubeRuntime | undefined;
     try {
       const bootstrap = await prepare();
+      if (!bootstrap.permission) {
+        const trusted = await onboarding.pickTrust(bootstrap.workspaceRoot);
+        if (trusted !== null) await bootstrap.setTrust(trusted);
+        if (!trusted) {
+          onboarding.stopTerminal();
+          return null;
+        }
+      } else if (!bootstrap.permission.trusted) {
+        onboarding.stopTerminal();
+        return null;
+      }
       if (!bootstrap.readiness.ready) {
         onboarding.mount();
         const selection = await onboarding.pickGateway(bootstrap.gateway);

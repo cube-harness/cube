@@ -66,7 +66,7 @@ test("enrichment is atomic, idempotent through tool steps, and counted by the co
 test("catalog filters same-name sources and aliases; request snapshots and native path/search stay filtered", async () => {
   const root = await mkdtemp(join(tmpdir(), "cube-skills-"));
   try {
-    const home = new Home({ cubeHome: join(root, "home") });
+    const home = new Home({ cubeHome: join(root, "home"), userHome: root });
     const project = join(root, "project");
     const globalDir = join(home.getSkillDir(), "review");
     const projectDir = join(project, ".agents", "skills", "review");
@@ -101,5 +101,38 @@ test("catalog filters same-name sources and aliases; request snapshots and nativ
     await processor.processInput!({ messageList: list, requestContext: new RequestContext(), state } as any);
     assert.throws(() => processor.processLLMRequest!({ state } as any), /disabled.*\/skills/);
     assert.equal(list.get.input.db()[0]!.content.parts.length, 1);
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("community global skills share native loading, activation and disable filtering", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cube-community-skills-"));
+  try {
+    const home = new Home({ cubeHome: join(root, "home"), userHome: root });
+    const project = join(root, "project");
+    for (const [dir, name] of [
+      [home.getSkillDir(), "cube-only"],
+      [join(root, ".agents", "skills"), "community-review"],
+      [join(project, ".agents", "skills"), "project-only"],
+    ]) {
+      await mkdir(join(dir!, name!), { recursive: true });
+      await writeFile(join(dir!, name!, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill\n---\nInstructions for ${name}`);
+    }
+    const skills = await createCubeSkills(home, new WorkspaceManager(home, project), []);
+    assert.deepEqual((await skills.list()).map(({ name, source }) => [name, source]), [
+      ["community-review", "global"], ["cube-only", "global"], ["project-only", "project"],
+    ]);
+    const context = new RequestContext();
+    const snapshot = await skills.snapshot(context);
+    const community = snapshot.catalog.find(({ name }) => name === "community-review")!;
+    assert.ok(snapshot.globalPaths.includes(community.path));
+    const list = new MessageList();
+    list.add({ role: "user", content: "Use $community-review" }, "input");
+    await createSkillsProcessor(skills).processInput!({ messageList: list, requestContext: context, state: {} } as any);
+    assert.match(JSON.stringify(list.get.input.db()), /Instructions for community-review/);
+    skills.setDisabled([community.path]);
+    const fresh = await skills.snapshot(new RequestContext());
+    assert.equal(fresh.catalog.find(({ name }) => name === "community-review")!.enabled, false);
+    assert.equal(await fresh.enabled.get(community.path), null);
+    assert.equal(await skills.snapshot(context), snapshot);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

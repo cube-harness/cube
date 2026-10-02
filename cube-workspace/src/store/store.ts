@@ -5,7 +5,7 @@ import { atomicWriteFile } from "./atomic-write.js";
 import { HomeManager } from "../home-manager.js";
 import { ConfigSchema, type CubeConfigDocument } from "../schemas/config.schema.js";
 import { ModelCatalogCache, ModelCatalogCacheSchema } from "../schemas/model-catalog.schema.js";
-import { WorkspaceRegistry, WorkspaceRegistrySchema } from "../schemas/workspace.schema.js";
+import { PermissionRegistry, PermissionRegistrySchema } from "../schemas/permission.schema.js";
 import { History, HistoryEntry, HistorySchema } from "../schemas/history.schema.js";
 
 type Format = "text" | "yaml" | "json";
@@ -51,15 +51,14 @@ export const ConfigStore = (home: HomeManager) =>
 export const ModelCatalogStore = (home: HomeManager) =>
   new Store<ModelCatalogCache>(home.getModelCatalogPath(), "json", ModelCatalogCacheSchema);
 
-export const WorkspaceRegistryStore = (home: HomeManager) =>
-  new Store<WorkspaceRegistry>(home.getWorkspacePath(), "json", WorkspaceRegistrySchema);
+export const PermissionStore = (home: HomeManager) =>
+  new Store<PermissionRegistry>(home.getPermissionPath(), "json", PermissionRegistrySchema);
 
 export const AgentsStore = (home: HomeManager) => new Store<string>(home.getAgentsPath(), "text");
 
-export const SoulStore = (home: HomeManager) => {
+export const SoulStore = (home: HomeManager, maxCharacters = home.getSoulMaxCharacters()) => {
   const soulPath = home.getSoulPath();
   const store = new Store<string>(home.getSoulPath(), "text");
-  const maxCharacters = home.getSoulMaxCharacters();
 
   const validateCharacters = (content: string): void => {
     if (content.length > maxCharacters) {

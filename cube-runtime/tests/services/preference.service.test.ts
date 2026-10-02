@@ -9,7 +9,7 @@ import { PreferenceService } from "../../src/services/preference.service.js";
 
 test("skill toggles persist serially and a failed write keeps catalog availability unchanged", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cube-skill-preference-"));
-  const home = new Home({ cubeHome: directory });
+  const home = new Home({ cubeHome: directory, userHome: directory });
   try {
     await createBootstrap(home).run();
     for (const name of ["review", "build"]) {

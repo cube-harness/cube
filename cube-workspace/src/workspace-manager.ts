@@ -1,6 +1,8 @@
 import path from "node:path";
 import { access, readFile, realpath, stat } from "node:fs/promises";
-import { WorkspaceRegistryStore } from "./store/store.js";
+import { PermissionStore } from "./store/store.js";
+import { withFileLock } from "./store/atomic-write.js";
+import type { WorkspacePermission } from "./schemas/permission.schema.js";
 import type { HomeManager } from "./home-manager.js";
 import { WORKSPACE_PATHS, WORKSPACE_FILES, GLOBAL_ROOT, CONTEXT_FILE } from "./constants.js";
 
@@ -159,27 +161,25 @@ export class WorkspaceManager {
     return this.tryRead(sourcePath);
   }
 
-  async isTrusted(): Promise<boolean> {
-    const root = await this.resolveRoot();
-    const registry = await WorkspaceRegistryStore(this.home).read();
-    return registry.workspaces.some((w) => w.path === root);
+  async getPermission(): Promise<WorkspacePermission | undefined> {
+    const root = await realpath(await this.resolveRoot());
+    const registry = await PermissionStore(this.home).read();
+    return registry.workspaces.find((entry) => pathKey(entry.path) === pathKey(root));
   }
 
-  async trust(): Promise<void> {
-    const root = await this.resolveRoot();
-    await WorkspaceRegistryStore(this.home).update((reg) => {
-      if (reg.workspaces.some((w) => w.path === root)) return reg;
-      return {
-        workspaces: [...reg.workspaces, { path: root, trustedAt: new Date().toISOString() }],
-      };
-    });
-  }
-
-  async untrust(): Promise<void> {
-    const root = await this.resolveRoot();
-    await WorkspaceRegistryStore(this.home).update((reg) => ({
-      workspaces: reg.workspaces.filter((w) => w.path !== root),
-    }));
+  async setTrust(trusted: boolean): Promise<void> {
+    const root = await realpath(await this.resolveRoot());
+    await withFileLock(this.home.getPermissionPath(), () =>
+      PermissionStore(this.home).update((registry) => {
+        const previous = registry.workspaces.find((entry) => pathKey(entry.path) === pathKey(root));
+        return {
+          workspaces: [
+            ...registry.workspaces.filter((entry) => pathKey(entry.path) !== pathKey(root)),
+            { path: root, trusted, permissions: previous?.permissions ?? {} },
+          ],
+        };
+      }),
+    );
   }
 }
 

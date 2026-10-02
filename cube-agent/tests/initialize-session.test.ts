@@ -7,6 +7,7 @@ import { isUserAuthoredMessage } from "@mastra/core/agent";
 import { MockLanguageModelV3 } from "ai/test";
 import { HomeManager, WorkspaceManager, createBootstrap, ConfigStore, RunnableConfigSchema } from "@cube/workspace";
 import { createCubeMastra, type CubeMastraComposition } from "../src/bootstrap.js";
+import { reloadCubeAgentInstructions } from "../src/agents/default.agent.js";
 import { configureCubePermissions } from "../src/permission.js";
 import { PromptService } from "../../cube-runtime/src/services/prompt.service.js";
 import { ThreadService } from "../../cube-runtime/src/services/thread.service.js";
@@ -22,7 +23,8 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     const home = new HomeManager({ cubeHome: join(root, "home") });
     await createBootstrap(home).run();
     const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
-    composition = await createCubeMastra(home, new WorkspaceManager(home, project), config);
+    const workspace = new WorkspaceManager(home, project);
+    composition = await createCubeMastra(home, workspace, config, { deferInstructions: true });
     const requests: string[] = [];
     composition.agent.model = new MockLanguageModelV3({ doStream: async ({ prompt }) => {
       requests.push(JSON.stringify(prompt));
@@ -54,7 +56,7 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     const thread = new ThreadService(session, {
       read: composition.agent.readInstructions,
       install: composition.agent.installInstructions,
-      reload: async () => undefined,
+      reload: (includeDiscovered) => reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
       refresh: composition.agent.refreshInstructions,
     }, () => "init-thread");
     const commands = {
@@ -102,6 +104,10 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     assert.equal(requests.length, 4);
     assert.equal((requests[3]!.match(/analyze this codebase/g) ?? []).length, 1);
     assert.equal(composition.agent.instructionInfo.agentsFiles, 0, "init does not reload the instruction snapshot");
+    assert.ok(requests.every((request) => !request.includes("<agents_instructions>")));
+    await thread.reload();
+    assert.equal(composition.agent.instructionInfo.agentsFiles, 1);
+    assert.equal(composition.agent.readInstructions().sources[0]?.content, "# AGENTS.md\nRun pytest.");
     session.thread.detachFromCurrent();
     await session.thread.clearAndReleaseLock();
   } finally {

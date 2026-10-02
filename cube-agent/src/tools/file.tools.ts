@@ -2,7 +2,7 @@ import { lstat, mkdir, open, realpath, link, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createTool, type ToolPayloadTransformContext } from "@mastra/core/tools";
-import { atomicWriteFile } from "@cube/workspace";
+import { atomicWriteFile, DEFAULT_WORKSPACE_ONLY } from "@cube/workspace";
 import { createTwoFilesPatch, diffLines } from "diff";
 import { z } from "zod";
 import { replace } from "./edit-text.js";
@@ -41,11 +41,15 @@ const inside = (root: string, path: string): boolean => {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 };
 
-export async function resolveWorkspacePath(root: string, input: string): Promise<string> {
+export async function resolveWorkspacePath(
+  root: string,
+  input: string,
+  workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY,
+): Promise<string> {
   if (input.includes("\0")) throw new Error("Paths must not contain NUL.");
   const path = resolve(root, input);
-  if (!inside(resolve(root), path) || path.slice(parse(path).root.length).includes(":")) {
-    throw new Error(`Path is outside the workspace or uses an unsupported stream: ${input}`);
+  if ((workspaceOnly && !inside(resolve(root), path)) || path.slice(parse(path).root.length).includes(":")) {
+    throw new Error(`Permission denied: access on ${input}`);
   }
   const actualRoot = await realpath(root);
   let parent = path;
@@ -53,8 +57,8 @@ export async function resolveWorkspacePath(root: string, input: string): Promise
   while (true) {
     try {
       const actual = await realpath(parent);
-      if (!inside(actualRoot, actual))
-        throw new Error(`Symlink target is outside the workspace: ${input}`);
+      if (workspaceOnly && !inside(actualRoot, actual))
+        throw new Error(`Permission denied: access on ${input}`);
       return resolve(actual, ...suffix);
     } catch (error) {
       if (!missing(error)) throw error;
@@ -138,8 +142,11 @@ const writeInput = z.object({
 });
 const patchInput = z.object({ patch: z.string().min(1).max(OPERATION_LIMIT) });
 
-export function createFileTools(root: string) {
-  const pending = new Map<string, Promise<Proposal>>();
+export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY) {
+  const pending = new Map<
+    string,
+    { inputKey: string; result: Promise<Proposal | FileMutationResult> }
+  >();
   const ready = new Set<string>();
   // ponytail: serialize workspace mutations; use per-file locks only if write contention matters.
   let writes: Promise<unknown> = Promise.resolve();
@@ -172,11 +179,11 @@ export function createFileTools(root: string) {
       content: (source?: Snapshot) => string | undefined,
       requestedDestination?: string,
     ) {
-      const path = await resolveWorkspacePath(root, requestedPath);
+      const path = await resolveWorkspacePath(root, requestedPath, workspaceOnly);
       const destination =
         requestedDestination === undefined
           ? undefined
-          : await resolveWorkspacePath(root, requestedDestination);
+          : await resolveWorkspacePath(root, requestedDestination, workspaceOnly);
       for (const target of [path, destination].filter((p): p is string => p !== undefined)) {
         const key = process.platform === "win32" ? target.toLowerCase() : target;
         if (targets.has(key)) throw new Error(`Conflicting patch target: ${displayPath(target)}`);
@@ -252,7 +259,7 @@ export function createFileTools(root: string) {
       });
     } else if (id === "write_file") {
       const input = writeInput.parse(args);
-      const path = await resolveWorkspacePath(root, input.path);
+      const path = await resolveWorkspacePath(root, input.path, workspaceOnly);
       const exists = await lstat(path).then(
         () => true,
         (e) => {
@@ -306,7 +313,7 @@ export function createFileTools(root: string) {
   }
 
   async function validate(file: PreparedFile) {
-    if ((await resolveWorkspacePath(root, file.requestedPath)) !== file.path)
+    if ((await resolveWorkspacePath(root, file.requestedPath, workspaceOnly)) !== file.path)
       throw new Error(`Path target changed: ${file.requestedPath}`);
     const current = await snapshot(file.path);
     if (JSON.stringify(current) !== JSON.stringify(file.before))
@@ -314,7 +321,7 @@ export function createFileTools(root: string) {
         `File changed since preparation: ${file.change.path}. Read it and propose a fresh edit.`,
       );
     if (file.destination) {
-      if ((await resolveWorkspacePath(root, file.requestedDestination!)) !== file.destination)
+      if ((await resolveWorkspacePath(root, file.requestedDestination!, workspaceOnly)) !== file.destination)
         throw new Error("Move destination changed.");
       if (
         await lstat(file.destination).then(
@@ -428,21 +435,31 @@ export function createFileTools(root: string) {
     }
   };
   function mutation<S extends z.ZodObject>(id: string, inputSchema: S, description: string) {
+    const inputKey = (input: unknown) => `${id}:${JSON.stringify(inputSchema.parse(input))}`;
+    const stage = (toolCallId: string, input: unknown) => {
+      let entry = pending.get(toolCallId);
+      if (!entry) {
+        entry = {
+          inputKey: inputKey(input),
+          result: prepare(id, input)
+            .then((proposal) => {
+              if (proposal.preview.changes.some((c) => c.truncated))
+                throw new Error(
+                  "Approval diff exceeds 64 KiB; split this change before requesting approval.",
+                );
+              return proposal;
+            })
+            .catch(failure),
+        };
+        pending.set(toolCallId, entry);
+      }
+      return entry.result;
+    };
     const approval = async ({ toolCallId, input }: ToolPayloadTransformContext) => {
       try {
-        let entry = pending.get(toolCallId);
-        if (!entry) {
-          entry = prepare(id, input).then((proposal) => {
-            if (proposal.preview.changes.some((c) => c.truncated))
-              throw new Error(
-                "Approval diff exceeds 64 KiB; split this change before requesting approval.",
-              );
-            if (pending.get(toolCallId) === entry) ready.add(toolCallId);
-            return proposal;
-          });
-          pending.set(toolCallId, entry);
-        }
-        return { ...inputSchema.parse(input), preview: (await entry).preview };
+        const result = await stage(toolCallId, input);
+        if ("files" in result && pending.has(toolCallId)) ready.add(toolCallId);
+        return { ...inputSchema.parse(input), preview: "files" in result ? result.preview : result };
       } catch (error) {
         return { ...inputSchema.parse(input), preview: failure(error) };
       }
@@ -460,11 +477,26 @@ export function createFileTools(root: string) {
       description,
       inputSchema,
       outputSchema: fileMutationResultSchema,
+      onInputAvailable: async ({ toolCallId, input }) => {
+        await stage(toolCallId, input);
+      },
+      requireApproval: async (input) => {
+        // Mastra's predicate has no call ID; valid calls still go through Session permissions.
+        const key = inputKey(input);
+        const entries = [...pending.values()].filter((entry) => entry.inputKey === key);
+        return (await Promise.all(entries.map((entry) => entry.result))).every(
+          (result) => "files" in result,
+        );
+      },
       transform: { display: transform, transcript: transform },
       execute: async (input, context) => {
         const callId = context.agent?.toolCallId;
         try {
-          const proposal = await ((callId && pending.get(callId)) || prepare(id, input));
+          const entry = callId ? pending.get(callId) : undefined;
+          const proposal = await (entry?.result ?? prepare(id, input));
+          if (!("files" in proposal)) return proposal;
+          if (entry && callId && !ready.has(callId))
+            throw new Error("File preparation changed before approval. Propose a fresh edit.");
           const result = writes.then(() => commit(proposal, context.abortSignal));
           writes = result.catch(() => undefined);
           return await result;

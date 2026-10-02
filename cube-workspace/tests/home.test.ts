@@ -43,7 +43,7 @@ test("Bootstrap seeds all template files into new home", async () => {
     assert.ok(existsSync(home.getSoulPath()));
     assert.ok(existsSync(home.getAuthPath()));
     assert.ok(existsSync(home.getMcpPath()));
-    assert.ok(existsSync(home.getWorkspacePath()));
+    assert.ok(existsSync(home.getPermissionPath()));
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -82,7 +82,7 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
       instructions: "Generate a concise title under 80 characters.",
     });
     assert.deepEqual(config.memory.compaction, {
-      manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
+      model: "inherit", manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
     });
     assert.equal("working_memory" in config.memory, false);
 

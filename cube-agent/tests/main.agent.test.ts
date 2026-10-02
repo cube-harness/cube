@@ -113,11 +113,14 @@ test("instructions omit missing AGENTS but surface unreadable instruction source
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const home = CubeHome({ cubeHome: path.join(root, "home") });
   const project = path.join(root, "project");
-  await mkdir(home.getRoot(), { recursive: true });
+  await createBootstrap(home).run();
   await mkdir(project);
   await writeFile(home.getSoulPath(), "Cube behavior.");
   const workspace = CubeWorkspace(home, project);
   assert.equal((await loadInstructionSnapshot(home, workspace)).soul, "Cube behavior.");
+  await ConfigStore(home).update((config) => ({ ...config, soul: { max_characters: 4 } }));
+  await assert.rejects(loadInstructionSnapshot(home, workspace), /exceeds max length \(14\/4 characters\)/);
+  await ConfigStore(home).update((config) => ({ ...config, soul: { max_characters: 20_000 } }));
   assert.equal(formatAgentsContext((await loadInstructionSnapshot(home, workspace)).sources), "");
   await mkdir(home.getAgentsPath());
   await assert.rejects(loadInstructionSnapshot(home, workspace));

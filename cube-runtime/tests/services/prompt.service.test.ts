@@ -133,6 +133,7 @@ test("/init dispatches without echo, records history once, and requires an idle 
 });
 
 test("PromptService converts provider failures into one safe system notice", async () => {
+  const finalized: string[] = [];
   const session = {
     followUp: async () => {
       throw new Error("HTTP 429 request rejected: Bearer leaked-secret");
@@ -145,6 +146,7 @@ test("PromptService converts provider failures into one safe system notice", asy
     {
       current: () => "thread-1",
       ensureForPrompt: async () => "thread-1",
+      finishRun: async (reason: string) => { finalized.push(reason); },
     } as unknown as ThreadService,
     { gateway: { readiness: async () => ({ ready: true }) } } as unknown as SlashCommandContext,
     (callback) => callback(),
@@ -158,6 +160,7 @@ test("PromptService converts provider failures into one safe system notice", asy
       message: "HTTP 429 request rejected: Bearer [Redacted]",
     },
   });
+  assert.deepEqual(finalized, ["error"]);
 });
 
 test("PromptService keeps third-party warnings out of the terminal console", async () => {

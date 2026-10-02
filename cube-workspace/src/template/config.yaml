@@ -63,6 +63,8 @@ memory:
     threshold: null
 
   compaction:
+    # inherit uses the active chat model; a model ID overrides only summarization.
+    model: inherit
     # /compact requires this fraction of the model context plus a safe cut.
     manual_min_ratio: 0.30
     # Fraction of conversation capacity retained after reserving instructions
@@ -71,7 +73,16 @@ memory:
     # Generation/counting reserve, not a fixed summary length.
     reserve_tokens: 16384
 
+  durable:
+    # Background extraction/consolidation consumes normal provider usage.
+    enabled: true
+    model: inherit
+    min_idle_hours: 6
+
 permissions:
+  # Per-workspace overrides live in <CubeHome>/permission.json.
+  # Restricts file paths and command cwd, not paths inside shell commands.
+  workspace_only: true
   require_approval_for:
     - execute_command
     - edit_file

@@ -13,7 +13,7 @@ import {
   type GatewayId,
   type LocalGatewayId,
 } from "./schemas/config.schema.js";
-import { API_KEY_PROVIDERS } from "./constants.js";
+import { API_KEY_PROVIDERS, DEFAULT_OLLAMA_URL, DEFAULT_LMSTUDIO_URL } from "./constants.js";
 import {
   CatalogModelSchema,
   ModelCatalogSchema,
@@ -118,7 +118,10 @@ export class ModelManager {
       ];
       if ("project_id" in credential) identity.push(credential.project_id);
     } else {
-      const endpoint = config.gateway_options[gatewayId as LocalGatewayId]?.base_url;
+      const endpoint = config.gateway_options[gatewayId as LocalGatewayId]?.base_url
+        ?? (config.gateway === gatewayId
+          ? provider === "ollama" ? DEFAULT_OLLAMA_URL : DEFAULT_LMSTUDIO_URL
+          : undefined);
       if (!endpoint) return undefined;
       let normalized = endpoint.trim().replace(/\/+$/, "");
       if (provider === "ollama") normalized = normalized.replace(/\/api$/, "");

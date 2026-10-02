@@ -27,7 +27,7 @@ test("projection keeps repeated users, native tools, protected instructions and 
   const prompt = await list.get.all.aiV5.llmPrompt();
   prompt.unshift({ role: "system", content: "SOUL" });
   const project = { role: "user" as const, content: [{ type: "text" as const, text: "<project_context>AGENTS</project_context>" }] };
-  prompt.splice(prompt.length - 1, 0, project);
+  prompt.splice(1, 0, project);
   const frame = makeRequestFrame({
     threadId: "thread", messages, prompt, protectedMessages: new WeakSet([project]), toolsTokens: 10,
     requestContext: new RequestContext(), limits: { context: 256_000 }, isCurrent: () => true,
@@ -39,8 +39,11 @@ test("projection keeps repeated users, native tools, protected instructions and 
   const compacted = frame.project({ summary: { text: "completed", firstRetainedMessageId: "u2" }, prunedToolCallIds: [] });
   assert.equal(compacted.length, 4);
   assert.equal(compacted[0]?.role, "system");
-  assert.match(JSON.stringify(compacted[1]), /<summary>/);
-  assert.equal(compacted[2], project);
+  assert.equal(compacted[1], project);
+  assert.match(JSON.stringify(compacted[2]), /<summary>/);
+  const recompacted = frame.project({ summary: { text: "updated summary", firstRetainedMessageId: "u2" }, prunedToolCallIds: [] });
+  assert.deepEqual(compacted.slice(0, 2), prompt.slice(0, 2));
+  assert.deepEqual(recompacted.slice(0, 2), prompt.slice(0, 2));
   assert.deepEqual(messages, original);
   assert.equal(frame.count(compacted)! > 10, true);
 });
@@ -128,6 +131,12 @@ test("native Session compacts repeated tool continuations and can compact manual
     assert.match(JSON.stringify(requests[1]), /<summary>/);
     assert.match(JSON.stringify(requests[1]), /current task/);
     assert.match(JSON.stringify(requests[1]), /Use pnpm/);
+    const firstRequest = requests[0] as any[];
+    const projectIndex = firstRequest.findIndex((message) => JSON.stringify(message).includes("<project_context>Use pnpm"));
+    assert.equal(projectIndex, firstRequest.findIndex((message) => message.role !== "system"));
+    for (const request of requests as any[][]) {
+      assert.deepEqual(request.slice(0, projectIndex + 1), firstRequest.slice(0, projectIndex + 1));
+    }
     assert.match(JSON.stringify(await session.thread.listMessages({ threadId: "native-context" })), /a{120000}/);
     const manual = await context.compactManual({ threadId: "native-context", signal: new AbortController().signal });
     assert.equal(manual.status, "compacted");

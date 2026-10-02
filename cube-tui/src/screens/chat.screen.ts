@@ -401,6 +401,7 @@ export class ChatScreen {
         new ApprovalPicker({
           toolName: input.toolName,
           args: input.args,
+          directory: this.infoBox.getWorkspace(),
           onDecision: finish,
         }),
     );

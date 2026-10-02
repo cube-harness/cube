@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { mock } from "node:test";
@@ -7,6 +7,8 @@ import {
   AuthStore,
   Bootstrap,
   ConfigStore,
+  CubeWorkspace,
+  PermissionStore,
   HomeManager,
   ModelCatalogStore,
   ModelManager,
@@ -48,6 +50,7 @@ const withHome = async (run: (home: HomeManager) => Promise<void>) => {
     originalPreview.apply(canonical, args));
   try {
     await createBootstrap(home).run();
+    await CubeWorkspace(home).setTrust(true);
     await ModelCatalogStore(home).write({ api_key: {}, oauth: {}, local: {} });
     await run(home);
   } finally {
@@ -107,6 +110,19 @@ test("bootstrap requires onboarding when gateway configuration is incomplete", a
   });
 });
 
+test("a selected local gateway uses its default endpoint without rewriting minimal YAML", async () => {
+  await withHome(async (home) => {
+    await new Store(home.getConfigPath(), "yaml").write({ gateway: "local/ollama", model: "ollama/test-local" });
+    const before = await readFile(home.getConfigPath(), "utf8");
+    const bootstrap = await prepareCubeRuntime({ home, fetch: async (url) => {
+      assert.equal(String(url), "http://127.0.0.1:11434/api/tags");
+      return Response.json({ models: [{ name: "test-local" }] });
+    } });
+    assert.equal(bootstrap.readiness.ready, true);
+    assert.equal(await readFile(home.getConfigPath(), "utf8"), before);
+  });
+});
+
 test("bootstrap detects missing keys, unavailable models, and unreachable local gateways", async () => {
   const cases = [
     { gateway: "api_key/google" as const, model: modelId },
@@ -152,7 +168,9 @@ test("startup reuses prepared resources and reads the committed model", { timeou
   await withHome(async home => {
     context.mock.method(home, "getMemoryDbPath", () => ":memory:");
     const run = context.mock.method(Bootstrap.prototype, "run");
-    const prepared = await prepareCubeRuntime({ home, workspacePath: home.getRoot(),
+    const workspacePath = path.join(home.getRoot(), "project");
+    await mkdir(workspacePath);
+    const prepared = await prepareCubeRuntime({ home, workspacePath,
       fetch: async (url, init) => String(url).endsWith("/api/tags")
         ? Response.json({ models: [{ name: "test-local" }] })
         : String(url).startsWith("https://cli-chat-proxy.grok.com/")
@@ -161,6 +179,9 @@ test("startup reuses prepared resources and reads the committed model", { timeou
             ? Response.json({ models: [{ slug: "account-only-integration-model" }] })
             : noProviderFetch(url, init),
     });
+    await prepared.setTrust(true);
+    await PermissionStore(home).update((registry) => ({ workspaces: registry.workspaces.map((entry) =>
+      entry.path === workspacePath ? { ...entry, permissions: { workspace_only: false, require_approval_for: [] } } : entry) }));
     assert.equal(prepared.readiness.ready, false);
     const draft = await prepared.gateway.createApiKeyDraft("api_key/google", "test-key");
     await prepared.gateway.commitInitial({ draftId: draft.draftId, model: { modelId } });
@@ -186,6 +207,15 @@ test("startup reuses prepared resources and reads the committed model", { timeou
       const grok = await runtime.gateway.createStoredDraft("oauth/xai");
       // Use the real Session gate to exercise the runtime's live-switch boundary.
       const session = (runtime as unknown as { dependencies: { session: import("@cube/agent").Session } }).dependencies.session;
+      const tools = (runtime as unknown as { dependencies: { tools: import("@cube/agent").CubeTools } }).dependencies.tools;
+      const externalPath = path.join(home.getRoot(), "external.txt");
+      await writeFile(externalPath, "external fixture");
+      assert.equal(String(await session.getWorkspace()!.filesystem!.readFile(externalPath)), "external fixture");
+      const write = tools.forModel(modelId).write_file!;
+      const output = await write.execute!({ path: externalPath, content: "updated", overwrite: true }, {} as never) as any;
+      assert.equal(output.status, "applied", "workspace override must reach custom tools");
+      assert.equal(session.permissions.getRules().tools?.write_file, "allow");
+      assert.equal((await ConfigStore(home).read()).permissions.workspace_only, true, "workspace overrides must not rewrite global config");
       const approval = session.approval.arm({ toolName: "execute_command", toolCallId: "gate" });
       await assert.rejects(runtime.gateway.set({ draftId: grok.draftId, model: { modelId: "xai/grok-build" } }), (error: unknown) => {
         assert.ok(error instanceof Error);
@@ -234,4 +264,29 @@ test("startup reuses prepared resources and reads the committed model", { timeou
       assert.equal(runtime.thread.current(), preservedThread);
     } finally { await runtime.shutdown(); }
   });
+});
+
+test("workspace trust is persisted and checked before runtime startup or provider discovery", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cube-trust-"));
+  const home = new HomeManager({ cubeHome: directory });
+  const prepare = () => prepareCubeRuntime({ home, workspacePath: directory, fetch: noProviderFetch });
+  try {
+    const first = await prepare();
+    assert.equal(first.permission, undefined);
+    await assert.rejects(first.start(), /not trusted/);
+    await first.setTrust(false);
+    const rejected = await prepare();
+    assert.equal(rejected.permission?.trusted, false);
+    await assert.rejects(rejected.start(), /not trusted/);
+    await rejected.setTrust(true);
+    const accepted = await prepare();
+    assert.equal(accepted.permission?.trusted, true);
+    assert.deepEqual(accepted.permission?.permissions, {}, "trust must not freeze global permissions");
+    const registry = await PermissionStore(home).read();
+    assert.equal(registry.workspaces.length, 1);
+    assert.equal(registry.workspaces[0]?.path, directory);
+    // Revoking trust between prepare and start must also block the engine.
+    await CubeWorkspace(home, directory).setTrust(false);
+    await assert.rejects(accepted.start(), /not trusted/);
+  } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

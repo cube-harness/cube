@@ -4,6 +4,13 @@ export const CONTEXT_FILE = "AGENTS.md";
 export const SKILL_DIR = "skills";
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
+export const INHERIT_MODEL = "inherit";
+export const DEFAULT_WORKSPACE_ONLY = true;
+export const DURABLE_MEMORY_DEFAULTS = {
+  enabled: true,
+  model: INHERIT_MODEL,
+  min_idle_hours: 6,
+} as const;
 
 export const HOME_PATHS = {
   ROOT: GLOBAL_ROOT,
@@ -20,7 +27,7 @@ export const HOME_FILES = {
   MCP: "mcp.json",
   MODEL_CATALOG: "model-catalog.json",
   SOUL: "SOUL.md",
-  WORKSPACE: "workspace.json",
+  PERMISSION: "permission.json",
   AGENTS: "AGENTS.md",
 } as const;
 
