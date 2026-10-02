@@ -23,7 +23,7 @@ export const createAgentsMdProcessor = (
           const input = call.args as Record<string, unknown> | undefined;
           if (!input) continue;
           if (
-            ["read_file", "list_files", "grep", "edit_file", "write_file"].includes(call.toolName)
+            ["read_file", "list_files", "edit_file", "write_file"].includes(call.toolName)
           ) {
             const value = typeof input.path === "string" ? input.path : ".";
             paths.push(isGlobPattern(value) ? extractGlobBase(value) : value);

@@ -109,7 +109,7 @@ test("discovery extracts file paths and patch moves once, never shell arguments"
   const processor = createAgentsMdProcessor(() => context, async (targets) => { paths.push(targets); });
   const list = new MessageList();
   const calls = [
-    { toolName: "grep", args: { path: "src/**/*.ts" } },
+    { toolName: "list_files", args: { path: "src" } },
     { toolName: "apply_patch", args: { patch: "*** Begin Patch\n*** Update File: old/a.ts\n*** Move to: next/a.ts\n@@\n-old\n+new\n*** End Patch" } },
     { toolName: "execute_command", args: { path: "secret", command: "cat secret/AGENTS.md" } },
   ];

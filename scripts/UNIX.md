@@ -16,7 +16,7 @@ For macOS replace `linux-x64` with `darwin-arm64` or `darwin-x64`.
 Output: `build/<target>/cube-<target>.tar.gz`, `.sha256`, `latest.json`,
 `latest-<target>.txt`, and `install.sh`. Node, production dependencies, templates
 and licenses are included. The Windows command and ZIP layout remain unchanged.
-The shared build smoke checks templates, native read/list/grep without rg, custom
+The shared build smoke checks templates, native read/list without external binaries, custom
 commands and SQLite outside the checkout. The installer smoke uses the archive,
 an isolated installation directory and a launcher probe; it does not test TUI rendering.
 

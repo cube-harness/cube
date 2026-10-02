@@ -28,12 +28,11 @@ try {
   const workspace = await agent.getWorkspace();
   assert.equal(workspace.filesystem.basePath, project);
   const tools = await createWorkspaceTools(workspace);
-  assert.deepEqual(Object.keys(tools).sort(), ["grep", "list_files", "read_file"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["list_files", "read_file"]);
   await writeFile(path.join(project, "probe.txt"), "CUBE_PACKAGE_OK\n");
   const previousPath = process.env.PATH;
   try {
     process.env.PATH = "";
-    assert.match(await tools.grep.execute({ pattern: "CUBE_PACKAGE_OK" }), /probe.txt:1:1/);
     assert.match(await tools.read_file.execute({ path: "probe.txt" }), /CUBE_PACKAGE_OK/);
     assert.match(await tools.list_files.execute({ path: "." }), /probe.txt/);
   } finally { process.env.PATH = previousPath; }

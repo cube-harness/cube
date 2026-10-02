@@ -143,7 +143,7 @@ export const createCubeAgent = async (
       : "execute_command uses /bin/sh. Use POSIX shell syntax.",
     "Commands have no TTY. Avoid interactive prompts, editors and pagers; use non-interactive options only when appropriate for the requested action.",
     "Supply a brief reason for each command. cwd defaults to the workspace root. Use background: true for long-running work, then get_process or kill_process with its returned process_id.",
-    "Use the exposed file mutation tools for edits. File mutations accept UTF-8 text; binary/media editing is unsupported. Read, list and grep paths are relative to the workspace root.",
+    "Use the exposed file mutation tools for edits. File mutations accept UTF-8 text; binary/media editing is unsupported. Read and list paths are relative to the workspace root. Use execute_command for content searches with an available host search command.",
   ].join("\n");
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
