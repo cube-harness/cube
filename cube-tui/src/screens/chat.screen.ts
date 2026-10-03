@@ -42,6 +42,7 @@ import { TitlePickerComponent } from "../components/title-picker.js";
 import { renderUsageBoxToString } from "../components/usage-box.js";
 import { WorkingIndicator } from "../components/working-indicator.js";
 import { PetPanel } from "../components/pet.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export type ChatScreenOptions = {
   tui: TUI;
@@ -141,6 +142,15 @@ export class ChatScreen {
       this.dock = new VStack([this.inputPanel, { component: this.footer, shrink: 0 }]);
       void this.inputPanel.start();
       this.transcript = new ScrollView(this.messageList, { follow: "end", primary: true });
+      const backToBottom: Component = {
+        invalidate: () => {},
+        render: (width) => {
+          const text = truncateToWidth(" ⭣ Back to bottom · Esc ", width, "");
+          const space = Math.max(0, width - visibleWidth(text));
+          const left = Math.floor(space / 2);
+          return [" ".repeat(left) + appTheme.ui.primary.bgHex(appTheme.surface.background)(text)];
+        },
+      };
       const welcome: Component = {
         invalidate: () => { this.banner.invalidate(); this.infoBox.invalidate(); },
         render: (width) => [this.banner, this.infoBox].flatMap((component) => {
@@ -156,6 +166,7 @@ export class ChatScreen {
           basis: 0, grow: 1, visible: empty },
         { component: this.transcript, basis: 0, grow: 1, visible: () => !empty() },
         { component: this.workingIndicator, shrink: 0 },
+        { component: backToBottom, shrink: 0, visible: () => this.canReturnToBottom() },
         { component: this.dock, minSize: 2 },
       ]));
     }
@@ -186,6 +197,18 @@ export class ChatScreen {
 
   requestRender(): void {
     this.options.tui.requestRender();
+  }
+
+  private canReturnToBottom(): boolean {
+    return this.promptEditor.focused && !this.promptEditor.isShowingAutocomplete()
+      && this.transcript !== undefined && !this.transcript.isFollowingEnd;
+  }
+
+  scrollToBottom(): boolean {
+    if (!this.canReturnToBottom()) return false;
+    this.transcript!.scrollToEnd();
+    this.requestRender();
+    return true;
   }
 
   startTerminal(): void {

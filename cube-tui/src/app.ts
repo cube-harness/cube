@@ -9,6 +9,7 @@ import {
   type RuntimeEvent,
 } from "@cube/runtime";
 import { copyToClipboard } from "./clipboard.js";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { matchesBinding } from "./keybindings.js";
 import type { ChatScreen } from "./screens/chat.screen.js";
 import type { OnBoardScreen } from "./screens/on-board.screen.js";
@@ -77,6 +78,12 @@ export class CubeApp {
         return { consume: true };
       }
       if (matchesBinding(data, "cube.turn.interrupt")) {
+        if (matchesKey(data, "escape")) {
+          if (!this.screen.promptEditor.focused || this.screen.promptEditor.isShowingAutocomplete()) {
+            return undefined;
+          }
+          if (this.screen.scrollToBottom()) return { consume: true };
+        }
         return this.handleInterrupt() ? { consume: true } : undefined;
       }
       return undefined;
