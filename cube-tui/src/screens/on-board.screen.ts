@@ -116,10 +116,11 @@ export class OnBoardScreen {
       return await this.show<"update" | "continue" | null>((finish) => {
         const content = new Container();
         content.addChild(new Text(
-          `${appTheme.status.warning(update.currentVersion)} ${appTheme.ui.muted("→")} ${appTheme.status.success(update.version)}`,
+          `${appTheme.ui.muted("Version:")} ${appTheme.status.warning(update.currentVersion)} ${appTheme.ui.muted("⭢")} ${appTheme.status.success(update.version)}`,
           0,
-          1,
+          0,
         ));
+        content.addChild(new Spacer(1));
         const choices = new SelectList(
           [
             {
@@ -127,7 +128,7 @@ export class OnBoardScreen {
               label: "Update",
               description: "Install the latest version and restart Cube",
             },
-            { value: "continue", label: "Continue", description: "Use the current version" },
+            { value: "continue", label: "Skip", description: "Use the current version" },
             { value: "cancel", label: "Cancel", description: "Exit Cube" },
           ],
           3,

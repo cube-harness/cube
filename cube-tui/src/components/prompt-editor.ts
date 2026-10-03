@@ -314,6 +314,8 @@ export class PromptEditor implements Component, Focusable {
 
   getCardStartRow(): number { return this.cardStartRow; }
 
+  isShowingAutocomplete(): boolean { return this.editor.isShowingAutocomplete(); }
+
   handleInput(data: string): void {
     this.onUserTyping();
     if (matchesBinding(data, "cube.history.previous") && !this.editor.isShowingAutocomplete()) {
