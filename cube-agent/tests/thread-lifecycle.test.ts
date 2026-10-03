@@ -10,7 +10,7 @@ import { createCubeMastra, type CubeMastraComposition } from "../src/bootstrap.j
 import { reloadCubeAgentInstructions } from "../src/agents/default.agent.js";
 import { ThreadService } from "../../cube-runtime/src/services/thread.service.js";
 
-test("runtime snapshots load at real thread creation and remain frozen until reload", async () => {
+test("startup and new load snapshots before prompts and keep them frozen until reload", async () => {
   const root = await mkdtemp(join(tmpdir(), "cube-thread-context-"));
   let composition: CubeMastraComposition | undefined;
   try {
@@ -21,8 +21,9 @@ test("runtime snapshots load at real thread creation and remain frozen until rel
     await writeFile(join(project, "AGENTS.md"), "Before app startup");
     const workspace = new WorkspaceManager(home, project);
     const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
-    composition = await createCubeMastra(home, workspace, config, { deferInstructions: true });
-    assert.equal(composition.agent.readInstructions().sources.length, 0, "startup must not load project instructions");
+    composition = await createCubeMastra(home, workspace, config);
+    assert.match(JSON.stringify(composition.agent.readInstructions()), /Before app startup/);
+    assert.ok(composition.agent.readInstructions().soul.length > 0);
     const session = await composition.controller.createSession({ resourceId: project });
     const initialId = session.thread.getId();
     if (initialId) await session.thread.delete({ threadId: initialId });
@@ -39,12 +40,20 @@ test("runtime snapshots load at real thread creation and remain frozen until rel
     });
     await writeFile(join(project, "AGENTS.md"), "Present at real creation");
     await thread.ensureForPrompt("first");
-    assert.match(JSON.stringify(composition.agent.readInstructions()), /Present at real creation/);
+    assert.match(JSON.stringify(composition.agent.readInstructions()), /Before app startup/);
+    assert.doesNotMatch(JSON.stringify(composition.agent.readInstructions()), /Present at real creation/);
     await writeFile(join(project, "AGENTS.md"), "Changed while chatting");
     await thread.ensureForPrompt("second");
     assert.doesNotMatch(JSON.stringify(composition.agent.readInstructions()), /Changed while chatting/);
-    await thread.reload();
+    await thread.create();
+    assert.equal(thread.current(), null);
     assert.match(JSON.stringify(composition.agent.readInstructions()), /Changed while chatting/);
+    await writeFile(join(project, "AGENTS.md"), "Changed after new before prompt");
+    await thread.ensureForPrompt("new first prompt");
+    assert.match(JSON.stringify(composition.agent.readInstructions()), /Changed while chatting/);
+    assert.doesNotMatch(JSON.stringify(composition.agent.readInstructions()), /Changed after new before prompt/);
+    await thread.reload();
+    assert.match(JSON.stringify(composition.agent.readInstructions()), /Changed after new before prompt/);
     await writeFile(join(project, "AGENTS.md"), "Present at fork");
     await thread.fork();
     assert.match(JSON.stringify(composition.agent.readInstructions()), /Present at fork/);
@@ -142,7 +151,8 @@ test("native chat receives a frozen memory prefix only in requests and reload up
         status: "user_stated", updated_at: new Date().toISOString(), revision: text, incorporated: {}, sections: [], body: text };
       await store.publish({ revision: (await store.read()).revision, replacements: { "memory_summary.md": [index] } }, new AbortController().signal);
     };
-    composition = await createCubeMastra(home, workspace, config, { deferInstructions: true });
+    await writeIndex("FIRST_INDEX");
+    composition = await createCubeMastra(home, workspace, config);
     const session = await composition.controller.createSession({ resourceId: project });
     const initial = session.thread.getId();
     if (initial) await session.thread.delete({ threadId: initial });
@@ -161,7 +171,6 @@ test("native chat receives a frozen memory prefix only in requests and reload up
     const thread = new ThreadService(session, { read: composition.agent.readInstructions,
       install: composition.agent.installInstructions, refresh: composition.agent.refreshInstructions,
       reload: include => reloadCubeAgentInstructions(composition!.agent, home, workspace, include) });
-    await writeIndex("FIRST_INDEX");
     await thread.ensureForPrompt("first");
     await session.followUp({ content: "first" });
     await writeIndex("SECOND_INDEX");

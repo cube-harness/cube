@@ -5,6 +5,7 @@ import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
 import type { PromptService } from "./services/prompt.service.js";
+import type { PermissionService } from "./services/permission.service.js";
 import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -16,6 +17,7 @@ export type SlashCommandContext = {
   thread: ThreadService;
   model: ModelService;
   preference: PreferenceService;
+  permission: PermissionService;
   memory: MemoryService;
   gateway: GatewayService;
   prompt: Pick<PromptService, "initialize">;
@@ -59,6 +61,13 @@ const parseModelSelection = (argument: string) => {
 };
 
 const definitions: SlashCommandDefinition[] = [
+  {
+    name: "/permissions",
+    description: "configure workspace boundaries and tool permissions",
+    execute: async (_argument, context) => ({
+      kind: "permissions", permissions: await context.permission.get(),
+    }),
+  },
   {
     name: "/init",
     description: "analyze the project and create or update AGENTS.md",
@@ -245,14 +254,6 @@ const definitions: SlashCommandDefinition[] = [
         model: await context.model.set({ modelId: current.modelId, reasoningEffort: effort }),
       };
     },
-  },
-  {
-    name: "/help",
-    description: "show available commands",
-    execute: async () => ({
-      kind: "command-catalog",
-      commands: slashCommandSuggestions,
-    }),
   },
   {
     name: "/rename",

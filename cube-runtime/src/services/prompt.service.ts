@@ -31,6 +31,8 @@ export class PromptService {
     if (!trimmed) return { kind: "ignored" };
 
     try {
+      if (this.commands.permission?.isApplying())
+        throw new Error("Wait for permissions to finish applying.");
       const command = parseSlashCommand(trimmed);
       if (command) {
         if (command.name !== "/init")
@@ -73,6 +75,8 @@ export class PromptService {
     console.warn = () => undefined;
     try {
       await this.runWithThreadLogContext(() => {
+        if (this.commands.permission?.isApplying())
+          throw new Error("Wait for permissions to finish applying.");
         onDispatch?.(this.session.run.isRunning());
         return this.session.followUp({ content: trimmed });
       });

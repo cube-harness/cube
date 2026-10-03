@@ -2,7 +2,7 @@ import path from "node:path";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { PermissionStore } from "./store/store.js";
 import { withFileLock } from "./store/atomic-write.js";
-import type { WorkspacePermission } from "./schemas/permission.schema.js";
+import { PermissionsSchema, type WorkspacePermission } from "./schemas/permission.schema.js";
 import type { HomeManager } from "./home-manager.js";
 import { WORKSPACE_PATHS, WORKSPACE_FILES, GLOBAL_ROOT, CONTEXT_FILE } from "./constants.js";
 
@@ -168,6 +168,7 @@ export class WorkspaceManager {
   }
 
   async setTrust(trusted: boolean): Promise<void> {
+    if (!trusted) return;
     const root = await realpath(await this.resolveRoot());
     await withFileLock(this.home.getPermissionPath(), () =>
       PermissionStore(this.home).update((registry) => {
@@ -175,9 +176,22 @@ export class WorkspaceManager {
         return {
           workspaces: [
             ...registry.workspaces.filter((entry) => pathKey(entry.path) !== pathKey(root)),
-            { path: root, trusted, permissions: previous?.permissions ?? {} },
+            { path: root, trusted, permissions: PermissionsSchema.parse(previous?.permissions ?? {}) },
           ],
         };
+      }),
+    );
+  }
+
+  async setPermissions(permissions: unknown): Promise<void> {
+    const next = PermissionsSchema.parse(permissions);
+    const root = await realpath(await this.resolveRoot());
+    await withFileLock(this.home.getPermissionPath(), () =>
+      PermissionStore(this.home).update((registry) => {
+        const current = registry.workspaces.find((entry) => pathKey(entry.path) === pathKey(root));
+        if (!current?.trusted) throw new Error("Workspace is not trusted.");
+        return { workspaces: registry.workspaces.map((entry) =>
+          entry === current ? { ...entry, permissions: next } : entry) };
       }),
     );
   }

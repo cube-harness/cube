@@ -5,7 +5,7 @@ import {
   Container, ProcessTerminal, getCellDimensions, truncateToWidth, visibleWidth, type TUI,
 } from "@earendil-works/pi-tui";
 import {
-  FRAME_SIZE_PX, PET_GEN_VERSION, PET_STATES, generateAnimations,
+  FRAME_SIZE_PX, PET_GEN_VERSION, PET_STATES, generateAnimations, resizeSixel,
   type PetAnimation, type PetState,
 } from "./pet.gen.js";
 import type { WorkingIndicatorState } from "./working-indicator.js";
@@ -13,10 +13,10 @@ import { appTheme } from "../themes/app.theme.js";
 
 type Animations = Record<PetState, PetAnimation>;
 type Manifest = { version: unknown; states: Record<PetState, { fps: number; frames: string[] }> };
-type PetFrame = { row: number; bottom: number; col: number; cols: number; rows: number; frame: string };
+type PetFrame = { row: number; bottom: number; col: number; cols: number; rows: number; frame: string; surface: boolean };
 
 /** Optional cache. Never invalidate, delete, or overwrite an existing pet. */
-export async function ensurePetFrames(dir: string): Promise<Animations | null> {
+export async function ensurePetFrames(dir: string, size = FRAME_SIZE_PX): Promise<Animations | null> {
   try {
     let manifest: Manifest;
     try {
@@ -47,9 +47,7 @@ export async function ensurePetFrames(dir: string): Promise<Animations | null> {
           !Array.isArray(entry.frames) || !entry.frames.length || entry.frames.length > 60 ||
           !entry.frames.every(name => typeof name === "string" && /^[\w-]+\.six$/.test(name))) return null;
       const frames = await Promise.all(entry.frames.map(name => readFile(join(dir, name), "latin1")));
-      // Keep malformed cache/control sequences out of the terminal. Only 50px Sixel frames.
-      if (!frames.every(frame => /^\x1bP[\d;]*q"1;1;50;50[\x20-\x7e]+\x1b\\$/.test(frame))) return null;
-      animations[state] = { fps: entry.fps, frames };
+      animations[state] = { fps: entry.fps, frames: frames.map(frame => resizeSixel(frame, size)) };
     }
     return animations;
   } catch {
@@ -79,13 +77,13 @@ export class PetTerminal extends ProcessTerminal {
       this.clearPet();
       this.paintedPet = undefined;
     }
-    data = data.replace(/\x1b_cube-pet;(\d+);(\d+);(\d+);(\d+);([A-Za-z0-9+/=]+)\x1b\\/g,
-      (_, rise, col, cols, rows, frame, offset: number) => {
+    data = data.replace(/\x1b_cube-pet;(\d+);(\d+);(\d+);(\d+);([A-Za-z0-9+/=]+)(;0)?\x1b\\/g,
+      (_, rise, col, cols, rows, frame, plain, offset: number) => {
         const anchor = [...data.slice(0, offset).matchAll(/\x1b\[(\d+);\d+H/g)].at(-1);
         const row = Number(anchor?.[1]) - Number(rise);
         this.pet = row >= 1 && row + Number(rows) - 1 <= this.rows
           ? { row, bottom: Number(anchor?.[1]), col: Number(col), cols: Number(cols), rows: Number(rows),
-              frame: Buffer.from(frame, "base64").toString("latin1") }
+              frame: Buffer.from(frame, "base64").toString("latin1"), surface: !plain }
           : undefined;
         return "";
       });
@@ -100,7 +98,7 @@ export class PetTerminal extends ProcessTerminal {
           const row = old.row + i;
           const clear = `\x1b[${row};${old.col}H\x1b[${cols}X`;
           // pi-tui can skip unchanged rows: restore their surface ourselves after erasing Sixel.
-          erase += this.pet && row >= this.pet.row && row <= this.pet.bottom
+          erase += this.pet?.surface && row >= this.pet.row && row <= this.pet.bottom
             ? chalk.bgHex(appTheme.surface.background)(clear) : clear;
         }
         data = data.slice(0, 8) + erase + "\x1b8" + data.slice(8);
@@ -112,7 +110,7 @@ export class PetTerminal extends ProcessTerminal {
       let draw = "\x1b7\x1b[0m";
       let clear = "";
       for (let i = 0; i < rows; i++) clear += `\x1b[${row + i};${col}H\x1b[${cols}X`;
-      draw += chalk.bgHex(appTheme.surface.background)(clear);
+      draw += this.pet.surface ? chalk.bgHex(appTheme.surface.background)(clear) : clear;
       draw += `\x1b[${row};${col}H${frame}\x1b8`;
       data = data.slice(0, -8) + draw + "\x1b[?2026l";
     }
@@ -136,12 +134,13 @@ export class PetPanel extends Container {
     private readonly dir: string | undefined,
     private readonly getPrompt: () => string,
     private readonly getTopRow: () => number,
+    private readonly options: { header?: boolean; size?: number } = {},
   ) { super(); }
 
   async start(): Promise<void> {
     if (!this.dir || !supportsSixel() || this.running) return;
     this.running = true;
-    this.animations ??= await ensurePetFrames(this.dir);
+    this.animations ??= await ensurePetFrames(this.dir, this.options.size);
     if (!this.running || !this.animations) return;
     this.timer = setInterval(() => {
       if (!this.visible) return;
@@ -176,26 +175,30 @@ export class PetPanel extends Container {
 
   override render(width: number): string[] {
     const cell = getCellDimensions();
-    const cols = Math.ceil(FRAME_SIZE_PX / cell.widthPx);
+    const size = this.options.size ?? FRAME_SIZE_PX;
+    const header = this.options.header;
+    const cols = Math.ceil(size / cell.widthPx);
     // Sixel uses six-pixel bands, even when the raster height is not divisible by six.
-    const rows = Math.ceil(Math.ceil(FRAME_SIZE_PX / 6) * 6 / cell.heightPx);
-    this.visible = this.tui.terminal instanceof PetTerminal && !!this.animations && this.running && width - cols >= 30 &&
+    const rows = Math.ceil(Math.ceil(size / 6) * 6 / cell.heightPx);
+    this.visible = this.tui.terminal instanceof PetTerminal && !!this.animations && this.running && width - cols >= (header ? 4 : 30) &&
       this.tui.terminal.rows >= rows + 5;
     if (!this.visible) {
       if (this.tui.terminal instanceof PetTerminal) this.tui.terminal.clearPet();
       return super.render(width);
     }
 
-    const next = this.activity === "idle" && this.getPrompt().trim() ? "prompting" : this.activity;
+    const next = header ? "waiting"
+      : this.activity === "idle" && this.getPrompt().trim() ? "prompting" : this.activity;
     if (next !== this.state) {
       this.state = next;
       this.changedAt = Date.now();
     }
     const leftWidth = width - cols;
-    const lines = super.render(leftWidth).map(line => truncateToWidth(line, leftWidth, ""));
-    const top = this.getTopRow();
+    const lines = header ? Array<string>(rows).fill("")
+      : super.render(leftWidth).map(line => truncateToWidth(line, leftWidth, ""));
+    const top = header ? 0 : this.getTopRow();
     while (lines.length < top + rows) lines.push(chalk.bgHex(appTheme.surface.background)(" ".repeat(leftWidth)));
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; !header && i < lines.length; i++) {
       const line = lines[i]!;
       const padding = " ".repeat(width - visibleWidth(line));
       // Extend each existing row's background, including the selected autocomplete row.
@@ -208,10 +211,10 @@ export class PetPanel extends Container {
     // Cached frames may end with blank-band advances; trim for display, never rewrite cache.
     const frame = this.animations![this.state].frames[this.lastFrame].replace(/-+\x1b\\$/, "\x1b\\");
     const rise = lines.length - 1 - top;
-    const col = leftWidth + 1;
+    const col = header ? 3 : leftWidth + 1;
     // Zero-width APC carries the frame without pretending to be a Kitty image.
     // PetTerminal consumes it after every text row has been repainted.
-    lines[lines.length - 1] += `\x1b_cube-pet;${rise};${col};${cols};${rows};${Buffer.from(frame, "latin1").toString("base64")}\x1b\\`;
+    lines[lines.length - 1] += `\x1b_cube-pet;${rise};${col};${cols};${rows};${Buffer.from(frame, "latin1").toString("base64")}${header ? ";0" : ""}\x1b\\`;
     return lines;
   }
 }

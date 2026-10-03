@@ -73,11 +73,11 @@ export const createCubeMastra = async (
   home: HomeManager,
   workspace: WorkspaceManager,
   config: CubeConfig,
-  options: { gateways?: CubeGatewayComposition; deferInstructions?: boolean } = {},
+  options: { gateways?: CubeGatewayComposition } = {},
 ): Promise<CubeMastraComposition> => {
   const root = (await workspace.getPaths()).root;
   const logging = await createCubeLogger(home);
-  const tools = createCubeTools(root, config.permissions.workspace_only);
+  const tools = createCubeTools(root, () => config.permissions.workspace_only);
   try {
     const auth = new AuthStore(home);
     const gateways =
@@ -205,7 +205,6 @@ export const createCubeMastra = async (
           }
         } } : {}),
       },
-      options.deferInstructions,
     );
     const summarizer = createSummarizerAgent(async ({ requestContext }) =>
       (await resolveAuxiliaryModel(config.memory.compaction.model, requestContext)).model, logging.logger);

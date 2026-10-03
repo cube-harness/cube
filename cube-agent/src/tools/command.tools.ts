@@ -46,7 +46,8 @@ const processInput = z.object({
   tail: z.number().int().min(1).max(2000).default(200),
 });
 
-export function createCommandTools(root: string, workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY) {
+export function createCommandTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
+  const isWorkspaceOnly = () => typeof workspaceOnly === "function" ? workspaceOnly() : workspaceOnly;
   const processes = new Map<string, ProcessEntry>();
   let disposed = false;
   let disposal: Promise<void> | undefined;
@@ -129,7 +130,7 @@ export function createCommandTools(root: string, workspaceOnly: boolean = DEFAUL
 
   const approval = async ({ input }: ToolPayloadTransformContext) => {
     const args = commandInput.parse(input);
-    return { ...args, cwd: await resolveWorkspacePath(root, args.cwd ?? ".", workspaceOnly) };
+    return { ...args, cwd: await resolveWorkspacePath(root, args.cwd ?? ".", isWorkspaceOnly()) };
   };
   const transform = {
     approval,
@@ -149,7 +150,7 @@ export function createCommandTools(root: string, workspaceOnly: boolean = DEFAUL
     execute: async (input, context) => {
       if (disposed) throw new Error("Cube command runtime is closed.");
       context.abortSignal?.throwIfAborted();
-      const cwd = await resolveWorkspacePath(root, input.cwd ?? ".", workspaceOnly);
+      const cwd = await resolveWorkspacePath(root, input.cwd ?? ".", isWorkspaceOnly());
       if (!(await stat(cwd)).isDirectory()) throw new Error("Command cwd must be a directory.");
       if (disposed) throw new Error("Cube command runtime is closed.");
       if ([...processes.values()].filter((p) => !p.closed).length >= 32)

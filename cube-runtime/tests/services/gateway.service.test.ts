@@ -54,7 +54,6 @@ const baseConfig = (): CubeConfigDocument => ({
     semantic_recall: { enabled: false, top_k: 1, message_range: { before: 0, after: 0 }, scope: "resource", threshold: null },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
-  permissions: { require_approval_for: [] },
 });
 
 const createHarness = (options: {

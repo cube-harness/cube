@@ -92,7 +92,6 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("create a thread");
 
-    await this.instructions.reload();
     const snapshot = this.instructions.read();
     const title = content.trim().replace(/\s+/g, " ") || "New Thread";
     const thread = await this.session.thread.create({
@@ -110,6 +109,7 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("start a new thread");
 
+    await this.instructions.reload();
     this.session.thread.detachFromCurrent();
     await this.session.thread.clearAndReleaseLock();
     this.plannedThreadId = this.createId();

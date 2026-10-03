@@ -4,6 +4,7 @@ import { type CubeConfig, type HomeManager, type WorkspaceManager, type MemorySn
 import type { createMemoryRecall } from "../tools/memory-recall.tool.js";
 import { createMemoryProcessor } from "../processors/memory.processor.js";
 import { createMastraWorkspace } from "../workspace.js";
+import { createWorkspaceTools } from "@mastra/core/workspace";
 import { webFetchTool, webSearchTool } from "@mastra/core/tools";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
 import { getCanonicalModelId } from "../gateways/types.js";
@@ -127,16 +128,17 @@ export const createCubeAgent = async (
     readMemory?: () => Promise<MemorySnapshot>;
     recallTool?: ReturnType<typeof createMemoryRecall>["tool"];
   },
-  deferInstructions = false,
 ) => {
-  let snapshot: InstructionSnapshot = deferInstructions
-    ? { soul: "", sources: [], explored: [] }
-    : await loadInstructionSnapshot(home, workspace, contextManager?.readMemory);
+  let snapshot: InstructionSnapshot = await loadInstructionSnapshot(
+    home,
+    workspace,
+    contextManager?.readMemory,
+  );
   let context = formatAgentsContext(snapshot.sources);
   const paths = await workspace.getPaths();
-  const cubeTools = tools ?? createCubeTools(paths.root, config.permissions.workspace_only);
+  const cubeTools = tools ?? createCubeTools(paths.root, () => config.permissions.workspace_only);
   let activeModel = config.model;
-  const executionInstructions = [
+  const executionInstructions = () => [
     `Workspace: ${paths.root}. ${config.permissions.workspace_only ? "File paths and command cwd are restricted to this root." : "File paths and command cwd outside this root are allowed."} Commands run on the host and are NOT an OS sandbox.`,
     process.platform === "win32"
       ? `execute_command uses ${process.env.ComSpec || "cmd.exe"}. Use cmd syntax (dir, %VAR%, date /t, time /t).`
@@ -148,7 +150,7 @@ export const createCubeAgent = async (
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
   const skills = await createCubeSkills(home, workspace, config.skills.disabled);
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills, config.permissions.workspace_only);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills, () => config.permissions.workspace_only);
 
   const agent = createCodingAgent({
     id: "cube-agent",
@@ -156,7 +158,7 @@ export const createCubeAgent = async (
     model: [modelConfig as any],
     instructions: [
       { role: "system", content: snapshot.soul },
-      { role: "system", content: executionInstructions },
+      { role: "system", content: executionInstructions() },
     ],
     inputProcessors: [
       createInitializeProcessor(),
@@ -237,6 +239,15 @@ export const createCubeAgent = async (
   if (logger) agent.__registerPrimitives({ logger });
   const result = Object.assign(agent, {
     cubeSkills: skills,
+    listPermissionTools: async () => [
+      ...new Set([
+        ...cubeTools.names,
+        ...Object.keys(await agent.listTools({ resolveWebSearch: false })),
+        ...Object.keys(await createWorkspaceTools(mastraWorkspace)),
+        // Native skill tool names; listing permissions must not load SKILL.md files.
+        "skill", "skill_read", "skill_search",
+      ]),
+    ],
     getActiveModelId: () => activeModel,
     loadInstructions: () => loadInstructionSnapshot(home, workspace, contextManager?.readMemory),
     setToolModel: (modelId: string) => {
@@ -249,13 +260,14 @@ export const createCubeAgent = async (
       | ((snapshot: InstructionSnapshot) => Promise<void>)
       | undefined,
     readInstructions: (): InstructionSnapshot => structuredClone(snapshot),
+    refreshPermissions: () => result.installInstructions(snapshot),
     installInstructions: (next: InstructionSnapshot): void => {
       contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
       agent.__updateInstructions([
         { role: "system", content: replacement.soul },
-        { role: "system", content: executionInstructions },
+        { role: "system", content: executionInstructions() },
       ]);
       snapshot = replacement;
       context = formatted;

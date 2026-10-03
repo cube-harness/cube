@@ -53,6 +53,34 @@ test("bad or incomplete pet cache is optional and never overwritten", async () =
   }
 });
 
+test("display sizes share the original cache and preserve edited pixels and timing", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "cube-pet-size-"));
+  try {
+    assert.ok(await ensurePetFrames(scratch));
+    const path = join(scratch, "idle_00.six");
+    const frame = '\x1bP9;1;0q"1;1;50;50#0;2;100;0;0#0!50~-\x1b\\';
+    await writeFile(path, frame, "latin1");
+    const manifestPath = join(scratch, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.states.idle.fps = 2;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const files = await readdir(scratch);
+    const before = await Promise.all(files.map(name => readFile(join(scratch, name))));
+    const onboard = await ensurePetFrames(scratch, 80);
+    assert.ok(onboard);
+    assert.equal(onboard.idle.fps, 2);
+    assert.ok(onboard.idle.frames[0].startsWith('\x1bP9;1;0q"1;1;80;80#0;2;100;0;0'));
+    // Six filled source rows scale to ten: six pixels in band one, four in band two.
+    assert.ok(onboard.idle.frames[0].includes("#0!80~$-#0!80N$"));
+    assert.ok((await ensurePetFrames(scratch, 60))?.waiting.frames[0].startsWith('\x1bP9;1;0q"1;1;60;60'));
+    assert.equal((await ensurePetFrames(scratch))?.idle.frames[0], frame);
+    assert.deepEqual(await readdir(scratch), files);
+    assert.deepEqual(await Promise.all(files.map(name => readFile(join(scratch, name)))), before);
+  } finally {
+    await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 test("unwritable pet directory cannot block startup", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "cube-pet-"));
   try {

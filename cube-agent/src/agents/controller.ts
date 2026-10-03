@@ -17,7 +17,7 @@ export const createCubeController = async (
   skills?: CubeSkills,
   threadLock?: AgentControllerConfig["threadLock"],
 ) => {
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills, config.permissions.workspace_only);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills, () => config.permissions.workspace_only);
 
   return new AgentController({
     id: "cube-controller",

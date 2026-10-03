@@ -142,7 +142,8 @@ const writeInput = z.object({
 });
 const patchInput = z.object({ patch: z.string().min(1).max(OPERATION_LIMIT) });
 
-export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY) {
+export function createFileTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
+  const isWorkspaceOnly = () => typeof workspaceOnly === "function" ? workspaceOnly() : workspaceOnly;
   const pending = new Map<
     string,
     { inputKey: string; result: Promise<Proposal | FileMutationResult> }
@@ -179,11 +180,11 @@ export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_W
       content: (source?: Snapshot) => string | undefined,
       requestedDestination?: string,
     ) {
-      const path = await resolveWorkspacePath(root, requestedPath, workspaceOnly);
+      const path = await resolveWorkspacePath(root, requestedPath, isWorkspaceOnly());
       const destination =
         requestedDestination === undefined
           ? undefined
-          : await resolveWorkspacePath(root, requestedDestination, workspaceOnly);
+          : await resolveWorkspacePath(root, requestedDestination, isWorkspaceOnly());
       for (const target of [path, destination].filter((p): p is string => p !== undefined)) {
         const key = process.platform === "win32" ? target.toLowerCase() : target;
         if (targets.has(key)) throw new Error(`Conflicting patch target: ${displayPath(target)}`);
@@ -259,7 +260,7 @@ export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_W
       });
     } else if (id === "write_file") {
       const input = writeInput.parse(args);
-      const path = await resolveWorkspacePath(root, input.path, workspaceOnly);
+      const path = await resolveWorkspacePath(root, input.path, isWorkspaceOnly());
       const exists = await lstat(path).then(
         () => true,
         (e) => {
@@ -313,7 +314,7 @@ export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_W
   }
 
   async function validate(file: PreparedFile) {
-    if ((await resolveWorkspacePath(root, file.requestedPath, workspaceOnly)) !== file.path)
+    if ((await resolveWorkspacePath(root, file.requestedPath, isWorkspaceOnly())) !== file.path)
       throw new Error(`Path target changed: ${file.requestedPath}`);
     const current = await snapshot(file.path);
     if (JSON.stringify(current) !== JSON.stringify(file.before))
@@ -321,7 +322,7 @@ export function createFileTools(root: string, workspaceOnly: boolean = DEFAULT_W
         `File changed since preparation: ${file.change.path}. Read it and propose a fresh edit.`,
       );
     if (file.destination) {
-      if ((await resolveWorkspacePath(root, file.requestedDestination!, workspaceOnly)) !== file.destination)
+      if ((await resolveWorkspacePath(root, file.requestedDestination!, isWorkspaceOnly())) !== file.destination)
         throw new Error("Move destination changed.");
       if (
         await lstat(file.destination).then(

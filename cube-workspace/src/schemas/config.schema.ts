@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { ApiKeyProviderSchema } from "./auth.schema.js";
+import { PermissionsSchema } from "./permission.schema.js";
 import {
   DEFAULT_OLLAMA_URL,
   DEFAULT_LMSTUDIO_URL,
-  DEFAULT_WORKSPACE_ONLY,
   HOME_LIMITS,
   DURABLE_MEMORY_DEFAULTS,
   INHERIT_MODEL,
@@ -141,15 +141,6 @@ export const ModelConfigSchema = z
   })
   .strict();
 
-export const PermissionsSchema = z
-  .object({
-    workspace_only: z.boolean().default(DEFAULT_WORKSPACE_ONLY),
-    require_approval_for: z.array(z.string().min(1)).default([
-      "execute_command", "edit_file", "write_file", "apply_patch",
-    ]),
-  })
-  .strict();
-
 const soul = z
   .object({
     max_characters: z.number().int().min(1).max(1_000_000).default(HOME_LIMITS.SOUL_MAX_CHARACTERS),
@@ -171,7 +162,6 @@ const configSettingsShape = {
   telemetry: z.boolean().default(false),
   soul: soul.default(soul.parse({})),
   memory: memory.default(memory.parse({})),
-  permissions: PermissionsSchema.default(PermissionsSchema.parse({})),
 };
 
 const gatewayOptions = z
@@ -204,6 +194,8 @@ export const ConfigSchema = z
 export const RunnableConfigSchema = ConfigSchema.extend({
   gateway: GatewayIdSchema,
   model: modelReference,
+  // Effective runtime policy; persisted only in permission.json, never config.yaml.
+  permissions: PermissionsSchema.default(PermissionsSchema.parse({})),
 });
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;

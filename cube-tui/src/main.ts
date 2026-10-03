@@ -6,6 +6,7 @@ import { startPreparedCube, type PreparedCube } from "./app.js";
 import { ChatScreen } from "./screens/chat.screen.js";
 import { OnBoardScreen } from "./screens/on-board.screen.js";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { PetTerminal } from "./components/pet.js";
 
 export const startTui = async (): Promise<void> => {
@@ -15,7 +16,7 @@ export const startTui = async (): Promise<void> => {
       if (/^https?:\/\//i.test(url)) void openExternalUrl(url).catch(() => undefined);
     },
   });
-  const onboarding = new OnBoardScreen(tui);
+  const onboarding = new OnBoardScreen(tui, join(homedir(), ".cube", "cache", "tui-pet", "cube"));
   const updateNotices: RuntimeNotice[] = [];
   const updateError = process.env.CUBE_UPDATE_ERROR;
   const skipUpdate = process.env.CUBE_SKIP_UPDATE === "1";

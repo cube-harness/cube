@@ -374,7 +374,10 @@ test("slash command router returns domain results for client-owned effects", asy
     (await executeSlashCommand("/statusline", "workspace, agentMd", context)).kind,
     "preference",
   );
-  assert.equal((await executeSlashCommand("/help", "", context)).kind, "command-catalog");
+  assert.deepEqual(await executeSlashCommand("/help", "", context), {
+    kind: "notice",
+    notice: { level: "error", message: "Unknown command: /help" },
+  });
   assert.deepEqual(await executeSlashCommand("/exit", "", context), {
     kind: "exit-requested",
   });

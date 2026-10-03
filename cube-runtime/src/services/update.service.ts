@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { access, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 const baseUrl = "https://pub-3313f2900e0948b5849dc47c989406ab.r2.dev";
 const targets = ["win32-x64", "linux-x64", "darwin-arm64", "darwin-x64"];
+const versionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export type CubeUpdate = {
   installDir: string;
   launcher: string;
   target: string;
-  currentBuild: string;
+  currentVersion: string;
+  version: string;
   sha256: string;
   file: string;
 };
@@ -55,11 +57,15 @@ export async function checkCubeUpdate(options: {
   } catch { throw new Error("Invalid Cube update manifest."); }
   const filename = windows ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`;
   const version = windows ? manifest.version : manifest.file.split("/")[1];
-  if (typeof version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) ||
+  if (typeof version !== "string" || !versionPattern.test(version) ||
       manifest.platform !== target || manifest.file !== `releases/${version}/${filename}`)
     throw new Error("Invalid Cube update manifest.");
   if (manifest.sha256.slice(0, 16) === currentBuild) return null;
-  return { installDir, launcher: launcherPath, target, currentBuild, sha256: manifest.sha256, file: manifest.file };
+  const installedVersion = await readFile(path.join(versionDir, "app", "package.json"), "utf8")
+    .then((text) => JSON.parse(text).version).catch(() => undefined);
+  const currentVersion = typeof installedVersion === "string" && versionPattern.test(installedVersion)
+    ? installedVersion : "Unknown";
+  return { installDir, launcher: launcherPath, target, currentVersion, version, sha256: manifest.sha256, file: manifest.file };
 }
 
 // The launcher runs this only after the old Node process exits (code 75).

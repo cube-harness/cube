@@ -193,7 +193,14 @@ export type SlashCommandSuggestion = {
   description: string;
 };
 
+export type PermissionPolicy = "ask" | "allow" | "deny";
+export type PermissionState = {
+  workspaceOnly: boolean;
+  tools: Record<string, PermissionPolicy>;
+};
+
 export type PromptResult =
+  | { kind: "permissions"; permissions: PermissionState }
   | { kind: "skills"; skills: import("@cube/agent").SkillChoice[] }
   | { kind: "ignored" }
   | { kind: "submitted" }
@@ -210,7 +217,6 @@ export type PromptResult =
   | { kind: "preferences"; request: PreferenceRequest }
   | { kind: "preference"; preference: PreferenceState }
   | { kind: "usage"; metrics: UsageMetrics; notice?: RuntimeNotice }
-  | { kind: "command-catalog"; commands: SlashCommandSuggestion[] }
   | { kind: "copy-content"; content: string }
   | { kind: "exit-requested" };
 

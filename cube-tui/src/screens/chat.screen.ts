@@ -16,9 +16,11 @@ import type {
   ThreadSummary,
   UsageMetrics,
   SkillChoice,
+  PermissionState,
 } from "@cube/runtime";
 import { toRuntimeNotice } from "@cube/runtime";
 import { SkillPicker } from "../components/skill-picker.js";
+import { PermissionPicker } from "../components/permission-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "../components/approval-picker.js";
 import {
   ToolSuspensionPicker,
@@ -342,6 +344,13 @@ export class ChatScreen {
 
   pickSkills(items: SkillChoice[], onApply: (changes: Pick<SkillChoice, "path" | "enabled">[]) => Promise<void>): Promise<void> {
     return this.showOverlay<void>((finish) => new SkillPicker(items, {
+      onApply, onCancel: () => finish(), onChange: () => this.requestRender(),
+      onError: (error) => this.showNotice(toRuntimeNotice(error)),
+    }));
+  }
+
+  pickPermissions(state: PermissionState, onApply: (state: PermissionState) => Promise<void>): Promise<void> {
+    return this.showOverlay<void>((finish) => new PermissionPicker(state, {
       onApply, onCancel: () => finish(), onChange: () => this.requestRender(),
       onError: (error) => this.showNotice(toRuntimeNotice(error)),
     }));

@@ -17,16 +17,17 @@ test("missing settings use Cube defaults without inventing a model or accepting 
   assert.equal(RunnableConfigSchema.safeParse({}).success, false);
   assert.deepEqual(defaults.app_title, ["workspace", "threadId"]);
   assert.deepEqual(defaults.status_line, ["workspace", "model"]);
-  assert.equal(defaults.permissions.workspace_only, true);
-  assert.deepEqual(defaults.permissions.require_approval_for, ["execute_command", "edit_file", "write_file", "apply_patch"]);
+  assert.equal("permissions" in defaults, false);
+  const runnable = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test" });
+  assert.equal(runnable.permissions.workspace_only, true);
+  assert.deepEqual(runnable.permissions.require_approval_for, ["execute_command", "edit_file", "write_file", "apply_patch"]);
   assert.equal(defaults.memory.compaction.reserve_tokens, 16384);
-  const partial = ConfigSchema.parse({ permissions: { workspace_only: false, require_approval_for: [] },
+  const partial = ConfigSchema.parse({
     memory: { semantic_recall: { message_range: { before: 0 } }, durable: { enabled: false, min_idle_hours: 0 } } });
-  assert.deepEqual(partial.permissions, { workspace_only: false, require_approval_for: [] });
   assert.deepEqual(partial.memory.semantic_recall.message_range, { before: 0, after: 1 });
   assert.equal(partial.memory.durable.enabled, false);
   assert.equal(partial.memory.durable.min_idle_hours, 0);
-  for (const input of [{ permissions: null }, { permissions: { workspace_only: "false" } },
+  for (const input of [{ permissions: { workspace_only: false } }, { permissions: null }, { permissions: { workspace_only: "false" } },
     { memory: { compaction: { reserve_tokens: 0 } } }, { model_config: null }])
     assert.equal(ConfigSchema.safeParse(input).success, false);
 });
@@ -42,6 +43,7 @@ test("fresh home uses one unversioned schema from onboarding through persisted s
     assert.deepEqual((await ConfigStore(home).read()).skills.disabled, ["D:/skills/review/SKILL.md"]);
     assert.equal("version" in raw, false);
     assert.equal("fallback_model" in raw, false);
+    assert.equal("permissions" in raw, false);
     assert.equal("observational_memory" in raw.memory, false);
     assert.deepEqual(raw.memory.compaction, {
       model: "inherit", manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,

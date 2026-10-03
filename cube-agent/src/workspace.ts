@@ -6,11 +6,15 @@ import type { CubeSkills } from "./skills.js";
 export const createMastraWorkspace = async (
   workspace: WorkspaceManager,
   skills?: CubeSkills,
-  workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY,
+  workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
 ): Promise<Workspace> => {
   const projectPaths = await workspace.getPaths();
+  const contained = new LocalFilesystem({ basePath: projectPaths.root, contained: true });
+  const uncontained = new LocalFilesystem({ basePath: projectPaths.root, contained: false });
   return new Workspace({
-    filesystem: new LocalFilesystem({ basePath: projectPaths.root, contained: workspaceOnly }),
+    filesystem: typeof workspaceOnly === "function"
+      ? () => workspaceOnly() ? contained : uncontained
+      : workspaceOnly ? contained : uncontained,
     skills: skills ? async ({ requestContext }) =>
       (await skills.snapshot(requestContext ?? new RequestContext())).projectPaths : projectPaths.skillsDirs,
     tools: {

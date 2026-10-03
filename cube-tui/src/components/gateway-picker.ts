@@ -1,5 +1,6 @@
 import {
   SelectList,
+  Spacer,
   Text,
   CancellableLoader,
   matchesKey,
@@ -69,6 +70,7 @@ export class GatewayPickerComponent implements Component, Focusable {
     { key: "Enter", label: "Select" },
     { key: "Esc", label: "Back" },
   ]);
+  private readonly hintSpacer = new Spacer(1);
 
   constructor(private readonly options: GatewayPickerOptions) {
     this.list = this.groupList();
@@ -183,7 +185,7 @@ export class GatewayPickerComponent implements Component, Focusable {
       ...(this.step === "provider" && (selected?.gatewayId === "oauth/anthropic" || selected?.gatewayId === "oauth/google")
         ? this.riskNotice.render(width)
         : []),
-      "",
+      ...this.hintSpacer.render(width),
       ...this.hint.render(width),
     ];
   }

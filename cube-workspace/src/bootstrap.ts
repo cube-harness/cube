@@ -29,9 +29,10 @@ export class Bootstrap {
   private async seedFromTemplate(templateFile: string, destPath: string): Promise<void> {
     if (await this.fileExists(destPath)) return;
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    let srcFile = path.join(currentDir, "template", templateFile);
+    // Use checkout assets in development; packaged builds keep them beside the bundle.
+    let srcFile = path.join(currentDir, "..", "src", "template", templateFile);
     if (!(await this.fileExists(srcFile))) {
-      srcFile = path.join(currentDir, "..", "src", "template", templateFile);
+      srcFile = path.join(currentDir, "template", templateFile);
     }
     await copyFile(srcFile, destPath);
   }

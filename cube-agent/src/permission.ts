@@ -1,13 +1,13 @@
-import type { ToolCategory } from "@mastra/core/agent-controller";
+import type { Session, ToolCategory } from "@mastra/core/agent-controller";
 import type { CubeConfig } from "@cube/workspace";
-import type { Session } from "@mastra/core/agent-controller";
 
 export const resolveCubeToolCategory = (_toolName: string): ToolCategory =>
   "other";
 
 export const configureCubePermissions = async (
   session: Session,
-  permissions: Pick<CubeConfig["permissions"], "require_approval_for">,
+  permissions: Pick<CubeConfig["permissions"], "require_approval_for"> &
+    Partial<Pick<CubeConfig["permissions"], "deny_for">>,
 ): Promise<string[]> => {
   await session.permissions.setForCategory({
     category: "other",
@@ -16,21 +16,20 @@ export const configureCubePermissions = async (
 
   const mutations = ["edit_file", "write_file", "apply_patch"];
   const names = new Set(permissions.require_approval_for);
-  const retired = [...names].filter((name) => name.startsWith("mastra_workspace_") || ["list_file", "create_file", "delete_file", "file_stat"].includes(name));
-  if (mutations.some((name) => names.has(name))) mutations.forEach((name) => names.add(name));
-  // config.yaml owns these rules. Clear a previous fail-closed block after correction.
-  for (const toolName of [...mutations, "execute_command"]) {
-    if (!names.has(toolName)) await session.permissions.setForTool({ toolName, policy: "allow" });
-  }
-  for (const configuredName of names) {
-    await session.permissions.setForTool({
-      toolName: configuredName,
-      policy: "ask",
-    });
+  const denied = new Set(permissions.deny_for ?? []);
+  const retired = [...names, ...denied].filter((name) => name.startsWith("mastra_workspace_") || ["list_file", "create_file", "delete_file", "file_stat"].includes(name));
+  // permission.json owns these rules, including rules saved on a resumed session.
+  const tools = new Set([
+    ...Object.keys(session.permissions.getRules().tools),
+    ...mutations, "execute_command", ...names, ...denied,
+  ]);
+  for (const toolName of tools) {
+    await session.permissions.setForTool({ toolName,
+      policy: denied.has(toolName) ? "deny" : names.has(toolName) ? "ask" : "allow" });
   }
   if (!retired.length) return [];
   for (const toolName of [...mutations, "execute_command"]) {
     await session.permissions.setForTool({ toolName, policy: "deny" });
   }
-  return [`Unknown retired tool names in permissions.require_approval_for: ${retired.join(", ")}. File mutations and commands are blocked. Update config.yaml to current tool names and restart Cube.`];
+  return [`Unknown retired tool names in permissions: ${retired.join(", ")}. File mutations and commands are blocked. Update this workspace's permission.json entry to current tool names and apply /permissions or restart Cube.`];
 };

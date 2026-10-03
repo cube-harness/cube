@@ -24,7 +24,7 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     await createBootstrap(home).run();
     const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
     const workspace = new WorkspaceManager(home, project);
-    composition = await createCubeMastra(home, workspace, config, { deferInstructions: true });
+    composition = await createCubeMastra(home, workspace, config);
     const requests: string[] = [];
     composition.agent.model = new MockLanguageModelV3({ doStream: async ({ prompt }) => {
       requests.push(JSON.stringify(prompt));

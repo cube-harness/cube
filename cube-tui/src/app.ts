@@ -143,6 +143,9 @@ export class CubeApp {
       case "skills":
         await this.screen.pickSkills(result.skills, (changes) => this.runtime.preference.setSkillsEnabled(changes));
         return;
+      case "permissions":
+        await this.screen.pickPermissions(result.permissions, (state) => this.runtime.permission.set(state));
+        return;
       case "ignored":
       case "submitted":
         return;
@@ -236,16 +239,6 @@ export class CubeApp {
       case "usage":
         this.screen.showUsage(result.metrics);
         if (result.notice) this.screen.showNotice(result.notice);
-        return;
-      case "command-catalog":
-        this.screen.showNotice({
-          level: "info",
-          message: [
-            "### Available Slash Commands",
-            "",
-            ...result.commands.map((command) => `- \`${command.name}\`: ${command.description}`),
-          ].join("\n"),
-        });
         return;
       case "copy-content": {
         const copied = await (this.options.copyToClipboard ?? copyToClipboard)(result.content);
@@ -467,16 +460,13 @@ export const startPreparedCube = async (
     let runtime: CubeRuntime | undefined;
     try {
       const bootstrap = await prepare();
-      if (!bootstrap.permission) {
+      if (!bootstrap.permission?.trusted) {
         const trusted = await onboarding.pickTrust(bootstrap.workspaceRoot);
-        if (trusted !== null) await bootstrap.setTrust(trusted);
         if (!trusted) {
           onboarding.stopTerminal();
           return null;
         }
-      } else if (!bootstrap.permission.trusted) {
-        onboarding.stopTerminal();
-        return null;
+        await bootstrap.setTrust(true);
       }
       if (!bootstrap.readiness.ready) {
         onboarding.mount();

@@ -78,13 +78,3 @@ memory:
     enabled: true
     model: inherit
     min_idle_hours: 6
-
-permissions:
-  # Per-workspace overrides live in <CubeHome>/permission.json.
-  # Restricts file paths and command cwd, not paths inside shell commands.
-  workspace_only: true
-  require_approval_for:
-    - execute_command
-    - edit_file
-    - write_file
-    - apply_patch

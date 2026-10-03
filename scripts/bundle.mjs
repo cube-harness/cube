@@ -1,5 +1,5 @@
 import * as esbuild from "esbuild";
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -66,9 +66,10 @@ export async function bundleApp(stageDir, target = `${process.platform}-${proces
   });
 
   // 3. Write package.json for the deployed app
+  const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   await writeFile(
     path.join(appDir, "package.json"),
-    JSON.stringify({ name: "@cube/app", version: "1.0.0", type: "module" }, null, 2) + "\n"
+    JSON.stringify({ name: "@cube/app", version, type: "module" }, null, 2) + "\n"
   );
 
   // 4. Copy template assets

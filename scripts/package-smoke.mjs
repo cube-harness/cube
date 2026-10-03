@@ -9,6 +9,7 @@ await import("@cube/runtime");
 const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSchema } = await import("@cube/workspace");
 const { createCubeAgent } = await import("@cube/agent");
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
+const { RequestContext } = await import("@mastra/core/request-context");
 const { LibSQLStore } = await import("@mastra/libsql");
 const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-package-smoke-")));
 const cwd = process.cwd();
@@ -26,7 +27,8 @@ try {
   const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
   agent = await createCubeAgent(home, CubeWorkspace(home, project), config);
   const workspace = await agent.getWorkspace();
-  assert.equal(workspace.filesystem.basePath, project);
+  const filesystem = await workspace.resolveFilesystem({ requestContext: new RequestContext() });
+  assert.equal(filesystem.basePath, project);
   const tools = await createWorkspaceTools(workspace);
   assert.deepEqual(Object.keys(tools).sort(), ["list_files", "read_file"]);
   await writeFile(path.join(project, "probe.txt"), "CUBE_PACKAGE_OK\n");

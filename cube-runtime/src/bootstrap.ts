@@ -17,6 +17,7 @@ import {
   HistoryStore,
   ModelManager,
   RunnableConfigSchema,
+  PermissionsSchema,
   createBootstrap,
   type HomeManager,
   type WorkspacePermission,
@@ -33,6 +34,7 @@ import {
 import { GatewayService, type GatewayServiceDependencies } from "./services/gateway.service.js";
 import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
+import { PermissionService } from "./services/permission.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ThreadService } from "./services/thread.service.js";
 import type {
@@ -151,7 +153,7 @@ export const prepareCubeRuntime = async (
       startup.readiness = await gateway.readiness();
       if (!startup.readiness.ready) throw new Error(startup.readiness.reason);
       const config = RunnableConfigSchema.parse(await configStore.read());
-      config.permissions = { ...config.permissions, ...permission.permissions };
+      config.permissions = PermissionsSchema.parse(permission.permissions);
       startup.preference = {
         theme: config.theme,
         appTitle: [...config.app_title],
@@ -173,13 +175,24 @@ export const prepareCubeRuntime = async (
         gatewayDependencies.adapters = gateways.byGatewayId;
         composition = await createCubeMastra(home, workspace, config, {
           gateways,
-          deferInstructions: true,
         });
         const session = await composition.controller.createSession({
           resourceId: workspacePaths.root,
         });
 
         const memory = new MemoryService(session, composition.context);
+        const permissions = new PermissionService(workspace, config.permissions, {
+          listTools: async () => [...await composition!.agent.listPermissionTools(), "ask_user"],
+          isBusy: () => memory.isBusy() || session.run.isRunning() ||
+            session.approval.isArmed() || session.suspensions.hasPending(),
+          apply: async (next) => {
+            const notices = await configureCubePermissions(session, next);
+            Object.assign(config.permissions, next);
+            composition!.tools.discardPreview();
+            composition!.agent.refreshPermissions();
+            for (const message of notices) session.emit({ type: "info", message });
+          },
+        });
         gatewayDependencies.onActiveCredentialRemoved = async () => {
           while (session.followUps.dequeue()) {
             /* Drop prompts queued for the removed credential. */
@@ -206,7 +219,7 @@ export const prepareCubeRuntime = async (
           {
             fork: (id, title) => composition!.context.fork(id, title),
             invalidate: () => composition!.context.invalidate(),
-            isBusy: () => memory.isBusy(),
+            isBusy: () => memory.isBusy() || permissions.isApplying(),
             drain: () => composition!.drain(),
             onActivated: () => composition!.durableMemory.check(),
           },
@@ -241,7 +254,7 @@ export const prepareCubeRuntime = async (
           // Rollback of a rejected switch is a no-op, even during an active turn.
           if (modelId === liveModelId && selection.reasoningEffort === liveEffort) return;
           if (
-            memory.isBusy() ||
+            memory.isBusy() || permissions.isApplying() ||
             session.run.isRunning() ||
             session.approval.isArmed() ||
             session.suspensions.hasPending()
@@ -284,6 +297,7 @@ export const prepareCubeRuntime = async (
           thread,
           model,
           preference,
+          permission: permissions,
           memory,
           gateway,
           prompt: { initialize: () => prompt.initialize() },
@@ -302,6 +316,7 @@ export const prepareCubeRuntime = async (
           thread,
           model,
           preference,
+          permission: permissions,
           memory,
           gateway,
           suggestions: slashCommandSuggestions,

@@ -90,7 +90,7 @@ test("ThreadService lists active state and resumes with one switch and one snaps
   assert.deepEqual(snapshot.messages, messages);
 });
 
-test("ThreadService loads instructions only when the first lazy thread is created", async () => {
+test("ThreadService reuses loaded instructions when the first lazy thread is created", async () => {
   const calls: unknown[][] = [];
   let activeId: string | null = null;
   const session = asSession({
@@ -114,7 +114,6 @@ test("ThreadService loads instructions only when the first lazy thread is create
   assert.equal(await service.ensureForPrompt("  hello   runtime  "), "planned-1");
   assert.equal(await service.ensureForPrompt("second prompt"), "planned-1");
   assert.deepEqual(calls, [
-    ["load"],
     ["create", "planned-1", "hello runtime"],
   ]);
 });
@@ -150,12 +149,12 @@ test("ThreadService creates a fresh unbound state and rotates its planned id", a
   assert.deepEqual(calls, []);
   running = false;
   assert.deepEqual(await service.create(), { threadId: null });
-  assert.deepEqual(calls, ["detach", "release"]);
+  assert.deepEqual(calls, ["reloadInstructions", "detach", "release"]);
   assert.equal(await service.ensureForPrompt("next"), "planned-2");
   assert.deepEqual(calls, [
+    "reloadInstructions",
     "detach",
     "release",
-    "reloadInstructions",
     "create:planned-2",
   ]);
 });
@@ -373,15 +372,18 @@ test("thread snapshots isolate resume/fork, refresh on restart, and retry a fail
   await service.resume("thread-1");
   assert.equal(binding.read().sources[0]?.content, "A");
   assert.equal(refreshes, 1);
-  assert.equal(reloads, 1);
-  await service.create();
-  assert.equal(reloads, 1);
+  assert.equal(reloads, 0);
   failReload = true;
-  await assert.rejects(service.ensureForPrompt("next"), /EACCES/);
-  assert.equal(active, null);
+  await assert.rejects(service.create(), /EACCES/);
+  assert.equal(active, "thread-1");
   assert.equal(binding.read().sources[0]?.content, "A");
   failReload = false;
+  await service.create();
+  assert.equal(active, null);
+  assert.equal(reloads, 2);
+  assert.deepEqual(binding.read().sources, []);
   await service.ensureForPrompt("next");
+  assert.equal(reloads, 2);
   assert.deepEqual(binding.read().sources, []);
   await service.resume("fork");
   assert.equal(binding.read().sources[0]?.content, "fork only");

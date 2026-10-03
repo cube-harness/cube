@@ -44,6 +44,7 @@ test("Bootstrap seeds all template files into new home", async () => {
     assert.ok(existsSync(home.getAuthPath()));
     assert.ok(existsSync(home.getMcpPath()));
     assert.ok(existsSync(home.getPermissionPath()));
+    assert.equal(existsSync(path.join(home.getRoot(), "workspace.json")), false);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

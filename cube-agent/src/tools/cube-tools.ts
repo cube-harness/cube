@@ -10,11 +10,12 @@ export function usesPatch(modelId: string): boolean {
 }
 
 export type CubeTools = ReturnType<typeof createCubeTools>;
-export function createCubeTools(root: string, workspaceOnly: boolean = DEFAULT_WORKSPACE_ONLY) {
+export function createCubeTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
   const files = createFileTools(root, workspaceOnly);
   const commands = createCommandTools(root, workspaceOnly);
   const { edit_file, write_file, apply_patch } = files.tools;
   return {
+    names: Object.keys({ ...files.tools, ...commands.tools }),
     forModel: (modelId: string): ToolsInput => ({
       ...commands.tools,
       ...(usesPatch(modelId) ? { apply_patch } : { edit_file, write_file }),

@@ -2,6 +2,7 @@ import type { Session, InstructionInfo, CubeTools, CubeContext } from "@cube/age
 import type { MemoryService } from "./services/memory.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
+import type { PermissionService } from "./services/permission.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
@@ -21,6 +22,7 @@ type CubeRuntimeDependencies = {
   thread: ThreadService;
   model: ModelService;
   preference: PreferenceService;
+  permission: PermissionService;
   memory: MemoryService;
   context?: CubeContext;
   gateway: GatewayService;
@@ -36,6 +38,7 @@ export class CubeRuntime {
   readonly thread: ThreadService;
   readonly model: ModelService;
   readonly preference: PreferenceService;
+  readonly permission: PermissionService;
   readonly memory: MemoryService;
   readonly gateway: GatewayService;
 
@@ -48,6 +51,7 @@ export class CubeRuntime {
     this.thread = dependencies.thread;
     this.model = dependencies.model;
     this.preference = dependencies.preference;
+    this.permission = dependencies.permission;
     this.memory = dependencies.memory;
     this.gateway = dependencies.gateway;
     if (dependencies.tools) {

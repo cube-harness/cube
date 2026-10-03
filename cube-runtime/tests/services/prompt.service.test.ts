@@ -41,10 +41,7 @@ test("PromptService records input once and uses native followUp only for prompts
   );
 
   assert.deepEqual(await service.submit("  hello  "), { kind: "submitted" });
-  assert.deepEqual(await service.submit("/help"), {
-    kind: "command-catalog",
-    commands: slashCommandSuggestions,
-  });
+  assert.deepEqual(await service.submit("/exit"), { kind: "exit-requested" });
   assert.equal(followUpCalls, 1);
   assert.deepEqual(calls, [
     ["ensureForPrompt", "hello"],
@@ -52,7 +49,7 @@ test("PromptService records input once and uses native followUp only for prompts
   ]);
   assert.deepEqual(history, [
     { text: "hello", threadId: "thread-1" },
-    { text: "/help", threadId: "thread-1" },
+    { text: "/exit", threadId: "thread-1" },
   ]);
 });
 
