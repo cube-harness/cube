@@ -24,6 +24,7 @@ test("workspace registry saves trust only and preserves independent permission o
     workspace_only: true,
     require_approval_for: ["execute_command", "edit_file", "write_file", "apply_patch"],
     deny_for: [],
+    allow_for: [],
   });
   await PermissionStore(home).update((registry) => ({ workspaces: registry.workspaces.map((entry) =>
     entry.trusted ? { ...entry, permissions: { workspace_only: false, require_approval_for: [] } } : entry) }));
@@ -31,9 +32,9 @@ test("workspace registry saves trust only and preserves independent permission o
   await first.setTrust(true);
   const entry = await CubeWorkspace(home, join(firstPath, ".")).getPermission();
   assert.equal(entry?.path, await realpath(firstPath));
-  assert.deepEqual(entry?.permissions, { workspace_only: false, require_approval_for: [], deny_for: [] });
+  assert.deepEqual(entry?.permissions, { workspace_only: false, require_approval_for: [], deny_for: [], allow_for: [] });
   assert.equal((await PermissionStore(home).read()).workspaces.length, 1);
-  assert.deepEqual(PermissionsSchema.parse(entry?.permissions), { workspace_only: false, require_approval_for: [], deny_for: [] });
+  assert.deepEqual(PermissionsSchema.parse(entry?.permissions), { workspace_only: false, require_approval_for: [], deny_for: [], allow_for: [] });
   await PermissionStore(home).update((registry) => ({ workspaces: registry.workspaces.map((saved) =>
     ({ ...saved, permissions: { require_approval_for: [] } })) }));
   await first.setTrust(true);
@@ -41,5 +42,6 @@ test("workspace registry saves trust only and preserves independent permission o
     workspace_only: true,
     require_approval_for: [],
     deny_for: [],
+    allow_for: [],
   });
 });

@@ -36,7 +36,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
       listener({ type: "display_state", displayState });
       return unsubscribe;
     },
-    run: { isRunning: () => true },
+    run: { isRunning: () => true, getRunId: () => "test-run" },
     abort: () => {
       aborted += 1;
     },

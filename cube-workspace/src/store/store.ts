@@ -1,7 +1,8 @@
 import { readFile, appendFile, access } from "node:fs/promises";
 import YAML from "yaml";
 import { ZodType } from "zod";
-import { atomicWriteFile } from "./atomic-write.js";
+import { atomicWriteFile, withFileLock } from "./atomic-write.js";
+import { McpDocumentSchema, mcpConnectionKey, parseMcpConfig, type McpConfigSnapshot } from "../schemas/mcp.schema.js";
 import { HomeManager } from "../home-manager.js";
 import { ConfigSchema, type CubeConfigDocument } from "../schemas/config.schema.js";
 import { ModelCatalogCache, ModelCatalogCacheSchema } from "../schemas/model-catalog.schema.js";
@@ -47,6 +48,33 @@ export class Store<T> {
 
 export const ConfigStore = (home: HomeManager) =>
   new Store<CubeConfigDocument>(home.getConfigPath(), "yaml", ConfigSchema);
+
+export const McpStore = (home: HomeManager) => {
+  const filePath = home.getMcpPath();
+  const store = new Store<unknown>(filePath, "json");
+  return {
+    read: async (): Promise<McpConfigSnapshot> => {
+      try { return parseMcpConfig(await store.read()); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return parseMcpConfig({ mcpServers: {} });
+        return { servers: {}, errors: {}, error: error instanceof SyntaxError
+          ? "Invalid mcp.json: malformed JSON."
+          : "Cannot read mcp.json. Check its file permissions." };
+      }
+    },
+    setDisabled: (name: string, disabled: boolean, expectedConnectionKey: string): Promise<McpConfigSnapshot> =>
+      withFileLock(filePath, async () => {
+        const document = McpDocumentSchema.parse(await store.read());
+        const snapshot = parseMcpConfig(document);
+        const server = snapshot.servers[name];
+        if (!server || mcpConnectionKey(server) !== expectedConnectionKey)
+          throw new Error("Server configuration changed. Run /reload before changing its enabled state.");
+        document.mcpServers[name] = { ...(document.mcpServers[name] as Record<string, unknown>), disabled };
+        await store.write(document);
+        return parseMcpConfig(document);
+      }),
+  };
+};
 
 export const ModelCatalogStore = (home: HomeManager) =>
   new Store<ModelCatalogCache>(home.getModelCatalogPath(), "json", ModelCatalogCacheSchema);

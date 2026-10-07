@@ -5,9 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { CubeHome } from "@cube/workspace";
 import { Mastra } from "@mastra/core";
-import type { Agent } from "@mastra/core/agent";
+import { Agent } from "@mastra/core/agent";
 import { InMemoryStore } from "@mastra/core/storage";
-import { ObservationalMemory } from "@mastra/memory/processors";
 import { APICallError } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { resolveAgentSkills } from "@mastra/core/skills";
@@ -41,7 +40,7 @@ const loadLogging = async () => {
   };
 };
 
-test("routes global and thread logs to separate JSONL files", async () => {
+test("persists thread logs and drains more than 16 entries without creating cube.log", { timeout: 10_000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cube-logger-test-"));
   const home = CubeHome({ cubeHome: root });
   await home.ensure();
@@ -67,6 +66,7 @@ test("routes global and thread logs to separate JSONL files", async () => {
           },
         },
       });
+      for (let index = 0; index < 40; index++) logging.logger.info("thread event", { index });
     });
     await logging.close();
     logging.logger.error("late provider cleanup after shutdown");
@@ -74,19 +74,16 @@ test("routes global and thread logs to separate JSONL files", async () => {
     logging.logger.error("second late provider cleanup after shutdown");
     await new Promise((resolve) => setImmediate(resolve));
 
-    const globalLog = await readFile(path.join(root, "logs", "cube.log"), "utf8");
+    await assert.rejects(readFile(path.join(root, "logs", "cube.log")), { code: "ENOENT" });
     const threadLog = await readFile(
       path.join(root, "logs", "threads", "thread-123.log"),
       "utf8",
     );
 
-    const globalRecord = JSON.parse(globalLog.trim()) as Record<string, unknown>;
-    const threadRecord = JSON.parse(threadLog.trim()) as Record<string, unknown>;
-
-    assert.equal(globalRecord.msg, "runtime started");
-    assert.equal(globalRecord.component, "runtime");
-    assert.equal(globalLog.includes("provider failed"), false);
-    assert.equal(globalLog.includes("late provider cleanup"), false);
+    const records = threadLog.trim().split("\n").map((line) => JSON.parse(line));
+    const threadRecord = records[0];
+    assert.equal(records.length, 41);
+    assert.deepEqual(records.slice(1).map((record) => record.index), Array.from({ length: 40 }, (_, index) => index));
 
     assert.equal(threadRecord.msg, "provider failed");
     assert.equal(threadRecord.threadId, "thread-123");
@@ -132,12 +129,10 @@ test("malformed skills log diagnostics without writing into the terminal", async
     closed = true;
     assert.equal(console.error, error);
     assert.equal(console.warn, warn);
-    const globalLog = await readFile(path.join(root, "logs", "cube.log"), "utf8");
+    await assert.rejects(readFile(path.join(root, "logs", "cube.log")), { code: "ENOENT" });
     const threadLog = await readFile(path.join(root, "logs", "threads", "skill-thread.log"), "utf8");
-    for (const log of [globalLog, threadLog]) {
-      assert.match(log, /\[WorkspaceSkills\] Failed to load skill/);
-    }
-    assert.match(globalLog, /incomplete explicit mapping pair/);
+    assert.match(threadLog, /\[WorkspaceSkills\] Failed to load skill/);
+    assert.match(threadLog, /Invalid skill metadata|incomplete explicit mapping pair/);
     assert.match(threadLog, /Test skill warning/);
   } finally {
     if (!closed) await logging.close();
@@ -146,12 +141,11 @@ test("malformed skills log diagnostics without writing into the terminal", async
   }
 });
 
-test("native Observer and Reflector log upstream failures to file, not the terminal", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cube-om-logger-test-"));
+test("public Mastra agent registration routes upstream failures to file, not the terminal", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cube-provider-logger-test-"));
   const { createCubeLogger, runWithCubeLogContext } = await import("../src/logger.js");
   const logging = await createCubeLogger(CubeHome({ cubeHome: root }));
   const storage = new InMemoryStore();
-  const mastra = new Mastra({ logger: logging.logger, storage });
   const model = new MockLanguageModelV3({
     provider: "openrouter",
     modelId: "test-rate-limit",
@@ -165,42 +159,36 @@ test("native Observer and Reflector log upstream failures to file, not the termi
       });
     },
   });
-  const memoryStorage = await storage.getStore("memory");
-  assert.ok(memoryStorage);
-  const om = new ObservationalMemory({ storage: memoryStorage, model });
-  om.__registerMastra(mastra);
-  // Exercise the pinned dependency's real factories/streams without OM's long 429 backoff.
-  const agents: Agent[] = [
-    Reflect.get(om.observer, "createAgent").call(om.observer, model),
-    Reflect.get(om.observer, "createAgent").call(om.observer, model, true),
-    Reflect.get(om.reflector, "createAgent").call(om.reflector, model),
-  ];
+  const agent = new Agent({ id: "logger-test", name: "Logger Test", instructions: "Test", model });
+  const mastra = new Mastra({ logger: logging.logger, storage, agents: { agent } });
   const terminal = (["error", "warn", "log", "info", "debug"] as const).map((method) =>
     t.mock.method(console, method, () => undefined),
   );
+  const stdout = t.mock.method(process.stdout, "write", () => true);
+  const stderr = t.mock.method(process.stderr, "write", () => true);
   let closed = false;
   try {
-    for (const agent of agents) {
-      await assert.rejects(
-        runWithCubeLogContext({ threadId: "test-thread" }, async () =>
-          (await agent.stream("Remember this test.", { maxRetries: 0 })).getFullOutput(),
-        ),
-        /rate-limited upstream/,
-      );
-    }
+    await assert.rejects(
+      runWithCubeLogContext({ threadId: "test-thread" }, async () =>
+        (await agent.stream("Test provider failure", { maxRetries: 0 })).getFullOutput(),
+      ),
+      /rate-limited upstream/,
+    );
     await mastra.shutdown();
     await logging.close();
     closed = true;
     const records = (await readFile(path.join(root, "logs", "threads", "test-thread.log"), "utf8"))
       .trim().split("\n").map((line) => JSON.parse(line));
     const failures = records.filter((record) => record.msg.includes("Upstream LLM API error"));
-    assert.equal(failures.length, 3);
+    assert.equal(failures.length, 1);
     for (const record of failures) {
       assert.equal(record.error.statusCode, 429);
       assert.match(record.error.message, /rate-limited upstream/);
       assert.equal(record.provider, "openrouter");
     }
     assert.equal(terminal.reduce((count, method) => count + method.mock.callCount(), 0), 0);
+    assert.equal(stdout.mock.callCount(), 0);
+    assert.equal(stderr.mock.callCount(), 0);
   } finally {
     t.mock.restoreAll();
     if (!closed) {

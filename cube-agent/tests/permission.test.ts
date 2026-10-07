@@ -54,3 +54,15 @@ test("tool policies are independent and Apply clears previous Ask and Deny rules
   assert.equal(session.resolveToolApproval("fetch"), "allow");
   assert.equal(session.resolveToolApproval("write_file"), "allow");
 });
+
+test("fresh MCP names receive Ask before publication and retained explicit Allow survives removal", async () => {
+  const session = new Session({ id: "mcp-permissions", ownerId: "test", resourceId: "test" });
+  let state: Record<string, unknown> = {};
+  session.permissions.setResolver({ getState: () => state, setState: async updates => { state = { ...state, ...updates }; } });
+  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["mcp_docs_saved"] }, ["mcp_docs_saved", "mcp_docs_new"]);
+  assert.equal(session.resolveToolApproval("mcp_docs_saved"), "allow");
+  assert.equal(session.resolveToolApproval("mcp_docs_new"), "ask");
+  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["mcp_docs_saved"] });
+  assert.equal(session.resolveToolApproval("mcp_docs_saved"), "allow");
+  assert.equal(session.resolveToolApproval("mcp_docs_new"), "ask");
+});

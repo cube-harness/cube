@@ -147,6 +147,12 @@ export class CubeApp {
 
   async handlePromptResult(result: PromptResult): Promise<void> {
     switch (result.kind) {
+      case "mcp":
+        if (this.runtime.mcp) await this.screen.pickMcp(this.runtime.mcp);
+        return;
+      case "tasks":
+        if (this.runtime.background) await this.screen.pickTasks(this.runtime.background);
+        return;
       case "skills":
         await this.screen.pickSkills(result.skills, (changes) => this.runtime.preference.setSkillsEnabled(changes));
         return;

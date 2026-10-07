@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { createTool, type ToolPayloadTransformContext } from "@mastra/core/tools";
 import { z } from "zod";
 import { resolveWorkspacePath } from "./file.tools.js";
-import { DEFAULT_WORKSPACE_ONLY } from "@cube/workspace";
+import { DEFAULT_BACKGROUND_TASKS, DEFAULT_WORKSPACE_ONLY } from "@cube/workspace";
 
 const MAX_OUTPUT = 256 * 1024;
 export const commandResultSchema = z.object({
@@ -13,14 +13,34 @@ export const commandResultSchema = z.object({
   reason: z.string(),
   cwd: z.string(),
   process_id: z.string(),
-  status: z.enum(["running", "completed", "failed", "cancelled", "timed_out"]),
+  status: z.enum(["pending", "running", "completed", "failed", "cancelled", "timed_out"]),
   output: z.string(),
   exit_code: z.number().nullable(),
   truncated: z.boolean(),
 });
 export type CommandResult = z.infer<typeof commandResultSchema>;
+export type ProcessRecord = {
+  id: string;
+  result: CommandResult;
+  workspaceRoot: string;
+  threadId?: string;
+  runId?: string;
+  toolCallId?: string;
+  createdAt: number;
+  completedAt?: number;
+  detached: boolean;
+  timeoutMs: number | null;
+};
+export type ProcessRegistry = {
+  list(): ProcessRecord[];
+  get(id: string, tail?: number): ProcessRecord;
+  stop(id: string): Promise<ProcessRecord>;
+  subscribe(listener: (record: ProcessRecord) => void): () => void;
+};
 type ProcessEntry = {
-  child: ChildProcess;
+  record: Omit<ProcessRecord, "result">;
+  child?: ChildProcess;
+  start: () => void;
   result: CommandResult;
   buffer: Buffer;
   closed: boolean;
@@ -36,21 +56,29 @@ const commandInput = z.object({
     .number()
     .positive()
     .max(600)
-    .default(120)
-    .describe("Process deadline in seconds, including background execution."),
+    .nullable()
+    .optional()
+    .describe("Deadline in seconds. Defaults to 120 for foreground, configured deadline for background. null disables the deadline only for background: true."),
   tail: z.number().int().min(1).max(2000).default(200),
   background: z.boolean().default(false),
 });
-const processInput = z.object({
-  process_id: z.string().uuid(),
-  tail: z.number().int().min(1).max(2000).default(200),
-});
+const manageTaskInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("list") }),
+  z.object({ action: z.enum(["get", "kill"]), id: z.string().uuid() }),
+]);
+export type ManageTaskInput = z.infer<typeof manageTaskInput>;
 
-export function createCommandTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
+export function createCommandTools(
+  root: string,
+  workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
+  background: { enabled: boolean; concurrency: number; timeout_ms: number } = DEFAULT_BACKGROUND_TASKS,
+) {
   const isWorkspaceOnly = () => typeof workspaceOnly === "function" ? workspaceOnly() : workspaceOnly;
   const processes = new Map<string, ProcessEntry>();
+  const listeners = new Set<(record: ProcessRecord) => void>();
   let disposed = false;
   let disposal: Promise<void> | undefined;
+  let taskHandler: ((input: ManageTaskInput, threadId: string) => Promise<unknown>) | undefined;
   const view = (entry: ProcessEntry, tail: number): CommandResult => {
     const lines = entry.buffer.toString("utf8").split(/\r?\n/);
     return {
@@ -67,18 +95,56 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
       );
     return entry;
   };
+  const snapshot = (entry: ProcessEntry, tail = 200): ProcessRecord => ({
+    ...entry.record, result: view(entry, tail),
+  });
+  const emit = (entry: ProcessEntry) => {
+    for (const listener of listeners) listener(snapshot(entry));
+  };
+  const dispatch = () => {
+    if (disposed) return;
+    let running = [...processes.values()].filter(
+      (entry) => entry.record.detached && !entry.closed && entry.result.status !== "pending",
+    ).length;
+    for (const entry of processes.values()) {
+      if (running >= background.concurrency) break;
+      if (!entry.closed && entry.result.status === "pending") {
+        running++;
+        entry.start();
+      }
+    }
+  };
+  const close = (entry: ProcessEntry, code: number | null) => {
+    if (entry.closed) return;
+    entry.closed = true;
+    entry.record.completedAt = Date.now();
+    entry.result.exit_code = code;
+    if (entry.result.status === "running")
+      entry.result.status = code === 0 ? "completed" : "failed";
+    const completed = [...processes.entries()].filter(([, process]) => process.closed);
+    for (const [id] of completed.slice(0, Math.max(0, completed.length - 100)))
+      processes.delete(id);
+    emit(entry);
+    entry.finish();
+    dispatch();
+  };
 
   function terminate(entry: ProcessEntry, status: "cancelled" | "timed_out"): Promise<void> {
     if (entry.closed) return Promise.resolve();
     if (entry.terminate) return entry.terminate;
     entry.result.status = status;
+    if (!entry.child) {
+      close(entry, null);
+      return Promise.resolve();
+    }
+    const child = entry.child;
     entry.terminate = (async () => {
-      const pid = entry.child.pid;
+      const pid = child.pid;
       if (pid) {
         if (
           process.platform === "win32" &&
-          entry.child.exitCode === null &&
-          entry.child.signalCode === null
+          child.exitCode === null &&
+          child.signalCode === null
         ) {
           await new Promise<void>((done, reject) => {
             const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
@@ -118,10 +184,10 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
       const output = Buffer.concat([entry.buffer, Buffer.from(message)]);
       entry.result.truncated ||= output.length > MAX_OUTPUT;
       entry.buffer = output.subarray(-MAX_OUTPUT);
-      entry.child.stdout?.destroy();
-      entry.child.stderr?.destroy();
-      entry.child.unref();
-      entry.finish();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+      close(entry, child.exitCode);
       entry.terminate = undefined;
       throw error;
     });
@@ -143,16 +209,21 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
 
   const execute_command = createTool({
     id: "execute_command",
-    description: `Run a non-interactive ${process.platform === "win32" ? "cmd.exe" : "POSIX shell"} command. Explain its purpose in reason. Use background: true for a long-running process, then get_process/kill_process with the returned handle. cwd is not an OS sandbox.`,
+    description: `Run a non-interactive ${process.platform === "win32" ? "cmd.exe" : "POSIX shell"} command. Explain its purpose in reason. Omitted/false background waits for the actual result. background:true runs builds/tests or servers in the background and returns a process_id (pending/running), not evidence of success. Inspect/stop that same ID with manage_task; the actual completion result arrives later in the originating conversation. Foreground timeout defaults to 120 seconds; background uses the configured deadline. timeout:null disables the deadline only for background:true. cwd is not an OS sandbox.`,
     inputSchema: commandInput,
     outputSchema: commandResultSchema,
     transform: { display: transform, transcript: transform },
     execute: async (input, context) => {
+      if (input.timeout === null && !input.background)
+        throw new Error("timeout: null requires background: true.");
+      if (input.background && !background.enabled)
+        throw new Error("Background commands are disabled in config.yaml.");
       if (disposed) throw new Error("Cube command runtime is closed.");
       context.abortSignal?.throwIfAborted();
       const cwd = await resolveWorkspacePath(root, input.cwd ?? ".", isWorkspaceOnly());
       if (!(await stat(cwd)).isDirectory()) throw new Error("Command cwd must be a directory.");
       if (disposed) throw new Error("Cube command runtime is closed.");
+      context.abortSignal?.throwIfAborted();
       if ([...processes.values()].filter((p) => !p.closed).length >= 32)
         throw new Error("32 processes are already active; stop one before starting another.");
       const id = randomUUID();
@@ -162,7 +233,7 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
         reason: input.reason,
         cwd,
         process_id: id,
-        status: "running",
+        status: input.background ? "pending" : "running",
         output: "",
         exit_code: null,
         truncated: false,
@@ -171,16 +242,54 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
       const completion = new Promise<void>((resolve) => {
         finish = resolve;
       });
-      const windows = process.platform === "win32";
-      const child = spawn(input.command, {
-        cwd,
-        shell: windows ? process.env.ComSpec || "cmd.exe" : "/bin/sh",
-        windowsHide: true,
-        detached: !windows,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const timeoutMs = input.timeout === null ? null : input.timeout !== undefined
+        ? input.timeout * 1000 : input.background ? background.timeout_ms || null : 120_000;
       const entry: ProcessEntry = {
-        child,
+        record: {
+          id, workspaceRoot: root, threadId: context.agent?.threadId,
+          toolCallId: context.agent?.toolCallId,
+          runId: context.requestContext?.get("cubeBackgroundRunId") as string | undefined,
+          createdAt: Date.now(), detached: input.background, timeoutMs,
+        },
+        start: () => {
+          result.status = "running";
+          const windows = process.platform === "win32";
+          const child = entry.child = spawn(input.command, {
+            cwd,
+            shell: windows ? process.env.ComSpec || "cmd.exe" : "/bin/sh",
+            windowsHide: true,
+            detached: !windows,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          const stop = (status: "cancelled" | "timed_out") => {
+            void terminate(entry, status).catch(() => undefined);
+          };
+          const timer = timeoutMs === null ? undefined : setTimeout(() => stop("timed_out"), timeoutMs);
+          timer?.unref();
+          const cancel = () => stop("cancelled");
+          const append = (chunk: Buffer) => {
+            if (chunk.length + entry.buffer.length > MAX_OUTPUT) result.truncated = true;
+            entry.buffer = Buffer.concat([entry.buffer, chunk]).subarray(-MAX_OUTPUT);
+            emit(entry);
+          };
+          child.stdout?.on("data", append);
+          child.stderr?.on("data", append);
+          child.once("error", (error) => {
+            result.status = "failed";
+            append(Buffer.from(error.message));
+          });
+          child.once("close", (code) => {
+            clearTimeout(timer);
+            context.abortSignal?.removeEventListener("abort", cancel);
+            close(entry, code);
+          });
+          // Background jobs outlive the tool's turn; only foreground follows its abort signal.
+          if (!input.background) {
+            context.abortSignal?.addEventListener("abort", cancel, { once: true });
+            if (context.abortSignal?.aborted) cancel();
+          }
+          emit(entry);
+        },
         result,
         buffer: Buffer.alloc(0),
         closed: false,
@@ -188,72 +297,43 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
         finish,
       };
       processes.set(id, entry);
-      const append = (chunk: Buffer) => {
-        if (chunk.length + entry.buffer.length > MAX_OUTPUT) result.truncated = true;
-        entry.buffer = Buffer.concat([entry.buffer, chunk]).subarray(-MAX_OUTPUT);
-      };
-      child.stdout?.on("data", append);
-      child.stderr?.on("data", append);
-      child.once("error", (error) => {
-        result.status = "failed";
-        append(Buffer.from(error.message));
-      });
-      child.once("close", (code) => {
-        entry.closed = true;
-        const completed = [...processes.entries()].filter(([, p]) => p.closed);
-        for (const [id] of completed.slice(0, Math.max(0, completed.length - 100)))
-          processes.delete(id);
-        result.exit_code = code;
-        if (result.status === "running") result.status = code === 0 ? "completed" : "failed";
-        clearTimeout(timer);
-        context.abortSignal?.removeEventListener("abort", cancel);
-        finish();
-      });
-      const stop = (status: "cancelled" | "timed_out") => {
-        void terminate(entry, status).catch(() => undefined); // Failure is retained in the process result.
-      };
-      const timer = setTimeout(() => stop("timed_out"), input.timeout * 1000);
-      timer.unref();
-      const cancel = () => stop("cancelled");
-      context.abortSignal?.addEventListener("abort", cancel, { once: true });
-      if (context.abortSignal?.aborted) cancel();
-      try {
-        if (input.background) {
-          await new Promise<void>((done) => {
-            child.once("spawn", done);
-            child.once("error", () => done());
-          });
-          return view(entry, input.tail);
-        }
-        await completion;
+      emit(entry);
+      if (input.background) {
+        dispatch();
         return view(entry, input.tail);
-      } finally {
-        // A completed tool call must not cancel an intentionally backgrounded process.
-        context.abortSignal?.removeEventListener("abort", cancel);
       }
+      entry.start();
+      await completion;
+      return view(entry, input.tail);
     },
   });
-  const get_process = createTool({
-    id: "get_process",
-    description: "Get bounded output and status of a process started by this Cube runtime.",
-    inputSchema: processInput,
-    outputSchema: commandResultSchema,
-    execute: async ({ process_id, tail }) => view(find(process_id), tail),
-  });
-  const kill_process = createTool({
-    id: "kill_process",
-    description:
-      "Stop an owned process tree using its Cube process handle, never an arbitrary operating-system PID.",
-    inputSchema: processInput,
-    outputSchema: commandResultSchema,
-    execute: async ({ process_id, tail }) => {
-      const entry = find(process_id);
-      await terminate(entry, "cancelled");
-      return view(entry, tail);
+  const manage_task = createTool({
+    id: "manage_task",
+    description: "List background commands in this conversation, get their bounded logs/status, or kill an attached process tree. Use the same process_id returned by execute_command as id, never an OS PID. Historical tasks are read-only; logs are limited to 200 lines / 16 KiB.",
+    inputSchema: manageTaskInput,
+    execute: async (input, context) => {
+      const threadId = context.agent?.threadId;
+      if (!threadId) throw new Error("Task management requires a calling thread.");
+      if (!taskHandler) throw new Error("Task management is unavailable in this runtime.");
+      return taskHandler(input, threadId);
     },
   });
   return {
-    tools: { execute_command, get_process, kill_process },
+    tools: { execute_command, manage_task },
+    setTaskHandler: (handler: NonNullable<typeof taskHandler>) => { taskHandler = handler; },
+    processes: {
+      list: () => [...processes.values()].map((entry) => snapshot(entry)),
+      get: (id, tail = 200) => snapshot(find(id), Math.max(1, Math.min(2000, tail))),
+      stop: async (id) => {
+        const entry = find(id);
+        await terminate(entry, "cancelled");
+        return snapshot(entry);
+      },
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+    } satisfies ProcessRegistry,
     dispose: () => {
       disposed = true;
       disposal ??= (async () => {
@@ -263,6 +343,7 @@ export function createCommandTools(root: string, workspaceOnly: boolean | (() =>
         const failed = outcomes.find((outcome) => outcome.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;
         processes.clear();
+        listeners.clear();
       })();
       return disposal;
     },

@@ -82,6 +82,11 @@ export class OAuthLoginComponent<T> implements Component {
     this.loader.handleInput(data);
   }
 
+  dispose(): void {
+    this.done = true;
+    this.loader.dispose();
+  }
+
   invalidate(): void {
     this.loader.invalidate();
   }

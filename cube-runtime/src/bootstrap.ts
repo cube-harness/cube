@@ -11,6 +11,7 @@ import {
 } from "@cube/agent";
 import {
   ConfigStore,
+  McpStore,
   AuthStore,
   CubeHome,
   CubeWorkspace,
@@ -35,8 +36,10 @@ import { GatewayService, type GatewayServiceDependencies } from "./services/gate
 import { ModelService } from "./services/model.service.js";
 import { PreferenceService } from "./services/preference.service.js";
 import { PermissionService } from "./services/permission.service.js";
+import { McpService } from "./services/mcp.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ThreadService } from "./services/thread.service.js";
+import { BackgroundService } from "./services/background.service.js";
 import type {
   GatewayReadiness,
   ModelSelection,
@@ -181,12 +184,14 @@ export const prepareCubeRuntime = async (
         });
 
         const memory = new MemoryService(session, composition.context);
+        let mcp: McpService | undefined;
+        let shuttingDown = false;
         const permissions = new PermissionService(workspace, config.permissions, {
           listTools: async () => [...await composition!.agent.listPermissionTools(), "ask_user"],
           isBusy: () => memory.isBusy() || session.run.isRunning() ||
-            session.approval.isArmed() || session.suspensions.hasPending(),
+            session.approval.isArmed() || session.suspensions.hasPending() || !!mcp?.isApplying(),
           apply: async (next) => {
-            const notices = await configureCubePermissions(session, next);
+            const notices = await configureCubePermissions(session, next, composition!.mcp.readToolNames());
             Object.assign(config.permissions, next);
             composition!.tools.discardPreview();
             composition!.agent.refreshPermissions();
@@ -205,6 +210,33 @@ export const prepareCubeRuntime = async (
         };
         const permissionNotices = await configureCubePermissions(session, config.permissions);
         await normalizeStartupSession(session);
+        mcp = new McpService({
+          store: McpStore(home), client: composition.mcp,
+          isBusy: () => shuttingDown || memory.isBusy() || permissions.isApplying() || session.run.isRunning() ||
+            session.approval.isArmed() || session.suspensions.hasPending(),
+          beforePublish: async (names) => {
+            await configureCubePermissions(session, config.permissions, names);
+            composition!.context.invalidate();
+          },
+        });
+        await mcp.reload();
+
+        let runtime!: CubeRuntime;
+        const background = new BackgroundService({
+          history: () => composition!.mastra.getStorage()!.getStore("backgroundTasks"),
+          processes: composition.tools.processes,
+          workspaceRoot: workspacePaths.root,
+          currentThread: () => session.thread.getId(),
+          notice: message => runtime ? runtime.notify(message) : permissionNotices.push(message),
+          redact: composition.redact,
+          drain: composition.drain,
+          continueProcess: composition.continueProcess,
+        });
+        composition.tools.setTaskHandler(async (input, threadId) => {
+          if (input.action === "list") return { tasks: await background.list(threadId) };
+          if (input.action === "kill") await background.stop(input, threadId);
+          return background.get(input, threadId);
+        });
 
         const thread = new ThreadService(
           session,
@@ -219,9 +251,10 @@ export const prepareCubeRuntime = async (
           {
             fork: (id, title) => composition!.context.fork(id, title),
             invalidate: () => composition!.context.invalidate(),
-            isBusy: () => memory.isBusy() || permissions.isApplying(),
+            isBusy: () => memory.isBusy() || permissions.isApplying() || !!mcp?.isApplying(),
             drain: () => composition!.drain(),
             onActivated: () => composition!.durableMemory.check(),
+            beforeDelete: threadId => background.beforeDelete(threadId),
           },
         );
         const stopThreadEnd = session.onBeforeAgentEnd(async (event) => {
@@ -254,7 +287,7 @@ export const prepareCubeRuntime = async (
           // Rollback of a rejected switch is a no-op, even during an active turn.
           if (modelId === liveModelId && selection.reasoningEffort === liveEffort) return;
           if (
-            memory.isBusy() || permissions.isApplying() ||
+            memory.isBusy() || permissions.isApplying() || mcp?.isApplying() ||
             session.run.isRunning() ||
             session.approval.isArmed() ||
             session.suspensions.hasPending()
@@ -301,17 +334,20 @@ export const prepareCubeRuntime = async (
           memory,
           gateway,
           prompt: { initialize: () => prompt.initialize() },
+          mcp,
         };
         const prompt = new PromptService(home, session, thread, commands, (callback) => {
           const threadId = session.thread.getId();
           return runWithCubeLogContext(threadId ? { threadId } : {}, callback);
         });
 
-        const runtime = new CubeRuntime({
+        runtime = new CubeRuntime({
           session,
           tools: composition.tools,
           context: composition.context,
           notices: permissionNotices,
+          background,
+          mcp,
           prompt,
           thread,
           model,
@@ -324,7 +360,9 @@ export const prepareCubeRuntime = async (
           readInstructionInfo: () => composition!.agent.instructionInfo,
           readHistory: async () => (await HistoryStore(home).read()).map((entry) => entry.text),
           shutdownResources: async () => {
+            shuttingDown = true;
             stopThreadEnd();
+            await mcp?.dispose();
             await composition!.shutdown();
           },
         });

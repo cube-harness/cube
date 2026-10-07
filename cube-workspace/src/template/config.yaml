@@ -21,6 +21,12 @@ status_line:
 
 telemetry: false
 
+background_tasks:
+  enabled: true
+  concurrency: 2
+  timeout_ms: 300000
+  # 0 means no deadline. execute_command timeout:null overrides this per command.
+
 soul:
   max_characters: 20000
 

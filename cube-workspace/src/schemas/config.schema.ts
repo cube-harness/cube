@@ -7,6 +7,7 @@ import {
   HOME_LIMITS,
   DURABLE_MEMORY_DEFAULTS,
   INHERIT_MODEL,
+  DEFAULT_BACKGROUND_TASKS,
 } from "../constants.js";
 
 export const GATEWAY_IDS = [
@@ -148,6 +149,11 @@ const soul = z
   .strict();
 
 const configSettingsShape = {
+  background_tasks: z.object({
+    enabled: z.boolean().default(DEFAULT_BACKGROUND_TASKS.enabled),
+    concurrency: z.number().int().min(1).max(32).default(DEFAULT_BACKGROUND_TASKS.concurrency),
+    timeout_ms: z.number().int().min(0).max(600000).default(DEFAULT_BACKGROUND_TASKS.timeout_ms),
+  }).strict().default(DEFAULT_BACKGROUND_TASKS),
   skills: z
     .object({ disabled: z.array(z.string().min(1)).default([]) })
     .strict()

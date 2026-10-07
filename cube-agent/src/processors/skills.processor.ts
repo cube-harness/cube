@@ -1,6 +1,7 @@
-import { isUserAuthoredMessage, type MessageList } from "@mastra/core/agent";
-import type { InputProcessor } from "@mastra/core/processors";
+import { isUserAuthoredMessage } from "@mastra/core/agent";
+import type { InputProcessor, ProcessInputArgs } from "@mastra/core/processors";
 import { RequestContext } from "@mastra/core/request-context";
+import { join } from "node:path";
 import type { CubeSkills } from "../skills.js";
 import { formatActivatedSkill } from "../prompts/skills.prompt.js";
 
@@ -19,59 +20,75 @@ export function findSkillMentions(text: string, knownNames: ReadonlySet<string>)
 }
 
 export function createSkillsProcessor(skills: CubeSkills): InputProcessor {
-  async function enrich(messageList: MessageList, requestContext?: RequestContext) {
+  async function activate({
+    messageList, requestContext, state, sendSignal,
+  }: Pick<ProcessInputArgs, "messageList" | "requestContext" | "state" | "sendSignal">) {
     const inputs = messageList.get.input.db().filter(isUserAuthoredMessage);
     if (!inputs.length) return messageList;
     const snapshot = await skills.snapshot(requestContext ?? new RequestContext());
     const names = new Set(snapshot.catalog.map((skill) => skill.name));
+    const delivered = (state.skillActivations ??= new Set<string>()) as Set<string>;
+    for (const stored of messageList.get.all.db()) {
+      const signal = stored.content.metadata?.signal as { metadata?: { cube?: Record<string, unknown> } } | undefined;
+      const cube = signal?.metadata?.cube;
+      if (stored.role === "signal" && cube?.kind === "skill-activation") {
+        delivered.add(JSON.stringify([cube.triggerMessageId, cube.source]));
+      }
+    }
+    const activations = [];
     for (const message of inputs) {
-      const metadata = message.content.metadata ?? {};
-      const cube = (metadata.cube ?? {}) as Record<string, unknown>;
-      if (typeof cube.displayText === "string") continue;
       const text = message.content.parts
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n");
       const mentions = findSkillMentions(text, names);
       if (!mentions.length) continue;
-      const blocks = [];
       for (const name of mentions) {
         if (!snapshot.catalog.some((skill) => skill.name === name && skill.enabled)) {
           throw new Error(`Skill "${name}" is disabled. Enable it with /skills.`);
         }
         const skill = await snapshot.enabled.get(name);
         if (!skill) throw new Error(`Cannot load skill "${name}". Check /skills.`);
-        blocks.push({ type: "text" as const, text: formatActivatedSkill(skill) });
+        const source = join(skill.path, "SKILL.md");
+        const key = JSON.stringify([message.id, source]);
+        if (!delivered.has(key)) {
+          activations.push({ skill, source, key, triggerMessageId: message.id });
+        }
       }
-      messageList.add(
-        {
-          ...message,
-          content: {
-            ...message.content,
-            parts: [...blocks, ...message.content.parts],
-            metadata: { ...metadata, cube: { ...cube, displayText: text } },
-          },
-        },
-        "input",
-        { merge: false },
-      );
+    }
+    if (activations.length && !sendSignal) {
+      throw new Error("Skill activation requires native signal delivery.");
+    }
+    for (const { skill, source, key, triggerMessageId } of activations) {
+      if (delivered.has(key)) continue;
+      await sendSignal!({
+        type: "reactive",
+        tagName: "system-reminder",
+        transient: false,
+        attributes: { type: "skill-activation", name: skill.name, source },
+        metadata: { cube: { kind: "skill-activation", triggerMessageId, source } },
+        contents: formatActivatedSkill(skill),
+      });
+      delivered.add(key);
     }
     return messageList;
   }
   return {
     id: "cube-skills",
-    async processInput({ messageList, requestContext, state }) {
+    async processInput(args) {
+      const { messageList, state } = args;
       try {
-        return await enrich(messageList, requestContext);
+        return await activate(args);
       } catch (error) {
         state.skillError = error instanceof Error ? error.message : String(error);
         return messageList;
       }
     },
-    async processInputStep({ messageList, requestContext, state }) {
+    async processInputStep(args) {
+      const { messageList, state } = args;
       if (state.skillError) return messageList;
       try {
-        return await enrich(messageList, requestContext);
+        return await activate(args);
       } catch (error) {
         state.skillError = error instanceof Error ? error.message : String(error);
         return messageList;

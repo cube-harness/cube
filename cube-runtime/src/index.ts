@@ -5,6 +5,9 @@ export {
   type CreateCubeRuntimeOptions,
 } from "./bootstrap.js";
 export { CubeRuntime } from "./runtime.js";
+export { BackgroundService } from "./services/background.service.js";
+export { McpService } from "./services/mcp.service.js";
+export type { McpState, McpServerState, McpStatus, McpLogin } from "@cube/agent";
 export { checkCubeUpdate, prepareCubeUpdate, type CubeUpdate } from "./services/update.service.js";
 export type { FileMutationResult, FileChange, CommandResult } from "@cube/agent";
 export * from "./types.js";

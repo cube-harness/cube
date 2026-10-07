@@ -64,6 +64,7 @@ export class ThreadService {
       isBusy(): boolean;
       drain?(): Promise<void>;
       onActivated?(threadId: string): void;
+      beforeDelete?(threadId: string): Promise<void>;
     },
   ) {
     this.plannedThreadId = createId();
@@ -147,6 +148,7 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("delete a thread");
     const wasActive = this.current() === threadId;
+    await this.context?.beforeDelete?.(threadId);
     await this.session.thread.delete({ threadId });
     this.snapshots.delete(threadId);
     if (this.pendingCreation === threadId) this.pendingCreation = undefined;

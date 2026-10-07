@@ -6,6 +6,7 @@ import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { PermissionService } from "./services/permission.service.js";
+import type { McpService } from "./services/mcp.service.js";
 import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -21,6 +22,7 @@ export type SlashCommandContext = {
   memory: MemoryService;
   gateway: GatewayService;
   prompt: Pick<PromptService, "initialize">;
+  mcp?: McpService;
 };
 
 type SlashCommandDefinition = SlashCommandSuggestion & {
@@ -62,6 +64,16 @@ const parseModelSelection = (argument: string) => {
 
 const definitions: SlashCommandDefinition[] = [
   {
+    name: "/mcp",
+    description: "manage MCP servers and tools",
+    execute: async () => ({ kind: "mcp" }),
+  },
+  {
+    name: "/tasks",
+    description: "inspect or stop background tasks and processes",
+    execute: async () => ({ kind: "tasks" }),
+  },
+  {
     name: "/permissions",
     description: "configure workspace boundaries and tool permissions",
     execute: async (_argument, context) => ({
@@ -83,9 +95,10 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/reload",
-    description: "reload project instructions",
+    description: "reload project instructions and MCP configuration",
     execute: async (_argument, context) => {
       await context.thread.reload();
+      await context.mcp?.reload();
       return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
     },
   },

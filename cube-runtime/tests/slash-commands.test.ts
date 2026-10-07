@@ -34,6 +34,18 @@ test("/skills only lists preferences without a gateway or thread", async () => {
   assert.deepEqual(result, { kind: "skills", skills: [] });
 });
 
+test("/mcp is view-only and /reload rereads MCP once after project context", async () => {
+  const calls: string[] = [];
+  const context = {
+    thread: { reload: async () => { calls.push("project"); return { agentsFiles: 0, agentsCharacters: 0, soulCharacters: 0 }; } },
+    mcp: { reload: async () => { calls.push("mcp"); } },
+  } as unknown as SlashCommandContext;
+  assert.deepEqual(await executeSlashCommand("/mcp", "", context), { kind: "mcp" });
+  assert.deepEqual(calls, []);
+  await executeSlashCommand("/reload", "", context);
+  assert.deepEqual(calls, ["project", "mcp"]);
+});
+
 const createContext = () => {
   const calls: unknown[][] = [];
   const state = {

@@ -1,4 +1,4 @@
-import { PermissionsSchema, type CubeConfig, type WorkspaceManager } from "@cube/workspace";
+import { PermissionsSchema, resolveToolPermission, type CubeConfig, type WorkspaceManager } from "@cube/workspace";
 import type { PermissionState } from "../types.js";
 
 export class PermissionService {
@@ -23,12 +23,12 @@ export class PermissionService {
       ...await this.options.listTools(),
       ...this.current.require_approval_for,
       ...this.current.deny_for,
+      ...(this.current.allow_for ?? []),
     ]);
     return {
       workspaceOnly: this.current.workspace_only,
       tools: Object.fromEntries([...names].sort().map((name) => [name,
-        this.current.deny_for.includes(name) ? "deny" :
-          this.current.require_approval_for.includes(name) ? "ask" : "allow",
+        resolveToolPermission(name, this.current),
       ])),
     };
   }
@@ -50,6 +50,7 @@ export class PermissionService {
         workspace_only: state.workspaceOnly,
         require_approval_for: entries.filter(([, policy]) => policy === "ask").map(([name]) => name),
         deny_for: entries.filter(([, policy]) => policy === "deny").map(([name]) => name),
+        allow_for: entries.filter(([, policy]) => policy === "allow").map(([name]) => name),
       });
       const entry = await this.workspace.getPermission();
       if (!entry?.trusted) throw new Error("Workspace is not trusted.");

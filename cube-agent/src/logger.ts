@@ -34,10 +34,7 @@ const safeThreadFileName = (threadId: string): string => {
 };
 
 class CubeFileTransport extends LoggerTransport {
-  constructor(
-    private readonly globalLogFile: string,
-    private readonly threadLogDir: string,
-  ) {
+  constructor(private readonly threadLogDir: string) {
     super({ objectMode: true });
   }
 
@@ -50,7 +47,7 @@ class CubeFileTransport extends LoggerTransport {
     const lines = raw.split(/\r?\n/).filter(Boolean);
 
     void this.writeLines(lines).then(
-      () => callback(null, chunk),
+      () => callback(),
       (error: unknown) => callback(error instanceof Error ? error : new Error(String(error))),
     );
   }
@@ -58,11 +55,8 @@ class CubeFileTransport extends LoggerTransport {
   private async writeLines(lines: string[]): Promise<void> {
     for (const line of lines) {
       const record = JSON.parse(line) as { threadId?: unknown };
-      const target =
-        typeof record.threadId === "string" && record.threadId.trim()
-          ? path.join(this.threadLogDir, `${safeThreadFileName(record.threadId)}.log`)
-          : this.globalLogFile;
-
+      if (typeof record.threadId !== "string" || !record.threadId.trim()) continue;
+      const target = path.join(this.threadLogDir, `${safeThreadFileName(record.threadId)}.log`);
       await appendFile(target, `${line}\n`, "utf8");
     }
   }
@@ -71,17 +65,15 @@ class CubeFileTransport extends LoggerTransport {
 export const createCubeLogger = async (home: HomeManager): Promise<CubeLogging> => {
   const logDir = home.getLogDir();
   const threadLogDir = path.join(logDir, "threads");
-  const globalLogFile = path.join(logDir, "cube.log");
-
   await mkdir(threadLogDir, { recursive: true });
-  await appendFile(globalLogFile, "", "utf8");
 
-  const transport = new CubeFileTransport(globalLogFile, threadLogDir);
+  const transport = new CubeFileTransport(threadLogDir);
   const logger = new PinoLogger({
     name: "cube",
     level: "info",
     prettyPrint: false,
-    transports: { file: transport },
+    overrideDefaultTransports: true,
+    transports: { default: transport },
     mixin: () => logContext.getStore() ?? {},
     formatters: {
       log: (record) => {

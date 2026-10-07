@@ -89,15 +89,15 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     }
     assert.match(requests[1]!, /Example Python project/);
     const messages = await session.thread.listMessages({ threadId: "init-thread" });
-    const init = messages.filter(isUserAuthoredMessage).find((message) => message.content.metadata?.cube)!;
+    const init = messages.filter(isUserAuthoredMessage).find((message) => (message.content.metadata?.signal as any)?.metadata?.cube)!;
     assert.ok(init);
-    assert.equal((init.content.metadata!.cube as any).displayText, "");
+    assert.equal((init.content.metadata!.signal as any).metadata.cube.displayText, "");
     assert.equal(init.content.parts.filter((part) => part.type === "text" && part.text.includes("analyze this codebase")).length, 1);
     const memory = await composition.mastra.getStorage()!.getStore("memory");
     const restored = await memory!.listMessages({ threadId: "init-thread", perPage: false });
     assert.deepEqual(restored.messages.find((message) => message.id === init.id)?.content, init.content);
     const fork = await memory!.cloneThread({ sourceThreadId: "init-thread", newThreadId: "init-fork" });
-    assert.equal((fork.clonedMessages.find((message) => message.content.metadata?.cube)?.content.metadata!.cube as any).displayText, "");
+    assert.equal((fork.clonedMessages.find((message) => (message.content.metadata?.signal as any)?.metadata?.cube)?.content.metadata!.signal as any).metadata.cube.displayText, "");
     await service.submit("Continue normally", () => { echoes++; });
     assert.deepEqual(errors, []);
     assert.equal(echoes, 1);

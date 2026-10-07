@@ -1,4 +1,3 @@
-import type { ToolsInput } from "@mastra/core/agent";
 import { getCanonicalModelId } from "../gateways/types.js";
 import { createFileTools } from "./file.tools.js";
 import { createCommandTools } from "./command.tools.js";
@@ -10,13 +9,19 @@ export function usesPatch(modelId: string): boolean {
 }
 
 export type CubeTools = ReturnType<typeof createCubeTools>;
-export function createCubeTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
+export function createCubeTools(
+  root: string,
+  workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
+  background?: Parameters<typeof createCommandTools>[2],
+) {
   const files = createFileTools(root, workspaceOnly);
-  const commands = createCommandTools(root, workspaceOnly);
+  const commands = createCommandTools(root, workspaceOnly, background);
   const { edit_file, write_file, apply_patch } = files.tools;
   return {
+    processes: commands.processes,
+    setTaskHandler: commands.setTaskHandler,
     names: Object.keys({ ...files.tools, ...commands.tools }),
-    forModel: (modelId: string): ToolsInput => ({
+    forModel: (modelId: string) => ({
       ...commands.tools,
       ...(usesPatch(modelId) ? { apply_patch } : { edit_file, write_file }),
     }),

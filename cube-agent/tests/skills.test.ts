@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HomeManager as Home, WorkspaceManager } from "@cube/workspace";
-import { MessageList } from "@mastra/core/agent";
+import { MessageList, createSignal } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
 import { createCubeSkills } from "../src/skills.js";
 import { createSkillsProcessor, findSkillMentions } from "../src/processors/skills.processor.js";
@@ -25,7 +25,7 @@ test("mentions exclude code, escapes, unknowns and partial names, preserving ord
   ] as const) assert.deepEqual(findSkillMentions(text, names), expected, text);
 });
 
-test("enrichment is atomic, idempotent through tool steps, and counted by the context guard", async () => {
+test("activation is atomic, keeps user input intact, deduplicates tool steps, and counts toward context", async () => {
   const enabled = resolveAgentSkills([createSkill({ name: "review", description: "Review", instructions: "Full instructions. ".repeat(10_000) })]);
   const snapshot = { catalog: ["review", "missing"].map((name) => ({ name, path: name, description: name,
     source: "project" as const, enabled: true, userInvocable: true })), projectPaths: [], globalPaths: [], enabled };
@@ -34,19 +34,31 @@ test("enrichment is atomic, idempotent through tool steps, and counted by the co
   const list = new MessageList({ threadId: "thread", resourceId: "resource" });
   list.add({ id: "submission", role: "user", createdAt: new Date(), content: { format: 2, parts: [{ type: "text", text: "$review $missing" }] } }, "input");
   const requestContext = new RequestContext();
+  const sendSignal = async (input: Parameters<typeof createSignal>[0]) => {
+    const signal = createSignal(input);
+    list.addSignal(signal);
+    return signal;
+  };
   requestContext.set("controller", { threadId: "thread" });
   const failedState = {};
-  await processor.processInput!({ messageList: list, requestContext, state: failedState } as any);
+  await processor.processInput!({ messageList: list, requestContext, state: failedState, sendSignal } as any);
   assert.throws(() => processor.processLLMRequest!({ state: failedState } as any), /Cannot load skill/);
   assert.equal(list.get.input.db()[0]!.content.parts.length, 1);
+  assert.equal(list.get.all.db().filter(message => message.role === "signal").length, 0);
   list.add({ ...list.get.input.db()[0]!, content: { format: 2, parts: [{ type: "text", text: "$review" }] } }, "input", { merge: false });
   const skillState = {};
-  await processor.processInput!({ messageList: list, requestContext, state: skillState } as any);
+  await processor.processInput!({ messageList: list, requestContext, state: skillState, sendSignal } as any);
   const before = structuredClone(list.get.input.db()[0]);
-  await processor.processInputStep!({ messageList: list, requestContext, state: skillState } as any);
+  await processor.processInputStep!({ messageList: list, requestContext, state: skillState, sendSignal } as any);
   assert.deepEqual(list.get.input.db()[0], before);
   assert.equal(before!.id, "submission");
-  assert.equal(before!.content.parts.length, 2);
+  assert.equal(before!.content.parts.length, 1);
+  assert.equal(list.get.all.db().filter(message => message.role === "signal").length, 1);
+  const missingState = {};
+  const fresh = new MessageList();
+  fresh.add({ role: "user", content: "$review" }, "input");
+  await processor.processInput!({ messageList: fresh, requestContext, state: missingState } as any);
+  assert.throws(() => processor.processLLMRequest!({ state: missingState } as any), /native signal delivery/);
   const storage = new InMemoryStore();
   const memory = (await storage.getStore("memory"))!;
   await memory.saveThread({ thread: { id: "thread", resourceId: "resource", createdAt: new Date(), updatedAt: new Date() } });
@@ -60,7 +72,28 @@ test("enrichment is atomic, idempotent through tool steps, and counted by the co
   await assert.rejects(async () => guard.processLLMRequest!({ state, requestContext,
     prompt: await list.get.all.aiV5.llmPrompt(), abort: (reason: string) => { throw new Error(reason); },
   } as any), /No older conversation can be compacted safely/);
-  assert.equal(list.get.input.db()[0]!.content.parts.length, 2, "guard must not truncate the skill body");
+  assert.match(JSON.stringify(list.get.all.db()), /Full instructions/, "guard must not truncate the signal body");
+});
+
+test("partial skill delivery fails closed and retry uses persisted activation metadata", async () => {
+  const enabled = resolveAgentSkills(["first", "second"].map(name => createSkill({ name, description: name, instructions: name })));
+  const catalog = ["first", "second"].map(name => ({ name, path: name, description: name, source: "project" as const, enabled: true, userInvocable: true }));
+  const processor = createSkillsProcessor({ snapshot: async () => ({ catalog, enabled, projectPaths: [], globalPaths: [] }), list: async () => catalog, setDisabled() {} });
+  const list = new MessageList();
+  list.add({ id: "trigger", role: "user", content: "$first $second" }, "input");
+  let attempts = 0;
+  const sendSignal = async (input: Parameters<typeof createSignal>[0]) => {
+    if (++attempts === 2) throw new Error("Delivery failed");
+    const signal = createSignal(input); list.addSignal(signal); return signal;
+  };
+  const failed = {};
+  await processor.processInput!({ messageList: list, state: failed, sendSignal } as any);
+  assert.throws(() => processor.processLLMRequest!({ state: failed } as any), /Delivery failed/);
+  assert.equal(list.get.all.db().filter(message => message.role === "signal").length, 1);
+  await processor.processInput!({ messageList: list, state: {}, sendSignal } as any);
+  assert.equal(attempts, 3);
+  assert.equal(list.get.all.db().filter(message => message.role === "signal").length, 2);
+  assert.equal(list.get.input.db()[0]!.content.parts.length, 1);
 });
 
 test("catalog filters same-name sources and aliases; request snapshots and native path/search stay filtered", async () => {
@@ -127,8 +160,13 @@ test("community global skills share native loading, activation and disable filte
     assert.ok(snapshot.globalPaths.includes(community.path));
     const list = new MessageList();
     list.add({ role: "user", content: "Use $community-review" }, "input");
-    await createSkillsProcessor(skills).processInput!({ messageList: list, requestContext: context, state: {} } as any);
-    assert.match(JSON.stringify(list.get.input.db()), /Instructions for community-review/);
+    await createSkillsProcessor(skills).processInput!({ messageList: list, requestContext: context, state: {},
+      sendSignal: async (input: Parameters<typeof createSignal>[0]) => {
+        const signal = createSignal(input); list.addSignal(signal); return signal;
+      },
+    } as any);
+    assert.match(JSON.stringify(list.get.all.db()), /Instructions for community-review/);
+    assert.doesNotMatch(JSON.stringify(list.get.input.db().filter(message => message.role === "user")), /Instructions for community-review/);
     skills.setDisabled([community.path]);
     const fresh = await skills.snapshot(new RequestContext());
     assert.equal(fresh.catalog.find(({ name }) => name === "community-review")!.enabled, false);

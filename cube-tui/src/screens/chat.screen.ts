@@ -17,10 +17,14 @@ import type {
   UsageMetrics,
   SkillChoice,
   PermissionState,
+  BackgroundService,
+  McpService,
 } from "@cube/runtime";
 import { toRuntimeNotice } from "@cube/runtime";
 import { SkillPicker } from "../components/skill-picker.js";
 import { PermissionPicker } from "../components/permission-picker.js";
+import { TaskPicker } from "../components/task-picker.js";
+import { McpPicker } from "../components/mcp-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "../components/approval-picker.js";
 import {
   ToolSuspensionPicker,
@@ -92,6 +96,8 @@ export class ChatScreen {
   readonly footer: Footer;
 
   private mounted = false;
+  private closeTasks?: () => void;
+  private closeMcp?: () => void;
   private dock?: VStack;
   private inputPanel?: PetPanel;
   private transcript?: ScrollView;
@@ -178,6 +184,8 @@ export class ChatScreen {
   }
 
   unmount(): void {
+    this.closeTasks?.();
+    this.closeMcp?.();
     this.promptEditor.focused = false;
     this.inputPanel?.stop();
     this.workingIndicator.stop();
@@ -379,6 +387,26 @@ export class ChatScreen {
     }));
   }
 
+  pickTasks(background: BackgroundService): Promise<void> {
+    let picker: TaskPicker;
+    return this.showOverlay<void>(finish => (picker = new TaskPicker(background, {
+      onClose: () => finish(), onChange: () => this.requestRender(),
+      onError: error => this.showNotice(toRuntimeNotice(error)),
+      logHeight: () => Math.max(3, this.options.tui.terminal.rows - 20),
+    })), finish => { this.closeTasks = () => finish(); }, () => {
+      picker.dispose(); this.closeTasks = undefined;
+    });
+  }
+
+  pickMcp(service: McpService): Promise<void> {
+    let picker: McpPicker;
+    return this.showOverlay<void>(finish => (picker = new McpPicker(service, {
+      tui: this.options.tui, onClose: () => finish(), onChange: () => this.requestRender(),
+    })), finish => { this.closeMcp = () => finish(); }, () => {
+      picker.dispose(); this.closeMcp = undefined;
+    });
+  }
+
   pickTheme(current: string): Promise<string | null> {
     return this.showOverlay<string | null>(
       (finish) =>
@@ -466,6 +494,8 @@ export class ChatScreen {
     onOpen?: (finish: (value: T) => void) => void,
     onClose?: () => void,
   ): Promise<T> {
+    this.closeTasks?.();
+    this.closeMcp?.();
     return new Promise<T>((resolve) => {
       const host = this.inputPanel ?? this.dock ?? this.options.tui;
       let closed = false;
