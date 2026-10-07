@@ -1,8 +1,11 @@
 import type { Session, InstructionInfo, CubeTools, CubeContext } from "@cube/agent";
+import { toRuntimeNotice } from "./types.js";
 import type { MemoryService } from "./services/memory.service.js";
+import type { BackgroundService } from "./services/background.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
 import type { PermissionService } from "./services/permission.service.js";
+import type { McpService } from "./services/mcp.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
@@ -24,6 +27,8 @@ type CubeRuntimeDependencies = {
   preference: PreferenceService;
   permission: PermissionService;
   memory: MemoryService;
+  background?: BackgroundService;
+  mcp?: McpService;
   context?: CubeContext;
   gateway: GatewayService;
   suggestions: SlashCommandSuggestion[];
@@ -41,6 +46,8 @@ export class CubeRuntime {
   readonly permission: PermissionService;
   readonly memory: MemoryService;
   readonly gateway: GatewayService;
+  readonly background?: BackgroundService;
+  readonly mcp?: McpService;
 
   private shutdownPromise?: Promise<void>;
   private unsubscribeTools?: () => void;
@@ -54,6 +61,8 @@ export class CubeRuntime {
     this.permission = dependencies.permission;
     this.memory = dependencies.memory;
     this.gateway = dependencies.gateway;
+    this.background = dependencies.background;
+    this.mcp = dependencies.mcp;
     if (dependencies.tools) {
       this.unsubscribeTools = dependencies.session.subscribe((event) => {
         if (event.type === "tool_end") dependencies.tools!.discardPreview(event.toolCallId);
@@ -128,6 +137,8 @@ export class CubeRuntime {
       !this.dependencies.session.suspensions.hasPending()
     )
       return false;
+    const runId = this.dependencies.session.run.getRunId();
+    if (runId) void this.background?.cancelRun(runId).catch(error => this.notify(toRuntimeNotice(error).message));
     this.dependencies.session.abort();
     return true;
   }
@@ -201,6 +212,7 @@ export class CubeRuntime {
       await this.memory.shutdown?.();
       if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending())
         session.abort();
+      await this.background?.shutdown();
       if (session.thread.getId() !== null) {
         await session.thread.clearAndReleaseLock().catch(() => undefined);
       }

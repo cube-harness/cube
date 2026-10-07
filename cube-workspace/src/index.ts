@@ -10,6 +10,7 @@ export type { CubeProject, ContextFile } from "./workspace-manager.js";
 export {
   Store,
   ConfigStore,
+  McpStore,
   ModelCatalogStore,
   PermissionStore,
   SoulStore,
@@ -31,5 +32,6 @@ export * from "./schemas/permission.schema.js";
 export * from "./schemas/model-catalog.schema.js";
 export * from "./schemas/history.schema.js";
 export * from "./schemas/auth.schema.js";
+export * from "./schemas/mcp.schema.js";
 export { providers as snapshotProviders } from "@opencode-ai/models/snapshot";
 export * from "./constants.js";

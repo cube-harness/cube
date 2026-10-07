@@ -71,7 +71,7 @@ export const startTui = async (): Promise<void> => {
     exitPromise ??= (async () => {
       await launched?.app.stop();
       await launched?.runtime.shutdown();
-      process.exit(0);
+      process.exitCode = 0;
     })();
     return exitPromise;
   };

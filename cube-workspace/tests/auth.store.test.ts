@@ -10,7 +10,7 @@ import type { CubeAuth } from "../src/schemas/auth.schema.js";
 
 test("auth updates for the same home cannot let a delayed refresh overwrite a newer account", async context => {
   const home = new HomeManager({ cubeHome: path.join(os.tmpdir(), "cube-auth-write-order") });
-  let document: CubeAuth = { api_keys: {}, oauth: {} };
+  let document: CubeAuth = { api_keys: {}, oauth: {}, mcp: {} };
   let release!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; });
   let started!: () => void;
@@ -54,6 +54,26 @@ const createTestHome = async () => {
 
 const cleanup = (tmp: string) =>
   rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
+test("MCP OAuth updates isolate URLs and preserve gateway and other server credentials", async () => {
+  const { home, tmp } = await createTestHome();
+  try {
+    const auth = new AuthStore(home);
+    await auth.replaceApiKey("google", "google-secret");
+    await auth.updateMcpValues("first", "https://one.test/mcp", values => ({ ...values, tokens: "first-token" }));
+    await auth.updateMcpValues("other", "https://two.test/mcp", () => ({ tokens: "other-token" }));
+    assert.deepEqual(await auth.getMcpValues("first", "https://changed.test/mcp"), {});
+    await auth.updateMcpValues("first", "https://changed.test/mcp", values => {
+      assert.deepEqual(values, {});
+      return { tokens: "new-token" };
+    });
+    await auth.removeMcp("first");
+    const reread = new AuthStore(home);
+    assert.deepEqual(await reread.getMcpValues("first", "https://changed.test/mcp"), {});
+    assert.deepEqual(await reread.getMcpValues("other", "https://two.test/mcp"), { tokens: "other-token" });
+    assert.equal(await reread.getApiKey("google"), "google-secret");
+  } finally { await cleanup(tmp); }
+});
 
 test("AuthStore keeps all supported provider keys separate, including Coding Plans", async () => {
   const { home, tmp } = await createTestHome();
@@ -200,6 +220,7 @@ test("Bootstrap seeds a valid empty auth store and does not load Cube-home .env"
     assert.deepEqual(await new AuthStore(home).read(), {
       api_keys: {},
       oauth: {},
+      mcp: {},
     });
     assert.equal(process.env[variable], undefined);
   } finally {

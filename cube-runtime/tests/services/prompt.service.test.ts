@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Session } from "@cube/agent";
+import { INITIALIZE_PROMPT, type Session } from "@cube/agent";
 import type { Home } from "@cube/workspace";
 import { slashCommandSuggestions } from "../../src/slash-commands.js";
 import { PromptService } from "../../src/services/prompt.service.js";
@@ -42,6 +42,8 @@ test("PromptService records input once and uses native followUp only for prompts
 
   assert.deepEqual(await service.submit("  hello  "), { kind: "submitted" });
   assert.deepEqual(await service.submit("/exit"), { kind: "exit-requested" });
+  assert.deepEqual(await service.submit("/tasks"), { kind: "tasks" });
+  assert.ok(slashCommandSuggestions.some(command => command.name === "/tasks"));
   assert.equal(followUpCalls, 1);
   assert.deepEqual(calls, [
     ["ensureForPrompt", "hello"],
@@ -92,16 +94,29 @@ test("PromptService cancels native follow-ups newest first without changing FIFO
 
 test("/init dispatches without echo, records history once, and requires an idle configured session", async () => {
   const history: string[] = [];
-  const sent: string[] = [];
+  const sent: unknown[] = [];
   let echoes = 0;
   let created = 0;
   let ready = true;
   let busy = false;
+  let listener: ((event: { type: string }) => void) | undefined;
+  let unsubscribed = 0;
+  let fail = false;
+  const finalized: string[] = [];
   const session = {
     run: { isRunning: () => busy },
     approval: { isArmed: () => false },
     suspensions: { hasPending: () => false },
-    followUp: async ({ content }: { content: string }) => { sent.push(content); },
+    followUp: async () => { assert.fail("/init must not enter the follow-up queue"); },
+    subscribe: (callback: typeof listener) => {
+      listener = callback;
+      return () => { listener = undefined; unsubscribed++; };
+    },
+    sendSignal: (signal: unknown, options: unknown) => {
+      sent.push(signal);
+      assert.deepEqual(options, { requireDelivery: true });
+      return { accepted: fail ? Promise.reject(new Error("init delivery failed")) : Promise.resolve({ accepted: true }) };
+    },
   } as unknown as Session;
   const commands = {
     gateway: { readiness: async () => ({ ready }), listChoices: () => [] },
@@ -110,13 +125,21 @@ test("/init dispatches without echo, records history once, and requires an idle 
   } as unknown as SlashCommandContext;
   const service = new PromptService(
     {} as Home, session,
-    { current: () => null, ensureForPrompt: async () => { created++; return "init-thread"; } } as unknown as ThreadService,
+    { current: () => null, ensureForPrompt: async () => { created++; return "init-thread"; },
+      finishRun: async (reason: string) => { finalized.push(reason); },
+    } as unknown as ThreadService,
     commands, (callback) => callback(), async (text) => { history.push(text); },
   );
   assert.ok(slashCommandSuggestions.some((command) => command.name === "/init"));
-  assert.deepEqual(await service.submit("/init", () => { echoes++; }), { kind: "submitted" });
+  let completed = false;
+  const init = service.submit("/init", () => { echoes++; }).then(result => { completed = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(completed, false, "signal acceptance is not turn completion");
+  listener!({ type: "agent_end" });
+  assert.deepEqual(await init, { kind: "submitted" });
   assert.deepEqual(history, ["/init"]);
-  assert.deepEqual(sent, ["/init"]);
+  assert.deepEqual(sent, [{ type: "user", tagName: "user", contents: INITIALIZE_PROMPT, metadata: { cube: { displayText: "" } } }]);
+  assert.equal(unsubscribed, 1);
   assert.equal(echoes, 0);
   assert.equal(created, 1);
   ready = false;
@@ -127,6 +150,33 @@ test("/init dispatches without echo, records history once, and requires an idle 
   const blocked = await service.submit("/init");
   assert.equal(blocked.kind, "notice");
   assert.equal(sent.length, 1);
+  busy = false;
+  fail = true;
+  const rejected = await service.submit("/init");
+  assert.equal(rejected.kind, "notice");
+  assert.match(JSON.stringify(rejected), /init delivery failed/);
+  assert.deepEqual(finalized, ["error"]);
+  assert.equal(unsubscribed, 2);
+});
+
+test("MCP changes block prompts before thread creation but keep /mcp view available", async () => {
+  let applying = true;
+  let readinessCalls = 0, created = 0, sent = 0;
+  const thread = { current: () => null, ensureForPrompt: async () => { created++; applying = true; return "thread"; } } as unknown as ThreadService;
+  const service = new PromptService({} as Home, {
+    followUp: async () => { sent++; }, run: { isRunning: () => false },
+  } as unknown as Session, thread, {
+    mcp: { isApplying: () => applying },
+    gateway: { readiness: async () => { readinessCalls++; return { ready: true }; } },
+  } as unknown as SlashCommandContext, callback => callback(), async () => undefined);
+  assert.equal((await service.submit("hello")).kind, "notice");
+  assert.equal(readinessCalls, 0);
+  assert.equal(created, 0);
+  assert.deepEqual(await service.submit("/mcp"), { kind: "mcp" });
+  applying = false;
+  assert.equal((await service.submit("hello")).kind, "notice");
+  assert.equal(created, 1);
+  assert.equal(sent, 0);
 });
 
 test("PromptService converts provider failures into one safe system notice", async () => {

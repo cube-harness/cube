@@ -49,6 +49,32 @@ export class AuthStore {
     return (await this.read()).api_keys[provider]?.api_key;
   }
 
+  async getMcpValues(name: string, url: string): Promise<Record<string, string>> {
+    const entry = (await this.read()).mcp[name];
+    return entry?.url === new URL(url).href ? { ...entry.values } : {};
+  }
+
+  async updateMcpValues(
+    name: string,
+    url: string,
+    mutate: (values: Record<string, string>) => Record<string, string>,
+  ): Promise<void> {
+    const canonical = new URL(url).href;
+    await this.update((current) => {
+      const entry = current.mcp[name];
+      const values = mutate(entry?.url === canonical ? { ...entry.values } : {});
+      return { ...current, mcp: { ...current.mcp, [name]: { url: canonical, values } } };
+    });
+  }
+
+  async removeMcp(name: string): Promise<void> {
+    await this.update((current) => {
+      const mcp = { ...current.mcp };
+      delete mcp[name];
+      return { ...current, mcp };
+    });
+  }
+
   async replaceApiKey(provider: ApiKeyProvider, apiKey: string): Promise<void> {
     await this.update((current) => ({
       ...current,

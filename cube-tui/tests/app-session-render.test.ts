@@ -23,9 +23,6 @@ const displayState = (text: string, queuedFollowUps = 0) => ({
   pendingApproval: null,
   pendingSuspensions: new Map(),
   activeSubagents: new Map(),
-  omProgress: { status: "idle" },
-  bufferingMessages: false,
-  bufferingObservations: false,
   queuedFollowUps,
 }) as unknown as RuntimeDisplayState;
 

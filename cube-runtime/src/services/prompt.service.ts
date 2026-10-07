@@ -1,4 +1,4 @@
-import type { Session } from "@cube/agent";
+import { INITIALIZE_PROMPT, type Session } from "@cube/agent";
 import { HistoryStore, type HomeManager } from "@cube/workspace";
 import {
   executeSlashCommand,
@@ -31,11 +31,13 @@ export class PromptService {
     if (!trimmed) return { kind: "ignored" };
 
     try {
+      const command = parseSlashCommand(trimmed);
+      if (command?.name !== "/mcp" && this.commands.mcp?.isApplying())
+        throw new Error("Wait for MCP changes to finish applying.");
       if (this.commands.permission?.isApplying())
         throw new Error("Wait for permissions to finish applying.");
-      const command = parseSlashCommand(trimmed);
       if (command) {
-        if (command.name !== "/init")
+        if (command.name !== "/init" && command.name !== "/tasks")
           await this.appendHistory(trimmed, this.thread.current() ?? "new thread");
         return executeSlashCommand(command.name, command.argument, this.commands);
       }
@@ -55,30 +57,57 @@ export class PromptService {
     ) {
       throw new Error("Finish or cancel the active turn before running /init.");
     }
-    return this.dispatch("/init");
+    return this.dispatch("/init", undefined, {
+      type: "user",
+      tagName: "user",
+      contents: INITIALIZE_PROMPT,
+      metadata: { cube: { displayText: "" } },
+    });
   }
 
   private async dispatch(
     trimmed: string,
     onDispatch?: (queued: boolean) => void,
+    signal?: Parameters<Session["sendSignal"]>[0],
   ): Promise<PromptResult> {
+    if (this.commands.mcp?.isApplying()) throw new Error("Wait for MCP changes to finish applying.");
     if (!(await this.commands.gateway.readiness()).ready) {
       return {
         kind: "gateways",
         request: { choices: await this.commands.gateway.listChoices() },
       };
     }
+    if (this.commands.mcp?.isApplying()) throw new Error("Wait for MCP changes to finish applying.");
     const threadId = await this.thread.ensureForPrompt(trimmed);
     await this.appendHistory(trimmed, threadId);
     const warn = console.warn;
     // ponytail: process-global during one queued turn; add a logger bridge if runtimes become concurrent.
     console.warn = () => undefined;
     try {
-      await this.runWithThreadLogContext(() => {
+      await this.runWithThreadLogContext(async () => {
         if (this.commands.permission?.isApplying())
           throw new Error("Wait for permissions to finish applying.");
+        if (this.commands.mcp?.isApplying())
+          throw new Error("Wait for MCP changes to finish applying.");
         onDispatch?.(this.session.run.isRunning());
-        return this.session.followUp({ content: trimmed });
+        if (!signal) return this.session.followUp({ content: trimmed });
+        // Like native sendMessage, wait for the actual turn, not just signal acceptance.
+        let resolveEnd!: () => void;
+        const ended = new Promise<void>((resolve) => {
+          resolveEnd = resolve;
+        });
+        const unsubscribe = this.session.subscribe((event) => {
+          if (event.type === "agent_end") resolveEnd();
+        });
+        try {
+          const sent = this.session.sendSignal(signal, { requireDelivery: true });
+          await Promise.race([
+            ended,
+            sent.accepted.then(() => new Promise<never>(() => {})),
+          ]);
+        } finally {
+          unsubscribe();
+        }
       });
     } catch (error) {
       try {

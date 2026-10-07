@@ -323,6 +323,7 @@ test("workspace trust is persisted and checked before runtime startup or provide
       workspace_only: true,
       require_approval_for: ["execute_command", "edit_file", "write_file", "apply_patch"],
       deny_for: [],
+      allow_for: [],
     }, "trust must persist editable defaults for this workspace");
     const registry = await PermissionStore(home).read();
     assert.equal(registry.workspaces.length, 1);

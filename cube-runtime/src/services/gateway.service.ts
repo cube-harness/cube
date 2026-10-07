@@ -96,7 +96,7 @@ type PendingDraft = {
   sourceKey?: string;
 };
 
-const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.159.2";
+const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.160.1";
 
 const containsModel = (catalog: ModelCatalog, modelId: string): boolean =>
   Object.values(catalog.providers).some((provider) =>
@@ -229,7 +229,7 @@ export class GatewayService {
     }
     const sourceKey = ModelManager.sourceKey(gatewayId, {
       config,
-      auth: { api_keys: {}, oauth: account },
+      auth: { api_keys: {}, oauth: account, mcp: {} },
     });
     const usage = await readUsage();
     if (
@@ -297,7 +297,8 @@ export class GatewayService {
           ? Boolean(auth.api_keys[descriptor.providerId as keyof typeof auth.api_keys])
           : descriptor.group === "oauth"
             ? Boolean(auth.oauth[descriptor.providerId as keyof typeof auth.oauth])
-            : Boolean(config.gateway_options[gatewayId as LocalGatewayId]) || config.gateway === gatewayId,
+            : Boolean(config.gateway_options[gatewayId as LocalGatewayId]) ||
+              config.gateway === gatewayId,
     }));
   }
 
@@ -375,7 +376,11 @@ export class GatewayService {
       "oauth/anthropic",
       "Anthropic",
       () => auth.beginLogin(signal),
-      (credential: AnthropicOAuthCredential) => ({ kind: "oauth", provider: "anthropic", credential }),
+      (credential: AnthropicOAuthCredential) => ({
+        kind: "oauth",
+        provider: "anthropic",
+        credential,
+      }),
       signal,
     );
   }
@@ -710,8 +715,8 @@ export class GatewayService {
       const configuredUrl =
         candidate.kind === "local" && candidate.gatewayId === local
           ? candidate.baseUrl
-          : config.gateway_options[local]?.base_url
-            ?? (local === "local/ollama" ? DEFAULT_OLLAMA_URL : DEFAULT_LMSTUDIO_URL);
+          : (config.gateway_options[local]?.base_url ??
+            (local === "local/ollama" ? DEFAULT_OLLAMA_URL : DEFAULT_LMSTUDIO_URL));
       if (local === "local/ollama") {
         const baseUrl = normalizeOllamaBaseUrl(configuredUrl);
         const payload = await this.fetchJson(`${baseUrl}/api/tags`, {}, "Ollama", signal);

@@ -188,9 +188,17 @@ const mapSessionMessage = (
   }
 
   const metadata = raw.content?.metadata;
-  const signalType = asRecord(metadata?.signal)?.type;
+  const signal = asRecord(metadata?.signal);
+  const signalType = signal?.type;
+  const cube = asRecord(asRecord(signal?.metadata)?.cube) ?? asRecord(metadata?.cube);
+  // Internal retained context is not a human message or a TUI notice.
+  if (raw.role === "signal" && (
+    signal?.tagName === "background_task" ||
+    (signalType === "reactive" && ["skill-activation", "agents-discovery"].includes(String(cube?.kind)))
+  ))
+    return [];
   const userAuthored = raw.role === "user" || (raw.role === "signal" && ["user", "user-message"].includes(String(signalType)));
-  const displayText = userAuthored ? asRecord(metadata?.cube)?.displayText : undefined;
+  const displayText = userAuthored ? cube?.displayText : undefined;
   const originalParts = raw.content?.parts ?? [];
   const parts = typeof displayText === "string"
     ? [{ type: "text", text: displayText }, ...originalParts.filter((part) => asRecord(part)?.type !== "text")]

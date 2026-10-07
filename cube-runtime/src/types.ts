@@ -16,6 +16,18 @@ export type RuntimeNotice = {
   message: string;
 };
 
+export type BackgroundJobRef = { id: string };
+export type BackgroundJobSummary = BackgroundJobRef & {
+  title: string; status: string; threadId?: string;
+  createdAt: number; completedAt?: number; canStop: boolean;
+};
+export type BackgroundJobDetail = BackgroundJobSummary & {
+  toolName?: string; command?: string; reason?: string; cwd?: string;
+  runId?: string; toolCallId?: string; exitCode?: number | null;
+  output: string; truncated: boolean;
+  ownerDeleted: boolean;
+};
+
 export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
   let details = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
   let message =
@@ -200,6 +212,8 @@ export type PermissionState = {
 };
 
 export type PromptResult =
+  | { kind: "mcp" }
+  | { kind: "tasks" }
   | { kind: "permissions"; permissions: PermissionState }
   | { kind: "skills"; skills: import("@cube/agent").SkillChoice[] }
   | { kind: "ignored" }

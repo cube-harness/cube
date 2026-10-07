@@ -435,6 +435,7 @@ test("failed live apply rolls auth and config back", async () => {
   const beforeAuth: CubeAuth = {
     api_keys: { google: { api_key: "old-google" } },
     oauth: {},
+    mcp: {},
   };
   const applied: string[] = [];
   const harness = createHarness({

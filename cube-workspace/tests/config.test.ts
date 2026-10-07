@@ -12,6 +12,12 @@ import { ConfigSchema, RunnableConfigSchema, GATEWAY_IDS, GatewayIdSchema } from
 
 test("missing settings use Cube defaults without inventing a model or accepting invalid overrides", () => {
   const defaults = ConfigSchema.parse({});
+  assert.deepEqual(defaults.background_tasks, { enabled: true, concurrency: 2, timeout_ms: 300000 });
+  assert.deepEqual(ConfigSchema.parse({ background_tasks: { enabled: false } }).background_tasks,
+    { enabled: false, concurrency: 2, timeout_ms: 300000 });
+  assert.equal(ConfigSchema.parse({ background_tasks: { timeout_ms: 0 } }).background_tasks.timeout_ms, 0);
+  for (const background_tasks of [{ concurrency: 0 }, { concurrency: 33 }, { concurrency: 1.5 }, { timeout_ms: -1 }, { timeout_ms: 600001 }, { retries: 3 }])
+    assert.equal(ConfigSchema.safeParse({ background_tasks }).success, false);
   assert.equal(defaults.gateway, undefined);
   assert.equal(defaults.model, undefined);
   assert.equal(RunnableConfigSchema.safeParse({}).success, false);
@@ -51,7 +57,7 @@ test("fresh home uses one unversioned schema from onboarding through persisted s
     assert.equal(ConfigSchema.safeParse({ ...raw, memory: { ...raw.memory, observational_memory: {} } }).success, false);
     assert.equal(ConfigSchema.safeParse(raw).success, true);
     assert.equal(RunnableConfigSchema.safeParse(raw).success, false);
-    assert.deepEqual(await new AuthStore(home).read(), { api_keys: {}, oauth: {} });
+    assert.deepEqual(await new AuthStore(home).read(), { api_keys: {}, oauth: {}, mcp: {} });
     assert.deepEqual(await PermissionStore(home).read(), { workspaces: [] });
     for (const gateway of GATEWAY_IDS) {
       assert.equal(GatewayIdSchema.parse(gateway), gateway);

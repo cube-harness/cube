@@ -9,9 +9,6 @@ const state = (overrides: Record<string, unknown> = {}) => ({
   pendingApproval: null,
   pendingSuspensions: new Map(),
   activeSubagents: new Map(),
-  omProgress: { status: "idle" },
-  bufferingMessages: false,
-  bufferingObservations: false,
   ...overrides,
 });
 

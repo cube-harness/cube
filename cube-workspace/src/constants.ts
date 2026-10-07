@@ -6,6 +6,11 @@ export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
 export const INHERIT_MODEL = "inherit";
 export const DEFAULT_WORKSPACE_ONLY = true;
+export const DEFAULT_BACKGROUND_TASKS = {
+  enabled: true,
+  concurrency: 2,
+  timeout_ms: 300000,
+} as const;
 export const DURABLE_MEMORY_DEFAULTS = {
   enabled: true,
   model: INHERIT_MODEL,
@@ -29,6 +34,12 @@ export const HOME_FILES = {
   SOUL: "SOUL.md",
   PERMISSION: "permission.json",
   AGENTS: "AGENTS.md",
+} as const;
+
+export const MCP_DEFAULTS = {
+  REQUEST_TIMEOUT_MS: 60_000,
+  CONNECT_TIMEOUT_MS: 3_000,
+  AUTH_TIMEOUT_MS: 300_000,
 } as const;
 
 export const HOME_LIMITS = {

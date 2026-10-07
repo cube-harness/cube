@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { INITIALIZE_PROMPT } from "../cube-agent/dist/prompts/initialize.prompt.js";
 
 // This file runs inside the deployed app, never resolves dependencies via the repo.
-await import("@cube/runtime");
-const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSchema } = await import("@cube/workspace");
-const { createCubeAgent } = await import("@cube/agent");
+const { McpService } = await import("@cube/runtime");
+const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSchema, McpStore, AuthStore } = await import("@cube/workspace");
+const { createCubeAgent, INITIALIZE_PROMPT, CubeMcp } = await import("@cube/agent");
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { RequestContext } = await import("@mastra/core/request-context");
 const { LibSQLStore } = await import("@mastra/libsql");
@@ -15,6 +14,7 @@ const scratch = await realpath(await mkdtemp(path.join(tmpdir(), "cube-package-s
 const cwd = process.cwd();
 let agent;
 let storage;
+let mcp;
 try {
   const project = path.join(scratch, "project with spaces");
   await mkdir(project);
@@ -22,6 +22,11 @@ try {
   process.chdir(project);
   const home = CubeHome({ cubeHome: path.join(scratch, "home"), userHome: scratch });
   await createBootstrap(home).run();
+  mcp = new CubeMcp({ auth: new AuthStore(home), workspaceRoot: project });
+  const mcpService = new McpService({ client: mcp, store: McpStore(home), isBusy: () => false, beforePublish: async () => undefined });
+  await mcpService.reload();
+  assert.deepEqual(mcp.readToolNames(), []);
+  assert.deepEqual(mcpService.get().servers, []);
   assert.deepEqual(JSON.parse(await readFile(home.getAuthPath(), "utf8")), { api_keys: {}, oauth: {} });
   assert.ok(INITIALIZE_PROMPT.length > 0);
   const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
@@ -39,6 +44,9 @@ try {
     assert.match(await tools.list_files.execute({ path: "." }), /probe.txt/);
   } finally { process.env.PATH = previousPath; }
   const commands = await agent.listTools();
+  assert.ok(commands.manage_task);
+  assert.equal(commands.get_process, undefined);
+  assert.equal(commands.kill_process, undefined);
   const result = await commands.execute_command.execute({ command: "echo CUBE_COMMAND_OK", reason: "Verify packaged command execution" }, {});
   assert.equal(result.exit_code, 0);
   assert.equal(await realpath(result.cwd), await realpath(project));
@@ -47,6 +55,7 @@ try {
   await storage.init();
   console.log("package-smoke: native tools, command, templates and SQLite OK outside checkout");
 } finally {
+  await mcp?.dispose();
   await agent?.disposeTools();
   await storage?.close();
   process.chdir(cwd);

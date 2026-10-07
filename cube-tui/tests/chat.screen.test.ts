@@ -335,9 +335,6 @@ test("ChatScreen pauses prompt cursor blinking while the working indicator spins
     pendingSuspensions: new Map(),
     activeSubagents: new Map(),
     queuedFollowUps: 0,
-    omProgress: { status: "idle" },
-    bufferingMessages: false,
-    bufferingObservations: false,
   } as unknown as RuntimeDisplayState;
 
   screen.workingIndicator.sync = () => ({
@@ -378,9 +375,6 @@ test("ChatScreen passes the elapsed native reasoning phase duration to the messa
     pendingSuspensions: new Map(),
     activeSubagents: new Map(),
     queuedFollowUps: 0,
-    omProgress: { status: "idle" },
-    bufferingMessages: false,
-    bufferingObservations: false,
   };
   const reasoningMessage = {
     id: "assistant-reasoning",

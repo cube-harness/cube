@@ -25,7 +25,8 @@ export { cubeAskUserTool } from "./tools/ask-user.tool.js";
 export type { CubeTools } from "./tools/cube-tools.js";
 export { skillPathIdentity, type CubeSkills, type SkillChoice } from "./skills.js";
 export type { FileMutationResult, FileChange } from "./tools/file.tools.js";
-export type { CommandResult } from "./tools/command.tools.js";
+export type { CommandResult, ProcessRecord, ProcessRegistry, ManageTaskInput } from "./tools/command.tools.js";
+export { INITIALIZE_PROMPT } from "./prompts/initialize.prompt.js";
 export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";
 export {
   createCubeGateways,
@@ -51,3 +52,7 @@ export {
   ANTIGRAVITY_HEADERS,
 } from "./gateways/oauth.gateway.js";
 export * from "./gateways/types.js";
+export type { BackgroundTask } from "@mastra/core/background-tasks";
+export type { BackgroundTasksStorage } from "@mastra/core/storage";
+export { CubeMcp } from "./mcp/client.js";
+export type { McpState, McpServerState, McpStatus, McpLogin, BeforeMcpPublish } from "./mcp/client.js";
