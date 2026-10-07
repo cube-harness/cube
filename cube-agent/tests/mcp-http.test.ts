@@ -93,8 +93,8 @@ for (const registered of [false, true]) test(`native MCP OAuth (${registered ? "
   assert.equal(registrations, registered ? 0 : 1, "pre-registered clients never attempt DCR");
   assert.equal(tokens, 1);
   assert.equal(client.get().servers[0]!.status, "connected");
-  assert.deepEqual(client.readToolNames(), ["mcp_docs_search"]);
-  assert.match(JSON.stringify(await client.readTools().mcp_docs_search!.execute!({}, {} as never)), /FOUND/);
+  assert.deepEqual(client.readToolNames(), ["docs_search"]);
+  assert.match(JSON.stringify(await client.readTools().docs_search!.execute!({}, {} as never)), /FOUND/);
   await client.dispose();
   restarted = new CubeMcp({ auth: new AuthStore(home), workspaceRoot: root });
   await restarted.reload(snapshot, publish);

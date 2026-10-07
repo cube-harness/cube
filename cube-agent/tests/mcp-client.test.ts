@@ -27,8 +27,8 @@ test("discovery isolates failures, config reload reuses connections, and policie
     let name = connections.get(this);
     if (!name) { name = names[discovers]!; connections.set(this, name); }
     discovers++;
-    return { tools: name === "good" ? { mcp_good_lookup: tool } : {},
-      errors: name === "broken" ? { mcp_broken: "Connection failed" } : {}, errorDetails: {} };
+    return { tools: name === "good" ? { good_lookup: tool } : {},
+      errors: name === "broken" ? { broken: "Connection failed" } : {}, errorDetails: {} };
   });
   t.mock.method(MCPClient.prototype, "getServerAuthState", () => "connected");
   t.mock.method(MCPClient.prototype, "reconnectServer", async () => { reconnects++; });
@@ -36,9 +36,9 @@ test("discovery isolates failures, config reload reuses connections, and policie
   const published: string[][] = [];
   const policy = async (names: string[]) => { assert.deepEqual(manager.readToolNames(), []); published.push(names); };
   await manager.reload(snapshot(config), policy);
-  assert.deepEqual(manager.readToolNames(), ["mcp_good_lookup"]);
+  assert.deepEqual(manager.readToolNames(), ["good_lookup"]);
   assert.deepEqual(manager.get().servers.map(s => [s.name, s.status]), [["broken", "error"], ["empty", "connected"], ["good", "connected"]]);
-  assert.deepEqual(published[0], ["mcp_good_lookup"]);
+  assert.deepEqual(published[0], ["good_lookup"]);
   await manager.reload(snapshot(config), async () => undefined);
   assert.equal(discovers, 3);
   await manager.restart("good", policy);
@@ -62,7 +62,7 @@ test("late discovery after disable cannot install old tools, and permission fail
   const gate = new Promise<void>(resolve => { release = resolve; });
   let started!: () => void;
   const pending = new Promise<void>(resolve => { started = resolve; });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => { started(); await gate; return { tools: { mcp_good_lookup: tool }, errors: {}, errorDetails: {} }; });
+  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => { started(); await gate; return { tools: { good_lookup: tool }, errors: {}, errorDetails: {} }; });
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const discovery = manager.reload(snapshot({ good: { command: "node" } }), async () => undefined);
   await pending;
@@ -84,7 +84,7 @@ test("OAuth setup failure and cancellation before URL settle without late creden
   await writeFile(home.getAuthPath(), JSON.stringify({ api_keys: {}, oauth: {}, mcp: {} }));
   const manager = new CubeMcp({ auth, workspaceRoot: root });
   t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: {}, errors: { mcp_docs: "Authorization required" }, errorDetails: {} }));
+  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: {}, errors: { docs: "Authorization required" }, errorDetails: {} }));
   t.mock.method(MCPClient.prototype, "getServerAuthState", () => "needs-auth");
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const authenticate = t.mock.method(MCPClient.prototype, "authenticate", async () => { throw new Error("Registration rejected: client-secret"); });
@@ -116,7 +116,7 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
   await createBootstrap(home).run();
   let executions = 0, gates = 0, issueTool = false, decision: "approve" | "decline" = "decline", call = 0;
   const executable = createTool({ id: "lookup", description: "Lookup", inputSchema: z.object({}), execute: async () => { executions++; return "READ_RESULT"; } });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: { mcp_docs_lookup: executable }, errors: {}, errorDetails: {} }));
+  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: { docs_lookup: executable }, errors: {}, errorDetails: {} }));
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test", memory: { durable: { enabled: false } } });
   const composition = await createCubeMastra(home, CubeWorkspace(home, root), config);
@@ -126,12 +126,12 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
     await composition.shutdown(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   await composition.mcp.reload(snapshot({ docs: { command: "node" } }), names => configureCubePermissions(session, { require_approval_for: [] }, names).then(() => undefined));
-  assert.ok((await composition.agent.listTools()).mcp_docs_lookup);
+  assert.ok((await composition.agent.listTools()).docs_lookup);
   composition.agent.model = new MockLanguageModelV3({ doStream: async () => {
     const sendTool = issueTool; issueTool = false;
     return { stream: new ReadableStream({ start(stream) {
       stream.enqueue({ type: "stream-start", warnings: [] });
-      if (sendTool) stream.enqueue({ type: "tool-call", toolCallId: `mcp-${call++}`, toolName: "mcp_docs_lookup", input: "{}" });
+      if (sendTool) stream.enqueue({ type: "tool-call", toolCallId: `mcp-${call++}`, toolName: "docs_lookup", input: "{}" });
       stream.enqueue({ type: "finish", finishReason: { unified: sendTool ? "tool-calls" : "stop", raw: sendTool ? "tool_calls" : "stop" },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
       stream.close();
@@ -144,7 +144,7 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
   for (const policy of ["decline", "approve", "allow", "deny"] as const) {
     decision = policy === "approve" ? "approve" : "decline";
     await configureCubePermissions(session, { require_approval_for: [],
-      allow_for: policy === "allow" ? ["mcp_docs_lookup"] : [], deny_for: policy === "deny" ? ["mcp_docs_lookup"] : [] }, ["mcp_docs_lookup"]);
+      allow_for: policy === "allow" ? ["docs_lookup"] : [], deny_for: policy === "deny" ? ["docs_lookup"] : [] }, ["docs_lookup"]);
     issueTool = true;
     await session.followUp({ content: `Run MCP (${policy})` });
     assert.equal(executions, policy === "decline" ? 0 : policy === "approve" ? 1 : 2);

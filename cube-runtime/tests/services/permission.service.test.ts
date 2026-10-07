@@ -29,7 +29,8 @@ test("Apply persists one workspace, replaces live policies and rejects busy or f
   let busy = false;
   let fail = false;
   const service = new PermissionService(workspace, current, {
-    listTools: async () => ["read_file", "fetch", "execute_command", "edit_file", "write_file", "apply_patch", "mcp_docs_lookup"],
+    listTools: async () => ["read_file", "fetch", "execute_command", "edit_file", "write_file", "apply_patch", "docs_lookup"],
+    listMcpTools: () => ["docs_lookup"],
     isBusy: () => busy,
     apply: async (permissions) => {
       await configureCubePermissions(session, permissions);
@@ -38,8 +39,8 @@ test("Apply persists one workspace, replaces live policies and rejects busy or f
     },
   });
   const draft = await service.get();
-  assert.equal(draft.tools.mcp_docs_lookup, "ask");
-  draft.tools.mcp_docs_lookup = "allow";
+  assert.equal(draft.tools.docs_lookup, "ask");
+  draft.tools.docs_lookup = "allow";
   draft.workspaceOnly = false;
   draft.tools.read_file = "deny";
   draft.tools.write_file = "allow";
@@ -50,8 +51,8 @@ test("Apply persists one workspace, replaces live policies and rejects busy or f
   assert.equal(session.resolveToolApproval("read_file"), "deny");
   assert.equal(session.resolveToolApproval("write_file"), "allow");
   assert.equal(session.resolveToolApproval("fetch"), "ask");
-  assert.equal(session.resolveToolApproval("mcp_docs_lookup"), "allow");
-  assert.ok((await workspace.getPermission())?.permissions.allow_for?.includes("mcp_docs_lookup"));
+  assert.equal(session.resolveToolApproval("docs_lookup"), "allow");
+  assert.ok((await workspace.getPermission())?.permissions.allow_for?.includes("docs_lookup"));
   assert.deepEqual((await workspace.getPermission())?.permissions, current);
   assert.deepEqual(await other.getPermission(), otherBefore);
   const bytes = await readFile(home.getPermissionPath(), "utf8");

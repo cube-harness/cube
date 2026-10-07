@@ -59,10 +59,12 @@ test("fresh MCP names receive Ask before publication and retained explicit Allow
   const session = new Session({ id: "mcp-permissions", ownerId: "test", resourceId: "test" });
   let state: Record<string, unknown> = {};
   session.permissions.setResolver({ getState: () => state, setState: async updates => { state = { ...state, ...updates }; } });
-  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["mcp_docs_saved"] }, ["mcp_docs_saved", "mcp_docs_new"]);
-  assert.equal(session.resolveToolApproval("mcp_docs_saved"), "allow");
-  assert.equal(session.resolveToolApproval("mcp_docs_new"), "ask");
-  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["mcp_docs_saved"] });
-  assert.equal(session.resolveToolApproval("mcp_docs_saved"), "allow");
-  assert.equal(session.resolveToolApproval("mcp_docs_new"), "ask");
+  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["docs_saved"] }, ["docs_saved", "docs_new"]);
+  assert.equal(session.resolveToolApproval("docs_saved"), "allow");
+  assert.equal(session.resolveToolApproval("docs_new"), "ask");
+  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["docs_saved"] });
+  assert.equal(session.resolveToolApproval("docs_saved"), "allow");
+  assert.equal(session.resolveToolApproval("docs_new"), "allow");
+  await configureCubePermissions(session, { require_approval_for: [], allow_for: ["docs_saved"] }, ["docs_saved", "docs_new"]);
+  assert.equal(session.resolveToolApproval("docs_new"), "ask");
 });
