@@ -105,7 +105,6 @@ export class CubeMcp {
     if (!server) throw new Error("MCP server is no longer configured. Run /reload.");
     return server;
   }
-  private namespace(name: string): string { return `mcp_${name}`; }
 
   private safe(text: string, config?: McpServerConfig): string {
     let value = stripVTControlCharacters(text);
@@ -124,7 +123,7 @@ export class CubeMcp {
   private fail(server: Server, error: unknown): void {
     server.tools = {};
     server.state.tools = [];
-    server.state.status = server.client?.getServerAuthState(this.namespace(server.state.name)) === "needs-auth"
+    server.state.status = server.client?.getServerAuthState(server.state.name) === "needs-auth"
       ? "needs-auth" : "error";
     server.state.error = this.safe(error instanceof Error ? error.message : String(error), server.config);
     this.dropTools();
@@ -156,7 +155,7 @@ export class CubeMcp {
     const base = { timeout: config.timeout, forwardInstructions: false, enableServerLogs: false };
     if (config.type === "stdio") {
       server.client = new QuietMcpClient({ id: randomUUID(), servers: {
-        [this.namespace(name)]: { ...base, command: config.command, args: config.args,
+        [name]: { ...base, command: config.command, args: config.args,
           env: config.env, cwd: config.cwd ?? this.options.workspaceRoot, stderr: "ignore" },
       } });
       return;
@@ -204,7 +203,7 @@ export class CubeMcp {
       server.state.oauth = true;
     }
     server.client = new QuietMcpClient({ id: randomUUID(), servers: {
-      [this.namespace(name)]: { ...base, url: new URL(config.url), requestInit: { headers: config.headers },
+      [name]: { ...base, url: new URL(config.url), requestInit: { headers: config.headers },
         connectTimeout: config.connectTimeout, ...(server.provider ? { authProvider: server.provider } : {}) },
     } });
   }
@@ -219,7 +218,7 @@ export class CubeMcp {
       if (!server.active || this.closing) throw new Error("MCP authentication was cancelled.");
       const result = await server.client!.listToolsWithErrors({ perServerTimeoutMs: server.config.timeout });
       if (!server.active || this.closing || server.generation !== generation) return;
-      const error = result.errors[this.namespace(name)];
+      const error = result.errors[name];
       if (error) throw new Error(error);
       if (Object.keys(result.tools).some((tool) => !/^[A-Za-z0-9_-]{1,64}$/.test(tool)))
         throw new Error("Server exposes a tool name incompatible with model tool identifiers (maximum 64 characters).");
@@ -266,7 +265,7 @@ export class CubeMcp {
     server.tools = {};
     server.state.tools = [];
     this.dropTools();
-    try { await server.client?.cancelAuthentication(this.namespace(server.state.name)); }
+    try { await server.client?.cancelAuthentication(server.state.name); }
     finally { await server.client?.disconnect(); }
   }
 
@@ -306,7 +305,7 @@ export class CubeMcp {
     this.dropTools();
     try {
       await this.createClient(name, server);
-      await server.client!.reconnectServer(this.namespace(name));
+      await server.client!.reconnectServer(name);
     } catch (error) { this.fail(server, error); return; }
     await this.discover(name, server);
     await this.publish(beforePublish);
@@ -330,7 +329,7 @@ export class CubeMcp {
     const expiresAt = Date.now() + MCP_DEFAULTS.AUTH_TIMEOUT_MS;
     const completion = (async () => {
       try {
-        await server.client!.authenticate(this.namespace(name), { timeoutMs: MCP_DEFAULTS.AUTH_TIMEOUT_MS });
+        await server.client!.authenticate(name, { timeoutMs: MCP_DEFAULTS.AUTH_TIMEOUT_MS });
         if (!server.active || this.closing) throw new Error("MCP authentication was cancelled.");
         await this.discover(name, server);
         if (server.state.status !== "connected") throw new Error(server.state.error ?? "MCP authentication did not connect the server.");

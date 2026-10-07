@@ -51,12 +51,12 @@ test("MCP toggles preserve manual fields and reject stale connection settings", 
 
 test("MCP tools default to Ask while explicit Deny and Ask outrank saved Allow", () => {
   for (const [name, policies, expected] of [
-    ["mcp_docs_search", { require_approval_for: [] }, "ask"],
+    ["docs_search", { require_approval_for: [] }, "ask"],
     ["read_file", { require_approval_for: [] }, "allow"],
-    ["mcp_docs_search", { require_approval_for: [], allow_for: ["mcp_docs_search"] }, "allow"],
-    ["mcp_docs_search", { require_approval_for: ["mcp_docs_search"], allow_for: ["mcp_docs_search"] }, "ask"],
-    ["mcp_docs_search", { require_approval_for: ["mcp_docs_search"], deny_for: ["mcp_docs_search"] }, "deny"],
-  ] as const) assert.equal(resolveToolPermission(name, { ...policies, require_approval_for: [...policies.require_approval_for] } as never), expected);
+    ["docs_search", { require_approval_for: [], allow_for: ["docs_search"] }, "allow"],
+    ["docs_search", { require_approval_for: ["docs_search"], allow_for: ["docs_search"] }, "ask"],
+    ["docs_search", { require_approval_for: ["docs_search"], deny_for: ["docs_search"] }, "deny"],
+  ] as const) assert.equal(resolveToolPermission(name, { ...policies, require_approval_for: [...policies.require_approval_for] } as never, name === "read_file" ? "allow" : "ask"), expected);
 });
 
 test("pre-registered OAuth clients are validated and participate in connection identity", () => {

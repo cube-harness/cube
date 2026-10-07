@@ -188,6 +188,7 @@ export const prepareCubeRuntime = async (
         let shuttingDown = false;
         const permissions = new PermissionService(workspace, config.permissions, {
           listTools: async () => [...await composition!.agent.listPermissionTools(), "ask_user"],
+          listMcpTools: () => composition!.mcp.readToolNames(),
           isBusy: () => memory.isBusy() || session.run.isRunning() ||
             session.approval.isArmed() || session.suspensions.hasPending() || !!mcp?.isApplying(),
           apply: async (next) => {
@@ -215,6 +216,10 @@ export const prepareCubeRuntime = async (
           isBusy: () => shuttingDown || memory.isBusy() || permissions.isApplying() || session.run.isRunning() ||
             session.approval.isArmed() || session.suspensions.hasPending(),
           beforePublish: async (names) => {
+            const previousMcp = new Set(composition!.mcp.readToolNames());
+            const native = (await composition!.agent.listPermissionTools()).filter(name => !previousMcp.has(name));
+            const collision = names.find(name => name === "ask_user" || native.includes(name));
+            if (collision) throw new Error(`MCP tool name collision: ${collision}`);
             await configureCubePermissions(session, config.permissions, names);
             composition!.context.invalidate();
           },

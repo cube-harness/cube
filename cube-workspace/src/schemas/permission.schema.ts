@@ -36,10 +36,11 @@ export type Permissions = z.infer<typeof PermissionsSchema>;
 export const resolveToolPermission = (
   name: string,
   permissions: Pick<Permissions, "require_approval_for"> & Partial<Pick<Permissions, "deny_for" | "allow_for">>,
+  defaultPolicy: "ask" | "allow" = "allow",
 ): "ask" | "allow" | "deny" => {
   if (permissions.deny_for?.includes(name)) return "deny";
   if (permissions.require_approval_for.includes(name)) return "ask";
   if (permissions.allow_for?.includes(name)) return "allow";
-  return name.startsWith("mcp_") ? "ask" : "allow";
+  return defaultPolicy;
 };
 export type PermissionRegistry = z.infer<typeof PermissionRegistrySchema>;

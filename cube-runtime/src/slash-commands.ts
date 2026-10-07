@@ -409,7 +409,7 @@ export const slashCommandSuggestions: SlashCommandSuggestion[] = definitions.fla
       description: `Alias for ${name}`,
     })),
   ],
-);
+).sort((a, b) => a.name.localeCompare(b.name));
 
 export const parseSlashCommand = (content: string): ParsedSlashCommand | null => {
   if (!content.startsWith("/")) return null;

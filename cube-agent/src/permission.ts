@@ -26,7 +26,7 @@ export const configureCubePermissions = async (
   ]);
   for (const toolName of tools) {
     await session.permissions.setForTool({ toolName,
-      policy: resolveToolPermission(toolName, permissions) });
+      policy: resolveToolPermission(toolName, permissions, mcpToolNames.includes(toolName) ? "ask" : "allow") });
   }
   if (!retired.length) return [];
   for (const toolName of [...mutations, "execute_command"]) {

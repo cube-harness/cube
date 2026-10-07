@@ -9,6 +9,7 @@ export class PermissionService {
     private readonly current: CubeConfig["permissions"],
     private readonly options: {
       listTools(): Promise<string[]>;
+      listMcpTools?(): readonly string[];
       isBusy(): boolean;
       apply(permissions: CubeConfig["permissions"]): Promise<void>;
     },
@@ -28,7 +29,7 @@ export class PermissionService {
     return {
       workspaceOnly: this.current.workspace_only,
       tools: Object.fromEntries([...names].sort().map((name) => [name,
-        resolveToolPermission(name, this.current),
+        resolveToolPermission(name, this.current, this.options.listMcpTools?.().includes(name) ? "ask" : "allow"),
       ])),
     };
   }
