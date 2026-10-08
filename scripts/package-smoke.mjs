@@ -4,9 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 // This file runs inside the deployed app, never resolves dependencies via the repo.
-const { McpService } = await import("@cube/runtime");
+const { McpService, SubagentService } = await import("@cube/runtime");
 const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSchema, McpStore, AuthStore } = await import("@cube/workspace");
-const { createCubeAgent, INITIALIZE_PROMPT, CubeMcp } = await import("@cube/agent");
+const { createCubeAgent, INITIALIZE_PROMPT, CubeMcp, BUILTIN_SUBAGENTS, createSubagentChild, createSubagentTools } = await import("@cube/agent");
+assert.equal(typeof SubagentService, "function");
+assert.equal(typeof createSubagentChild, "function");
+assert.deepEqual(BUILTIN_SUBAGENTS.map(role => role.name), ["explore", "worker"]);
+assert.deepEqual(Object.keys(createSubagentTools("/smoke", () => BUILTIN_SUBAGENTS, {})).sort(),
+  ["get_agent", "interrupt_agent", "list_agents", "send_message", "spawn_agent"]);
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { RequestContext } = await import("@mastra/core/request-context");
 const { LibSQLStore } = await import("@mastra/libsql");

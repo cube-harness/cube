@@ -35,3 +35,4 @@ export * from "./schemas/auth.schema.js";
 export * from "./schemas/mcp.schema.js";
 export { providers as snapshotProviders } from "@opencode-ai/models/snapshot";
 export * from "./constants.js";
+export * from "./subagents-manager.js";

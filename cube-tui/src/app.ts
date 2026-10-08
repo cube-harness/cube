@@ -7,6 +7,7 @@ import {
   type PromptResult,
   type RuntimeDisplayState,
   type RuntimeEvent,
+  type SubagentTarget,
 } from "@cube/runtime";
 import { copyToClipboard } from "./clipboard.js";
 import { matchesKey } from "@earendil-works/pi-tui";
@@ -33,11 +34,10 @@ export type PreparedCube = {
 export class CubeApp {
   private unsubscribeRuntime: () => void = () => undefined;
   private unsubscribeInput: () => void = () => undefined;
-  private activeApprovalId: string | null = null;
-  private readonly activeSuspensionIds = new Set<string>();
-  private readonly cancelledSuspensionIds = new Set<string>();
-  private suspensionInputQueue: Promise<void> = Promise.resolve();
-  private suspensionQueueCancelled = false;
+  private readonly interactions = new Map<string, SubagentTarget | undefined>();
+  private readonly cancelledInteractions = new Set<string>();
+  private readonly questions = new Set<string>();
+  private interactionQueue: Promise<void> = Promise.resolve();
   private nativeQueuedFollowUps: number;
   private locallyCancelledQueueTransitions = 0;
   private currentModel: ModelState;
@@ -105,6 +105,7 @@ export class CubeApp {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    for (const key of this.interactions.keys()) this.cancelInteraction(key);
     this.unsubscribeRuntime();
     this.unsubscribeRuntime = () => undefined;
     this.unsubscribeInput();
@@ -153,6 +154,11 @@ export class CubeApp {
       case "tasks":
         if (this.runtime.background) await this.screen.pickTasks(this.runtime.background);
         return;
+      case "subagents": {
+        const parent = this.runtime.thread.current();
+        if (this.runtime.subagents) await this.screen.pickSubagents(this.runtime.subagents, parent ?? "new thread");
+        return;
+      }
       case "skills":
         await this.screen.pickSkills(result.skills, (changes) => this.runtime.preference.setSkillsEnabled(changes));
         return;
@@ -274,62 +280,24 @@ export class CubeApp {
         this.applyDisplayState(event.displayState);
         return;
       case "tool_approval_required":
-        if (this.activeApprovalId === event.toolCallId) return;
-        this.activeApprovalId = event.toolCallId;
-        void this.screen
-          .requestApproval({ toolName: event.toolName, args: event.args })
-          .then((decision) => {
-            this.runtime.respondToApproval({
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              decision,
-              ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}),
-            });
-            this.applyDisplayState(this.runtime.getDisplayState());
-          })
-          .finally(() => {
-            this.activeApprovalId = null;
-          });
+        this.queueInteraction(event);
         return;
       case "tool_suspended":
-        if (this.activeSuspensionIds.has(event.toolCallId)) return;
-        if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
-        this.activeSuspensionIds.add(event.toolCallId);
-        this.suspensionInputQueue = this.suspensionInputQueue.then(async () => {
-          try {
-            if (this.suspensionQueueCancelled || this.cancelledSuspensionIds.has(event.toolCallId))
-              return;
-            const resolution = await this.screen.requestToolSuspension({
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              args: event.args,
-              suspendPayload: event.suspendPayload,
-              ...(event.resumeSchema ? { resumeSchema: event.resumeSchema } : {}),
-            });
-            if (resolution.kind === "dismissed") return;
-            if (resolution.kind === "cancel") {
-              this.suspensionQueueCancelled = true;
-              await this.runtime.cancelSuspension(event.toolCallId);
-              return;
-            }
-            await this.runtime.respondToSuspension({
-              toolCallId: event.toolCallId,
-              resumeData: resolution.resumeData,
-            });
-          } catch (error: unknown) {
-            this.screen.workingIndicator.stop();
-            this.screen.showNotice(toRuntimeNotice(error));
-          } finally {
-            this.activeSuspensionIds.delete(event.toolCallId);
-            this.cancelledSuspensionIds.delete(event.toolCallId);
-            this.applyDisplayState(this.runtime.getDisplayState());
-            if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
-          }
-        });
+        this.queueInteraction(event);
         return;
       case "tool_suspension_cancelled":
-        this.cancelledSuspensionIds.add(event.toolCallId);
-        this.screen.cancelToolSuspension(event.toolCallId);
+        this.cancelInteraction(`main:${event.toolCallId}`);
+        return;
+      case "subagent_interaction":
+        this.queueInteraction(event.event, event.target, `${event.description} · ${event.agent}`, event.directory);
+        return;
+      case "subagent_interaction_cancelled":
+        for (const [key, target] of this.interactions) if (target?.threadId === event.threadId &&
+          (!event.runId || target.runId === event.runId)) this.cancelInteraction(key);
+        return;
+      case "agent_end":
+        if (event.reason !== "suspended") for (const [key, target] of this.interactions)
+          if (!target) this.cancelInteraction(key);
         return;
       case "thread_created":
         this.screen.setInfo({
@@ -379,6 +347,49 @@ export class CubeApp {
         this.screen.workingIndicator.stop();
         this.screen.showNotice(toRuntimeNotice(event.error));
     }
+  }
+
+  private cancelInteraction(key: string): void {
+    this.cancelledInteractions.add(key);
+    this.screen.cancelToolSuspension(key);
+    this.screen.cancelApproval(key);
+  }
+
+  private queueInteraction(
+    event: Extract<RuntimeEvent, { type: "tool_approval_required" | "tool_suspended" }>,
+    target?: SubagentTarget,
+    label?: string,
+    directory?: string,
+  ): void {
+    const key = target ? `${target.threadId}:${target.runId}:${event.toolCallId}` : `main:${event.toolCallId}`;
+    if (this.interactions.has(key)) return;
+    this.interactions.set(key, target);
+    if (event.type === "tool_suspended") this.questions.add(key);
+    this.interactionQueue = this.interactionQueue.then(async () => {
+      try {
+        if (this.cancelledInteractions.has(key) || !this.started) return;
+        if (event.type === "tool_approval_required") {
+          const decision = await this.screen.requestApproval({ toolName: event.toolName, args: event.args, label, directory, interactionId: key });
+          if (this.cancelledInteractions.has(key)) return;
+          this.runtime.respondToApproval({ target, toolName: event.toolName, toolCallId: event.toolCallId, decision,
+            ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}) });
+        } else {
+          const resolution = await this.screen.requestToolSuspension({ ...event, toolCallId: key, label });
+          if (resolution.kind === "dismissed" || this.cancelledInteractions.has(key)) return;
+          if (resolution.kind === "cancel") {
+            // Cancel only questions from this Session, never a sibling's identical tool-call ID.
+            for (const [other, owner] of this.interactions) if (owner?.threadId === target?.threadId && this.questions.has(other)) this.cancelInteraction(other);
+            void this.runtime.cancelSuspension(event.toolCallId, target).catch(error => this.screen.showNotice(toRuntimeNotice(error)));
+          } else void this.runtime.respondToSuspension({ target, toolCallId: event.toolCallId, resumeData: resolution.resumeData })
+            .catch(error => this.screen.showNotice(toRuntimeNotice(error)));
+        }
+      } catch (error) { this.screen.showNotice(toRuntimeNotice(error)); }
+      finally {
+        this.interactions.delete(key); this.cancelledInteractions.delete(key);
+        this.questions.delete(key);
+        this.applyDisplayState(this.runtime.getDisplayState());
+      }
+    });
   }
 
   handleInterrupt(): boolean {

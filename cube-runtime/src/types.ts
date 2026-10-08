@@ -1,4 +1,6 @@
 import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
+import type { SubagentTarget } from "@cube/agent";
+import type { SubagentInteraction } from "./services/subagent.service.js";
 import type {
   ApiKeyGatewayId,
   GatewayId,
@@ -7,7 +9,7 @@ import type {
   ReasoningEffort,
 } from "@cube/workspace";
 
-export type RuntimeEvent = AgentControllerEvent;
+export type RuntimeEvent = AgentControllerEvent | SubagentInteraction;
 export type RuntimeDisplayState = Readonly<AgentControllerDisplayState> & { compacting?: boolean };
 export type RuntimeMessage = Awaited<ReturnType<Session["thread"]["listMessages"]>>[number];
 
@@ -68,6 +70,7 @@ export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
 };
 
 export type ToolApprovalResponse = {
+  target?: SubagentTarget;
   toolCallId: string;
   toolName: string;
   decision: "approve" | "decline" | "approve_prefix";
@@ -75,6 +78,7 @@ export type ToolApprovalResponse = {
 };
 
 export type ToolSuspensionResponse = {
+  target?: SubagentTarget;
   toolCallId: string;
   resumeData: unknown;
 };
@@ -214,6 +218,7 @@ export type PermissionState = {
 export type PromptResult =
   | { kind: "mcp" }
   | { kind: "tasks" }
+  | { kind: "subagents" }
   | { kind: "permissions"; permissions: PermissionState }
   | { kind: "skills"; skills: import("@cube/agent").SkillChoice[] }
   | { kind: "ignored" }

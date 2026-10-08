@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { HomeManager as Home, WorkspaceManager } from "@cube/workspace";
 import { MessageList, createSignal } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
-import { createCubeSkills } from "../src/skills.js";
+import { createCubeSkills, restrictCubeSkills } from "../src/skills.js";
 import { createSkillsProcessor, findSkillMentions } from "../src/processors/skills.processor.js";
 import { resolveAgentSkills, createSkill } from "@mastra/core/skills";
 import { InMemoryStore } from "@mastra/core/storage";
@@ -156,6 +156,17 @@ test("community global skills share native loading, activation and disable filte
     ]);
     const context = new RequestContext();
     const snapshot = await skills.snapshot(context);
+    const restricted = restrictCubeSkills(skills, ["community-review"]);
+    const scoped = await restricted.snapshot(new RequestContext());
+    assert.deepEqual(scoped.catalog.map(skill => skill.name), ["community-review"]);
+    assert.deepEqual((await scoped.enabled.list()).map(skill => skill.name), ["community-review"]);
+    const excluded = snapshot.catalog.find(skill => skill.name === "project-only")!;
+    assert.equal(await scoped.enabled.get(excluded.path), null);
+    assert.equal(await scoped.enabled.get("project-only"), null);
+    assert.equal(await scoped.enabled.getReference("project-only", "SKILL.md"), null);
+    assert.deepEqual(await scoped.enabled.search("project-only"), []);
+    assert.deepEqual((await restrictCubeSkills(skills, []).snapshot(new RequestContext())).catalog, []);
+    assert.equal(restrictCubeSkills(skills), skills, "omitted field preserves normal skill resolution");
     const community = snapshot.catalog.find(({ name }) => name === "community-review")!;
     assert.ok(snapshot.globalPaths.includes(community.path));
     const list = new MessageList();
@@ -170,6 +181,7 @@ test("community global skills share native loading, activation and disable filte
     skills.setDisabled([community.path]);
     const fresh = await skills.snapshot(new RequestContext());
     assert.equal(fresh.catalog.find(({ name }) => name === "community-review")!.enabled, false);
+    assert.deepEqual(await (await restricted.snapshot(new RequestContext())).enabled.list(), []);
     assert.equal(await fresh.enabled.get(community.path), null);
     assert.equal(await skills.snapshot(context), snapshot);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,8 +12,26 @@ import { createCubeMastra, type CubeMastraComposition } from "../src/bootstrap.j
 import { reloadCubeAgentInstructions } from "../src/agents/default.agent.js";
 import { ThreadService } from "../../cube-runtime/src/services/thread.service.js";
 
+const cleanup = async (root: string) => {
+  if (!process.env.CUBE_THREAD_TEST_ROOT) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+};
+
+if (process.platform === "win32" && !process.env.CUBE_THREAD_TEST_ROOT) {
+  test("thread lifecycle (isolated SQLite fixtures)", { timeout: 60000 }, async t => {
+    const root = await mkdtemp(join(tmpdir(), "cube-thread-suite-"));
+    try {
+      const env = { ...process.env, CUBE_THREAD_TEST_ROOT: root };
+      delete env.NODE_TEST_CONTEXT;
+      const result = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", import.meta.filename], { env, windowsHide: true });
+      t.diagnostic(result.stdout);
+      assert.equal(result.stderr, "");
+      assert.match(result.stdout, /fail 0/);
+    } finally { await cleanup(root); }
+  });
+} else {
+
 test("startup and new load snapshots before prompts and keep them frozen until reload", async () => {
-  const root = await mkdtemp(join(tmpdir(), "cube-thread-context-"));
+  const root = await mkdtemp(join(process.env.CUBE_THREAD_TEST_ROOT ?? tmpdir(), "cube-thread-context-"));
   let composition: CubeMastraComposition | undefined;
   try {
     const project = join(root, "project");
@@ -61,12 +81,12 @@ test("startup and new load snapshots before prompts and keep them frozen until r
     await session.thread.clearAndReleaseLock();
   } finally {
     await composition?.shutdown();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await cleanup(root);
   }
 });
 
 test("a rejected first provider request rolls back only its empty new thread", { timeout: 30_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "cube-empty-thread-"));
+  const root = await mkdtemp(join(process.env.CUBE_THREAD_TEST_ROOT ?? tmpdir(), "cube-empty-thread-"));
   let composition: CubeMastraComposition | undefined;
   try {
     const home = new HomeManager({ cubeHome: root });
@@ -130,12 +150,12 @@ test("a rejected first provider request rolls back only its empty new thread", {
     await session.thread.clearAndReleaseLock();
   } finally {
     await composition?.shutdown();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await cleanup(root);
   }
 });
 
 test("native chat receives a frozen memory prefix only in requests and reload updates it explicitly", { timeout: 30000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "cube-memory-prefix-"));
+  const root = await mkdtemp(join(process.env.CUBE_THREAD_TEST_ROOT ?? tmpdir(), "cube-memory-prefix-"));
   let composition: CubeMastraComposition | undefined;
   try {
     const home = new HomeManager({ cubeHome: join(root, "home") });
@@ -191,6 +211,7 @@ test("native chat receives a frozen memory prefix only in requests and reload up
     await session.thread.clearAndReleaseLock();
   } finally {
     await composition?.shutdown();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await cleanup(root);
   }
 });
+}

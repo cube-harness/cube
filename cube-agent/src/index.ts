@@ -11,6 +11,9 @@ export {
   buildModelConfig,
 } from "./agents/default.agent.js";
 export { createCubeController } from "./agents/controller.js";
+export { createSubagentChild, subagentAllowsTool, BUILTIN_SUBAGENTS } from "./agents/subagent.agent.js";
+export type { CreateSubagentChildOptions, SubagentChild, ChildRunResult, ChildToolActivity } from "./agents/subagent.agent.js";
+export * from "./tools/subagent.tools.js";
 export type { InstructionInfo, InstructionSnapshot } from "./prompts/system.prompt.js";
 export { configureCubePermissions, resolveCubeToolCategory } from "./permission.js";
 export {
@@ -54,5 +57,6 @@ export {
 export * from "./gateways/types.js";
 export type { BackgroundTask } from "@mastra/core/background-tasks";
 export type { BackgroundTasksStorage } from "@mastra/core/storage";
+export type { MemoryStorage } from "@mastra/core/storage";
 export { CubeMcp } from "./mcp/client.js";
 export type { McpState, McpServerState, McpStatus, McpLogin, BeforeMcpPublish } from "./mcp/client.js";

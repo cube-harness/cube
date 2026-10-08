@@ -34,6 +34,18 @@ test("/skills only lists preferences without a gateway or thread", async () => {
   assert.deepEqual(result, { kind: "skills", skills: [] });
 });
 
+test("/subagents is view-only and reload refreshes its catalog once", async () => {
+  const calls: string[] = [];
+  const context = { thread: { reload: async () => { calls.push("project"); return {}; } },
+    subagents: { reloadCatalog: async () => { calls.push("subagents"); } },
+    mcp: { reload: async () => { calls.push("mcp"); } } } as unknown as SlashCommandContext;
+  assert.deepEqual(await executeSlashCommand("/subagents", "", context), { kind: "subagents" });
+  assert.deepEqual(calls, []);
+  await executeSlashCommand("/reload", "", context);
+  assert.deepEqual(calls, ["project", "subagents", "mcp"]);
+  assert.ok(slashCommandSuggestions.some(item => item.name === "/subagents"));
+});
+
 test("/mcp is view-only and /reload rereads MCP once after project context", async () => {
   const calls: string[] = [];
   const context = {

@@ -1,4 +1,6 @@
 import { createCodingAgent } from "@mastra/core/coding-agent";
+import type { ToolsInput } from "@mastra/core/agent";
+import type { InputProcessor } from "@mastra/core/processors";
 import type { IMastraLogger } from "@mastra/core/logger";
 import {
   type CubeConfig,
@@ -26,6 +28,15 @@ import type { CubeContext, ContextLimits } from "../context.js";
 import { createCubeSkills } from "../skills.js";
 import { createSkillsProcessor } from "../processors/skills.processor.js";
 import type { CubeMcp } from "../mcp/client.js";
+
+export type CubeAgentOptions = {
+  id?: string;
+  snapshot?: InstructionSnapshot;
+  skills?: Awaited<ReturnType<typeof createCubeSkills>>;
+  roleInstructions?: string;
+  extraTools?: () => ToolsInput;
+  allowTool?: (name: string) => boolean;
+};
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
@@ -134,15 +145,18 @@ export const createCubeAgent = async (
     recallTool?: ReturnType<typeof createMemoryRecall>["tool"];
   },
   mcp?: Pick<CubeMcp, "readTools" | "readToolNames">,
+  options: CubeAgentOptions = {},
 ) => {
-  let snapshot: InstructionSnapshot = await loadInstructionSnapshot(
+  let snapshot: InstructionSnapshot = options.snapshot ? structuredClone(options.snapshot) : await loadInstructionSnapshot(
     home,
     workspace,
     contextManager?.readMemory,
   );
   let context = formatAgentsContext(snapshot.sources);
   const paths = await workspace.getPaths();
-  const cubeTools = tools ?? createCubeTools(paths.root, () => config.permissions.workspace_only, config.background_tasks);
+  const cubeTools =
+    tools ??
+    createCubeTools(paths.root, () => config.permissions.workspace_only, config.background_tasks);
   let activeModel = config.model;
   const executionInstructions = () =>
     [
@@ -156,17 +170,21 @@ export const createCubeAgent = async (
     ].join("\n");
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
-  const skills = await createCubeSkills(home, workspace, config.skills.disabled);
+  const skills = options.skills ?? await createCubeSkills(home, workspace, config.skills.disabled);
   const mastraWorkspace = await createMastraWorkspace(
     workspace,
     skills,
     () => config.permissions.workspace_only,
   );
   const agent = createCodingAgent({
-    id: "cube-agent",
+    id: options.id ?? "cube-agent",
     name: "Cube Agent",
     model: [modelConfig as any],
-    instructions: [
+    instructions: options.roleInstructions ? () => [
+      { role: "system" as const, content: snapshot.soul },
+      { role: "system" as const, content: executionInstructions() },
+      { role: "system" as const, content: options.roleInstructions! },
+    ] : [
       { role: "system", content: snapshot.soul },
       { role: "system", content: executionInstructions() },
     ],
@@ -207,6 +225,13 @@ export const createCubeAgent = async (
             ),
           ]
         : []),
+      ...(options.allowTool ? [{
+        id: "cube-subagent-tool-policy",
+        processInputStep: ({ tools: available }) => {
+          const allowed = Object.fromEntries(Object.entries(available ?? {}).filter(([name]) => options.allowTool!(name)));
+          return { tools: allowed, activeTools: Object.keys(allowed) };
+        },
+      } satisfies InputProcessor] : []),
     ],
     workspace: mastraWorkspace,
     skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
@@ -216,6 +241,7 @@ export const createCubeAgent = async (
       ...(contextManager?.recallTool ? { memory_recall: contextManager.recallTool } : {}),
       fetch: webFetchTool,
       ...mcp?.readTools(),
+      ...options.extraTools?.(),
     }),
     defaultOptions: ({ requestContext }) => {
       const controller = requestContext.get("controller") as { threadId?: string } | undefined;
@@ -285,7 +311,7 @@ export const createCubeAgent = async (
       contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
-      agent.__updateInstructions([
+      if (!options.roleInstructions) agent.__updateInstructions([
         { role: "system", content: replacement.soul },
         { role: "system", content: executionInstructions() },
       ]);

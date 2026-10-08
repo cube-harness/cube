@@ -6,6 +6,9 @@ export {
 } from "./bootstrap.js";
 export { CubeRuntime } from "./runtime.js";
 export { BackgroundService } from "./services/background.service.js";
+export { SubagentService } from "./services/subagent.service.js";
+export type { SubagentRecord, SubagentInteraction } from "./services/subagent.service.js";
+export type { SubagentSummary, SubagentView, SubagentOwner, SubagentTarget } from "@cube/agent";
 export { McpService } from "./services/mcp.service.js";
 export type { McpState, McpServerState, McpStatus, McpLogin } from "@cube/agent";
 export { checkCubeUpdate, prepareCubeUpdate, type CubeUpdate } from "./services/update.service.js";

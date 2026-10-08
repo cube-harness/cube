@@ -95,8 +95,12 @@ export class CubeMcp {
     return () => this.listeners.delete(listener);
   }
 
-  readTools(): McpTools { return { ...this.tools }; }
-  readToolNames(): string[] { return Object.keys(this.tools); }
+  readTools(serverNames?: readonly string[]): McpTools {
+    if (!serverNames) return { ...this.tools };
+    const allowed = new Set(serverNames.flatMap(name => Object.keys(this.server(name).tools)));
+    return Object.fromEntries(Object.entries(this.tools).filter(([name]) => allowed.has(name)));
+  }
+  readToolNames(serverNames?: readonly string[]): string[] { return Object.keys(this.readTools(serverNames)); }
   getConnectionKey(name: string): string { return this.server(name).key; }
 
   private changed(): void { for (const listener of this.listeners) listener(); }

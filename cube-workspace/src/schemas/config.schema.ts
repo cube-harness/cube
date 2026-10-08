@@ -8,6 +8,7 @@ import {
   DURABLE_MEMORY_DEFAULTS,
   INHERIT_MODEL,
   DEFAULT_BACKGROUND_TASKS,
+  DEFAULT_SUBAGENTS,
 } from "../constants.js";
 
 export const GATEWAY_IDS = [
@@ -149,6 +150,11 @@ const soul = z
   .strict();
 
 const configSettingsShape = {
+  subagents: z.object({
+    concurrency: z.number().int().min(1).max(32).default(DEFAULT_SUBAGENTS.concurrency),
+    model: modelReference.default(DEFAULT_SUBAGENTS.model),
+    timeout_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_SUBAGENTS.timeout_ms),
+  }).strict().default(DEFAULT_SUBAGENTS),
   background_tasks: z.object({
     enabled: z.boolean().default(DEFAULT_BACKGROUND_TASKS.enabled),
     concurrency: z.number().int().min(1).max(32).default(DEFAULT_BACKGROUND_TASKS.concurrency),

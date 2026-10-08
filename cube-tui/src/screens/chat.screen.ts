@@ -19,11 +19,13 @@ import type {
   PermissionState,
   BackgroundService,
   McpService,
+  SubagentService,
 } from "@cube/runtime";
 import { toRuntimeNotice } from "@cube/runtime";
 import { SkillPicker } from "../components/skill-picker.js";
 import { PermissionPicker } from "../components/permission-picker.js";
 import { TaskPicker } from "../components/task-picker.js";
+import { SubagentPicker } from "../components/subagent-picker.js";
 import { McpPicker } from "../components/mcp-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "../components/approval-picker.js";
 import {
@@ -98,6 +100,8 @@ export class ChatScreen {
   private mounted = false;
   private closeTasks?: () => void;
   private closeMcp?: () => void;
+  private closeSubagents?: () => void;
+  private activeApprovalOverlay?: { key: string; dismiss(): void };
   private dock?: VStack;
   private inputPanel?: PetPanel;
   private transcript?: ScrollView;
@@ -186,6 +190,7 @@ export class ChatScreen {
   unmount(): void {
     this.closeTasks?.();
     this.closeMcp?.();
+    this.closeSubagents?.();
     this.promptEditor.focused = false;
     this.inputPanel?.stop();
     this.workingIndicator.stop();
@@ -296,6 +301,7 @@ export class ChatScreen {
   }
 
   setInfo(info: InfoBoxContent): void {
+    if (info.threadId !== undefined && info.threadId !== this.infoBox.getThreadId()) this.closeSubagents?.();
     this.infoBox.setInfo(info);
     this.footer.setInfo(info);
   }
@@ -407,6 +413,18 @@ export class ChatScreen {
     });
   }
 
+  pickSubagents(service: SubagentService, parentThreadId: string): Promise<void> {
+    let picker: SubagentPicker;
+    return this.showOverlay<void>(finish => (picker = new SubagentPicker(service,
+      { projectRoot: this.infoBox.getWorkspace(), parentThreadId }, {
+        onClose: () => finish(), onChange: () => this.requestRender(),
+        onError: error => this.showNotice(toRuntimeNotice(error)),
+        height: () => Math.max(3, this.options.tui.terminal.rows - 18),
+      })), finish => { this.closeSubagents = () => finish(); }, () => {
+        picker.dispose(); this.closeSubagents = undefined;
+      });
+  }
+
   pickTheme(current: string): Promise<string | null> {
     return this.showOverlay<string | null>(
       (finish) =>
@@ -455,19 +473,24 @@ export class ChatScreen {
     );
   }
 
-  requestApproval(input: { toolName: string; args: unknown }): Promise<ToolApprovalDecision> {
+  requestApproval(input: { toolName: string; args: unknown; label?: string; directory?: string; interactionId?: string }): Promise<ToolApprovalDecision> {
+    this.closeSubagents?.();
     return this.showOverlay<ToolApprovalDecision>(
       (finish) =>
         new ApprovalPicker({
           toolName: input.toolName,
           args: input.args,
-          directory: this.infoBox.getWorkspace(),
+          label: input.label,
+          directory: input.directory ?? this.infoBox.getWorkspace(),
           onDecision: finish,
         }),
+      finish => { this.activeApprovalOverlay = { key: input.interactionId ?? input.toolName, dismiss: () => finish("decline") }; },
+      () => { this.activeApprovalOverlay = undefined; },
     );
   }
 
   requestToolSuspension(request: ToolSuspensionRequest): Promise<ToolSuspensionResolution> {
+    this.closeSubagents?.();
     return this.showOverlay<ToolSuspensionResolution>(
       (finish) => new ToolSuspensionPicker({ request, onResolve: finish }),
       (finish) => {
@@ -489,6 +512,10 @@ export class ChatScreen {
     this.activeSuspensionOverlay.dismiss();
   }
 
+  cancelApproval(key: string): void {
+    if (this.activeApprovalOverlay?.key === key) this.activeApprovalOverlay.dismiss();
+  }
+
   private showOverlay<T>(
     create: (finish: (value: T) => void) => Component,
     onOpen?: (finish: (value: T) => void) => void,
@@ -496,6 +523,7 @@ export class ChatScreen {
   ): Promise<T> {
     this.closeTasks?.();
     this.closeMcp?.();
+    this.closeSubagents?.();
     return new Promise<T>((resolve) => {
       const host = this.inputPanel ?? this.dock ?? this.options.tui;
       let closed = false;

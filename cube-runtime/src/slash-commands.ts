@@ -7,6 +7,7 @@ import type { GatewayService } from "./services/gateway.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { PermissionService } from "./services/permission.service.js";
 import type { McpService } from "./services/mcp.service.js";
+import type { SubagentService } from "./services/subagent.service.js";
 import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -23,6 +24,7 @@ export type SlashCommandContext = {
   gateway: GatewayService;
   prompt: Pick<PromptService, "initialize">;
   mcp?: McpService;
+  subagents?: SubagentService;
 };
 
 type SlashCommandDefinition = SlashCommandSuggestion & {
@@ -64,6 +66,11 @@ const parseModelSelection = (argument: string) => {
 
 const definitions: SlashCommandDefinition[] = [
   {
+    name: "/subagents",
+    description: "inspect and manage delegated child agents",
+    execute: async () => ({ kind: "subagents" }),
+  },
+  {
     name: "/mcp",
     description: "manage MCP servers and tools",
     execute: async () => ({ kind: "mcp" }),
@@ -98,6 +105,7 @@ const definitions: SlashCommandDefinition[] = [
     description: "reload project instructions and MCP configuration",
     execute: async (_argument, context) => {
       await context.thread.reload();
+      await context.subagents?.reloadCatalog();
       await context.mcp?.reload();
       return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
     },

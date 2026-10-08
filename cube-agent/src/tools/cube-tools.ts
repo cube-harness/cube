@@ -13,9 +13,10 @@ export function createCubeTools(
   root: string,
   workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
   background?: Parameters<typeof createCommandTools>[2],
+  projectRoot = root,
 ) {
   const files = createFileTools(root, workspaceOnly);
-  const commands = createCommandTools(root, workspaceOnly, background);
+  const commands = createCommandTools(root, workspaceOnly, background, projectRoot);
   const { edit_file, write_file, apply_patch } = files.tools;
   return {
     processes: commands.processes,

@@ -29,6 +29,33 @@ export const skillPathIdentity = (path: string): string => {
   return process.platform === "win32" ? absolute.toLowerCase() : absolute;
 };
 
+async function createSkillSnapshot(catalog: SkillChoice[]): Promise<SkillSnapshot> {
+  const projectPaths = catalog.filter(s => s.enabled && s.source === "project").map(s => s.path);
+  const globalPaths = catalog.filter(s => s.enabled && s.source === "global").map(s => s.path);
+  const { merged } = await mergeWorkspaceSkills(resolveAgentSkills(globalPaths), resolveAgentSkills(projectPaths));
+  return { catalog, projectPaths, globalPaths, enabled: merged };
+}
+
+export function restrictCubeSkills(skills: CubeSkills, names?: readonly string[]): CubeSkills {
+  if (!names) return skills;
+  const allowed = new Set(names);
+  const list = async () => (await skills.list()).filter(skill => allowed.has(skill.name));
+  const snapshots = new WeakMap<RequestContext, Promise<SkillSnapshot>>();
+  return {
+    ...skills,
+    list,
+    snapshot(context) {
+      let pending = snapshots.get(context);
+      if (!pending) {
+        pending = list().then(createSkillSnapshot);
+        snapshots.set(context, pending);
+        void pending.catch(() => snapshots.delete(context));
+      }
+      return pending;
+    },
+  };
+}
+
 export async function createCubeSkills(
   home: HomeManager, workspace: WorkspaceManager, disabled: readonly string[],
 ): Promise<CubeSkills> {
@@ -62,13 +89,7 @@ export async function createCubeSkills(
     snapshot(context) {
       let pending = snapshots.get(context);
       if (!pending) {
-        pending = (async () => {
-          const catalog = await list();
-          const projectPaths = catalog.filter((s) => s.enabled && s.source === "project").map((s) => s.path);
-          const globalPaths = catalog.filter((s) => s.enabled && s.source === "global").map((s) => s.path);
-          const { merged } = await mergeWorkspaceSkills(resolveAgentSkills(globalPaths), resolveAgentSkills(projectPaths));
-          return { catalog, projectPaths, globalPaths, enabled: merged };
-        })();
+        pending = list().then(createSkillSnapshot);
         snapshots.set(context, pending);
         void pending.catch(() => snapshots.delete(context));
       }
