@@ -516,7 +516,7 @@ export function createFileTools(root: string, workspaceOnly: boolean | (() => bo
       edit_file: mutation(
         "edit_file",
         editInput,
-        "Edit text using OpenCode's ordered matching strategies. Supply enough old text to identify the change; replace_all explicitly allows all matches. Empty old_string creates only a missing file.",
+        "Edit a UTF-8 file by replacing old_string with new_string. Supply enough surrounding text to identify one match. Set replace_all: true to replace all matches. Empty old_string creates only a missing file.",
       ),
       write_file: mutation(
         "write_file",

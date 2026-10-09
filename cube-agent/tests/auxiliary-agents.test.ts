@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MockLanguageModelV3 } from "ai/test";
 import { createMemoryAgent } from "../src/agents/memory.agent.js";
-import { createSummarizerAgent } from "../src/agents/summarizer.agent.js";
+import { createSummarizerAgent, summarizeConversation } from "../src/agents/summarizer.agent.js";
+import { RequestContext } from "@mastra/core/request-context";
 import { memoryWriterBudget } from "../src/durable-memory.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,6 +37,31 @@ test("writer budgets derive from actual limits and refuse insufficient or unknow
   assert.deepEqual(memoryWriterBudget({ context: 32000, output: 4000, input: 3000 }), { input: 3000, output: 1600 });
   assert.throws(() => memoryWriterBudget({}), /known/);
   assert.throws(() => memoryWriterBudget({ context: 1000, output: 1000 }), /insufficient/);
+});
+
+test("compact generation rejects unfit requests before calling the model and caps output", async () => {
+  let calls = 0;
+  const model = new MockLanguageModelV3({ doGenerate: async options => {
+    calls++;
+    assert.equal(options.maxOutputTokens, 512);
+    assert.ok(!options.tools?.length);
+    return generated("bounded summary");
+  } });
+  const input = {
+    text: "Conversation to summarize",
+    maxOutputTokens: 8192,
+    signal: new AbortController().signal,
+    requestContext: new RequestContext(),
+  };
+  await assert.rejects(summarizeConversation(model, {}, input), /known context\/output limits/);
+  await assert.rejects(
+    summarizeConversation(model, { context: 256000, output: 512, input: 1 }, input),
+    /cannot fit/,
+  );
+  assert.equal(calls, 0);
+  const result = await summarizeConversation(model, { context: 256000, output: 512 }, input);
+  assert.equal(result.text, "bounded summary");
+  assert.equal(calls, 1);
 });
 
 test("registered summarizer captures inherited model per call and explicit override stays routed", async t => {
