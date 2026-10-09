@@ -14,6 +14,7 @@ import { appTheme } from "../themes/app.theme.js";
 import { createSelectListTheme } from "../themes/pi-tui.theme.js";
 
 export type ToolSuspensionRequest = {
+  label?: string;
   toolCallId: string;
   toolName: string;
   args: unknown;
@@ -202,7 +203,7 @@ export class ToolSuspensionPicker implements Component, Focusable {
       { key: formatBinding("tui.select.confirm"), label: this.mode === "decision" ? "Select" : "Submit" },
       { key: formatBinding("tui.select.cancel"), label: this.mode === "feedback" ? "Back" : "Cancel" },
     ]);
-    const lines: string[] = [];
+    const lines: string[] = this.options.request.label ? [appTheme.ui.primary(this.options.request.label)] : [];
     if (this.options.request.toolName === "submit_plan") {
       const payload = asRecord(this.options.request.suspendPayload) ?? {};
       const title = typeof payload.title === "string" ? payload.title : undefined;
@@ -283,7 +284,7 @@ export class ToolSuspensionPicker implements Component, Focusable {
 
   private renderQuestion(width: number): string[] {
     const contentWidth = width;
-    const lines: string[] = [];
+    const lines: string[] = this.options.request.label ? [appTheme.ui.primary(this.options.request.label)] : [];
     lines.push(
       ...wrapTextWithAnsi(appTheme.ui.text.bold(this.question!.question), contentWidth).map((line) =>
         truncateToWidth(line, contentWidth),

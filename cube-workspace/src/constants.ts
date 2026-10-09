@@ -11,6 +11,11 @@ export const DEFAULT_BACKGROUND_TASKS = {
   concurrency: 2,
   timeout_ms: 300000,
 } as const;
+export const DEFAULT_SUBAGENTS = {
+  concurrency: 2,
+  model: INHERIT_MODEL,
+  timeout_ms: 0,
+} as const;
 export const DURABLE_MEMORY_DEFAULTS = {
   enabled: true,
   model: INHERIT_MODEL,

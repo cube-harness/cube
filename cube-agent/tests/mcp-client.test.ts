@@ -16,6 +16,23 @@ const tool = createTool({ id: "lookup", description: "Lookup", inputSchema: z.ob
 const snapshot = (servers: Record<string, unknown>) => parseMcpConfig({ mcpServers: servers });
 const config = { good: { command: "node" }, broken: { command: "missing-command" }, empty: { command: "node" } };
 
+test("server allowlists filter published MCP tools by ownership, not tool-name prefix", async t => {
+  const root = await mkdtemp(join(tmpdir(), "cube-mcp-scope-"));
+  const manager = new CubeMcp({ auth: new AuthStore(CubeHome({ cubeHome: root })), workspaceRoot: root });
+  t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
+  let discoveries = 0;
+  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({
+    tools: discoveries++ === 0 ? { beta_lookup: tool } : { alpha_lookup: tool }, errors: {}, errorDetails: {},
+  }));
+  t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
+  await manager.reload(snapshot({ alpha: { command: "node" }, beta: { command: "node" } }), async () => undefined);
+  assert.deepEqual(manager.readToolNames(["alpha"]), ["beta_lookup"]);
+  assert.deepEqual(manager.readToolNames(["beta"]), ["alpha_lookup"]);
+  assert.deepEqual(manager.readToolNames([]), []);
+  assert.deepEqual(manager.readToolNames(), ["alpha_lookup", "beta_lookup"]);
+  assert.throws(() => manager.readTools(["missing"]), /no longer configured/);
+});
+
 test("discovery isolates failures, config reload reuses connections, and policies precede publication", async t => {
   const root = await mkdtemp(join(tmpdir(), "cube-mcp-client-"));
   const manager = new CubeMcp({ auth: new AuthStore(CubeHome({ cubeHome: root })), workspaceRoot: root });

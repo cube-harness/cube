@@ -21,6 +21,11 @@ status_line:
 
 telemetry: false
 
+subagents:
+  concurrency: 2
+  model: inherit
+  timeout_ms: 0 # No overall child-turn deadline; includes approval waits when positive.
+
 background_tasks:
   enabled: true
   concurrency: 2

@@ -72,6 +72,7 @@ export function createCommandTools(
   root: string,
   workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
   background: { enabled: boolean; concurrency: number; timeout_ms: number } = DEFAULT_BACKGROUND_TASKS,
+  projectRoot = root,
 ) {
   const isWorkspaceOnly = () => typeof workspaceOnly === "function" ? workspaceOnly() : workspaceOnly;
   const processes = new Map<string, ProcessEntry>();
@@ -246,7 +247,7 @@ export function createCommandTools(
         ? input.timeout * 1000 : input.background ? background.timeout_ms || null : 120_000;
       const entry: ProcessEntry = {
         record: {
-          id, workspaceRoot: root, threadId: context.agent?.threadId,
+          id, workspaceRoot: projectRoot, threadId: context.agent?.threadId,
           toolCallId: context.agent?.toolCallId,
           runId: context.requestContext?.get("cubeBackgroundRunId") as string | undefined,
           createdAt: Date.now(), detached: input.background, timeoutMs,

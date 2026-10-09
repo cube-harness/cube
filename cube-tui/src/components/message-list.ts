@@ -194,6 +194,7 @@ const mapSessionMessage = (
   // Internal retained context is not a human message or a TUI notice.
   if (raw.role === "signal" && (
     signal?.tagName === "background_task" ||
+    signal?.tagName === "subagent_result" ||
     (signalType === "reactive" && ["skill-activation", "agents-discovery"].includes(String(cube?.kind)))
   ))
     return [];

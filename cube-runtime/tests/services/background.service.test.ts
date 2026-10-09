@@ -88,6 +88,30 @@ test("foreign handles are rejected and foreground commands never become tasks", 
   } finally { await f.service.shutdown(); }
 });
 
+test("running count follows live thread processes, including servers without a deadline", async () => {
+  const f = fixture();
+  try {
+    f.task("old-server", { status: "running" });
+    const build = f.process("build");
+    f.process("dev-server", { timeoutMs: null });
+    f.process("foreground", { detached: false });
+    f.process("other", { threadId: "other-thread" });
+    f.process("foreign", { workspaceRoot: "other" });
+    assert.equal(f.service.runningCount(), 2);
+    build.result.status = "completed";
+    build.completedAt = Date.now();
+    f.emit(build);
+    assert.equal(f.service.runningCount(), 1);
+    f.select("other-thread");
+    assert.equal(f.service.runningCount(), 1);
+    assert.equal(f.service.runningCount("owner"), 1);
+    f.select(null);
+    assert.equal(f.service.runningCount(), 0);
+    await f.service.stop({ id: "dev-server" }, "owner");
+    assert.equal(f.service.runningCount("owner"), 0);
+  } finally { await f.service.shutdown(); }
+});
+
 test("explicit calling-thread management is isolated from selection and rejects cross-thread get/kill", async () => {
   const f = fixture();
   try {

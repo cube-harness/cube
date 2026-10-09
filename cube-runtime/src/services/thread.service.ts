@@ -76,7 +76,7 @@ export class ThreadService {
 
   async list(): Promise<ThreadSummary[]> {
     const activeId = this.current();
-    return (await this.session.thread.list()).map((thread) => ({
+    return (await this.session.thread.list()).filter(thread => !thread.metadata?.cubeSubagent).map((thread) => ({
       id: thread.id,
       title: thread.title || "Untitled Thread",
       updatedAt: new Date(thread.updatedAt).toISOString(),
@@ -122,7 +122,10 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("switch threads");
 
-    const snapshot = await this.prepareInstructions(threadId);
+    const target = await this.session.thread.getById({ threadId });
+    if (target?.metadata?.cubeSubagent) throw new Error("Child conversations are available through /subagents, not /resume");
+
+    const snapshot = await this.prepareInstructions(threadId, target);
     this.context?.invalidate();
     await this.session.thread.switch({ threadId });
     this.instructions.install(snapshot);
@@ -227,10 +230,10 @@ export class ThreadService {
     this.context?.invalidate();
   }
 
-  private async prepareInstructions(threadId: string): Promise<InstructionSnapshot> {
+  private async prepareInstructions(threadId: string, loaded?: Awaited<ReturnType<Session["thread"]["getById"]>>): Promise<InstructionSnapshot> {
     const cached = this.snapshots.get(threadId);
     if (cached) return cached;
-    const thread = await this.session.thread.getById({ threadId });
+    const thread = loaded ?? await this.session.thread.getById({ threadId });
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     const snapshot = await this.instructions.refresh(thread.metadata?.cubeInstructions);
     await this.session.thread.setSettingOn({ threadId, key: "cubeInstructions", value: snapshot });

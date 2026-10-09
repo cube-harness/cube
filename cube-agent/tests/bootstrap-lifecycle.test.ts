@@ -94,3 +94,36 @@ test("composition keeps storage open until the native stream finishes cleanup", 
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
+
+test("child result persists once without waking an idle parent or recreating a deleted thread", { timeout: 15000 }, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cube-result-delivery-"));
+  const home = CubeHome({ cubeHome: root, userHome: root });
+  t.mock.method(home, "getMemoryDbPath", () => ":memory:");
+  let composition: Awaited<ReturnType<typeof createCubeMastra>> | undefined;
+  try {
+    await createBootstrap(home).run();
+    const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test" });
+    composition = await createCubeMastra(home, CubeWorkspace(home, root), config);
+    const session = await composition.controller.createSession({ resourceId: root });
+    await session.thread.create({ id: "result-parent" });
+    const record = {
+      id: "result-child", parentThreadId: "result-parent", projectRoot: root,
+      agent: "worker", error: "Child failed before execution", pendingDelivery: "child-result",
+    };
+    await composition.deliverSubagentResult(record, true);
+    await composition.deliverSubagentResult(record, true);
+    const storage = (await composition.mastra.getStorage()!.getStore("memory"))!;
+    const saved = await storage.listMessagesById({ messageIds: ["child-result"] });
+    assert.equal(saved.messages.length, 1);
+    assert.equal(saved.messages[0]!.threadId, "result-parent");
+    assert.match(JSON.stringify(saved.messages), /Child failed before execution/);
+    assert.equal(session.run.isRunning(), false);
+    await session.thread.delete({ threadId: "result-parent" });
+    await composition.deliverSubagentResult({ ...record, pendingDelivery: "late-child-result" }, true);
+    assert.equal(await storage.getThreadById({ threadId: "result-parent" }), null);
+    assert.equal((await storage.listMessagesById({ messageIds: ["late-child-result"] })).messages.length, 0);
+  } finally {
+    await composition?.shutdown();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
