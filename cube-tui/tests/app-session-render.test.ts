@@ -11,6 +11,7 @@ import type {
 import { CubeApp, startPreparedCube } from "../src/app.js";
 import { PromptService } from "../../cube-runtime/src/services/prompt.service.js";
 import type { ChatScreen } from "../src/screens/chat.screen.js";
+import type { SubagentApprovalRequest } from "../src/components/subagent-approval-picker.js";
 
 const displayState = (text: string, queuedFollowUps = 0) => ({
   isRunning: true,
@@ -477,6 +478,7 @@ test("CubeApp resolves native approval events through the runtime facade", async
   const { runtime, approvals } = createRuntime();
   const { screen } = createScreen();
   const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+  await app.start({ screenAlreadyMounted: true });
 
   app.handleRuntimeEvent({
     type: "tool_approval_required",
@@ -488,11 +490,46 @@ test("CubeApp resolves native approval events through the runtime facade", async
 
   assert.deepEqual(approvals, [
     {
+      target: undefined,
       toolCallId: "call-1",
       toolName: "mastra_workspace_execute_command",
       decision: "approve",
     },
   ]);
+  await app.stop();
+});
+
+test("child approvals wait for explicit review without blocking main approval and stale targets cannot resume", async () => {
+  const { runtime, approvals } = createRuntime();
+  const { screen } = createScreen();
+  const pending = new Map<string, SubagentApprovalRequest>();
+  screen.addSubagentApproval = input => { pending.set(input.id, input); };
+  screen.removeSubagentApproval = id => { pending.delete(id); };
+  screen.cancelApproval = () => {};
+  const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+  await app.start({ screenAlreadyMounted: true });
+  try {
+    const first = { jobId: "child-a", runId: "run-a", toolCallId: "same-call" };
+    const second = { jobId: "child-b", runId: "run-b", toolCallId: "same-call" };
+    for (const target of [first, second]) app.handleRuntimeEvent({
+      type: "subagent_interaction", target, agent: "worker", description: "Assigned task", directory: "D:/cube",
+      event: { type: "tool_approval_required", toolName: "execute_command", toolCallId: "same-call", args: { command: "dir" } },
+    } as never);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(approvals.length, 0, "background approvals must not open/resolve automatically");
+    assert.equal(pending.size, 2);
+    app.handleRuntimeEvent({ type: "tool_approval_required", toolName: "execute_command",
+      toolCallId: "main-call", args: { command: "dir" } } as never);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(approvals[0]?.toolCallId, "main-call");
+    pending.get("child-b:run-b:same-call")!.onDecision("approve");
+    assert.deepEqual(approvals[1]?.target, second);
+    const stale = pending.get("child-a:run-a:same-call");
+    app.handleRuntimeEvent({ type: "subagent_interaction_cancelled", jobId: "child-a", runId: "run-a" } as never);
+    stale!.onDecision("approve");
+    assert.equal(approvals.length, 2);
+    assert.equal(pending.size, 0);
+  } finally { await app.stop(); }
 });
 
 test("CubeApp clears approval indicator immediately after the native gate resolves", async () => {
@@ -511,6 +548,7 @@ test("CubeApp clears approval indicator immediately after the native gate resolv
   setApprovalPending(true);
   const { screen, calls } = createScreen();
   const app = new CubeApp(runtime, screen, { onExitRequested: () => undefined });
+  await app.start({ screenAlreadyMounted: true });
 
   app.handleRuntimeEvent({
     type: "tool_approval_required",
@@ -523,6 +561,7 @@ test("CubeApp clears approval indicator immediately after the native gate resolv
   const renders = calls.filter((call) => call[0] === "renderDisplayState");
   assert.equal(renders.at(-1)?.[1], stale);
   assert.equal(renders.at(-1)?.[2], false);
+  await app.stop();
 });
 
 test("CubeApp routes ask_user through the generic native suspension UI", async () => {

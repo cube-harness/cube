@@ -78,6 +78,9 @@ export class CubeApp {
         this.screen.requestRender();
         return { consume: true };
       }
+      if (matchesBinding(data, "cube.subagent.approvals") && this.screen.reviewSubagentApprovals()) {
+        return { consume: true };
+      }
       if (matchesBinding(data, "cube.app.exit")) {
         void this.handleExit();
         return { consume: true };
@@ -296,10 +299,12 @@ export class CubeApp {
         this.cancelInteraction(`main:${event.toolCallId}`);
         return;
       case "subagent_interaction":
-        this.queueInteraction(event.event, event.target, `${event.description} · ${event.agent}`, event.directory);
+        this.queueInteraction(event.event, event.target,
+          event.event.type === "tool_approval_required" ? event.agent : `${event.description} · ${event.agent}`,
+          event.directory, event.description);
         return;
       case "subagent_interaction_cancelled":
-        for (const [key, target] of this.interactions) if (target?.threadId === event.threadId &&
+        for (const [key, target] of this.interactions) if (target?.jobId === event.jobId &&
           (!event.runId || target.runId === event.runId)) this.cancelInteraction(key);
         return;
       case "agent_end":
@@ -360,6 +365,11 @@ export class CubeApp {
   }
 
   private cancelInteraction(key: string): void {
+    if (this.interactions.get(key) && !this.questions.has(key)) {
+      this.interactions.delete(key);
+      this.screen.removeSubagentApproval(key);
+      return;
+    }
     this.cancelledInteractions.add(key);
     this.screen.cancelToolSuspension(key);
     this.screen.cancelApproval(key);
@@ -377,10 +387,27 @@ export class CubeApp {
     target?: SubagentTarget,
     label?: string,
     directory?: string,
+    description?: string,
   ): void {
-    const key = target ? `${target.threadId}:${target.runId}:${event.toolCallId}` : `main:${event.toolCallId}`;
+    const key = target ? `${target.jobId}:${target.runId}:${event.toolCallId}` : `main:${event.toolCallId}`;
     if (this.interactions.has(key)) return;
     this.interactions.set(key, target);
+    if (target && event.type === "tool_approval_required") {
+      this.screen.addSubagentApproval({
+        id: key, agent: label ?? "Subagent", description, toolName: event.toolName, args: event.args, directory,
+        onDecision: decision => {
+          if (!this.started || !this.interactions.has(key)) return;
+          this.interactions.delete(key);
+          this.screen.removeSubagentApproval(key);
+          try {
+            this.runtime.respondToApproval({ target, toolName: event.toolName, toolCallId: event.toolCallId, decision,
+              ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}) });
+          } catch (error) { this.screen.showNotice(toRuntimeNotice(error)); }
+          this.applyDisplayState(this.runtime.getDisplayState());
+        },
+      });
+      return;
+    }
     if (event.type === "tool_suspended") this.questions.add(key);
     this.interactionQueue = this.interactionQueue.then(async () => {
       try {
@@ -394,8 +421,8 @@ export class CubeApp {
           const resolution = await this.screen.requestToolSuspension({ ...event, toolCallId: key, label });
           if (resolution.kind === "dismissed" || this.cancelledInteractions.has(key)) return;
           if (resolution.kind === "cancel") {
-            // Cancel only questions from this Session, never a sibling's identical tool-call ID.
-            for (const [other, owner] of this.interactions) if (owner?.threadId === target?.threadId && this.questions.has(other)) this.cancelInteraction(other);
+            // Never cancel a sibling's identical tool-call ID.
+            for (const [other, owner] of this.interactions) if (owner?.jobId === target?.jobId && this.questions.has(other)) this.cancelInteraction(other);
             void this.runtime.cancelSuspension(event.toolCallId, target).catch(error => this.screen.showNotice(toRuntimeNotice(error)));
           } else void this.runtime.respondToSuspension({ target, toolCallId: event.toolCallId, resumeData: resolution.resumeData })
             .catch(error => this.screen.showNotice(toRuntimeNotice(error)));

@@ -1,10 +1,15 @@
-import { Mastra } from "@mastra/core";
-import type { Agent } from "@mastra/core/agent";
-import type { AgentControllerEvent, Session } from "@mastra/core/agent-controller";
-import type { MemoryStorage } from "@mastra/core/storage";
-import type { IMastraLogger } from "@mastra/core/logger";
-import type { MastraModelGatewayInterface } from "@mastra/core/llm";
-import { LibSQLStore } from "@mastra/libsql";
+import { Agent } from "@mastra/core/agent";
+import { RequestContext } from "@mastra/core/request-context";
+import type { MastraStorage } from "@mastra/core/storage";
+import type { MastraToolInvocationOptions, ToolHooks } from "@mastra/core/tools";
+import { Memory } from "@mastra/memory";
+import { webFetchTool } from "@mastra/core/tools";
+import { createMastraWorkspace } from "../workspace.js";
+import { cubeAskUserTool } from "../tools/ask-user.tool.js";
+import { formatAgentsContext } from "../prompts/system.prompt.js";
+import { formatMemorySnapshot } from "../processors/memory.processor.js";
+import { buildModelConfig } from "./default.agent.js";
+import { createSkillsProcessor } from "../processors/skills.processor.js";
 import {
   WorkspaceManager,
   type CubeConfig,
@@ -13,20 +18,396 @@ import {
   type SubagentDefinition,
 } from "@cube/workspace";
 import path from "node:path";
-import { createCubeAgent } from "./default.agent.js";
-import { createCubeController } from "./controller.js";
 import { WORKER_AGENT } from "./worker.agent.js";
 import { EXPLORE_AGENT } from "./explore.agent.js";
-import { configureCubePermissions } from "../permission.js";
+import { resolveCubeToolPermission } from "../permission.js";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
-import { runWithCubeLogContext } from "../logger.js";
 import type { InstructionSnapshot } from "../prompts/system.prompt.js";
-import type { CubeContext, ContextLimits } from "../context.js";
 import { restrictCubeSkills, type CubeSkills } from "../skills.js";
 import type { CubeMcp } from "../mcp/client.js";
-import type { createMemoryRecall } from "../tools/memory-recall.tool.js";
 
 export const BUILTIN_SUBAGENTS: readonly SubagentDefinition[] = [EXPLORE_AGENT, WORKER_AGENT];
+
+export type NativeSubagentInput = {
+  prompt: string;
+  threadId?: string | null;
+  resourceId?: string | null;
+  instructions?: string | null;
+  maxSteps?: number | null;
+};
+export type NativeInvocation = {
+  id: string;
+  projectRoot: string;
+  executionRoot: string;
+  definition: SubagentDefinition;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  instructions: InstructionSnapshot;
+};
+export type NativeSubagentResult = {
+  text: string;
+  threadId?: string;
+  resourceId?: string;
+  runId?: string;
+  finishReason?: string;
+  toolActivity: ChildToolActivity[];
+};
+export type NativeSubagentGate = {
+  runId: string;
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  suspendPayload: unknown;
+  approval: boolean;
+};
+export type SubagentDispatchRequest = {
+  role: string;
+  input: NativeSubagentInput;
+  projectRoot: string;
+  parentThreadId: string;
+  runId: string;
+  toolCallId: string;
+};
+export type NativeSubagentExecution = {
+  agent: Agent;
+  tools: CubeTools;
+  history: Pick<NativeSubagentResult, "threadId" | "resourceId" | "runId">;
+  run(
+    input: NativeSubagentInput,
+    options: MastraToolInvocationOptions,
+    suspend: (gate: NativeSubagentGate) => Promise<unknown>,
+  ): Promise<NativeSubagentResult>;
+  dispose(): Promise<void>;
+};
+
+export function createNativeSubagents(options: {
+  home: HomeManager;
+  config: CubeConfig;
+  projectRoot: string;
+  storage: MastraStorage;
+  parent: Agent;
+  skills: CubeSkills;
+  mcp: Pick<CubeMcp, "readTools" | "readToolNames">;
+  readPermissions: () => CubeConfig["permissions"];
+}) {
+  const key = "cube.subagentInvocation";
+  let definitions: readonly SubagentDefinition[] = BUILTIN_SUBAGENTS;
+  let dispatch: ((request: SubagentDispatchRequest) => Promise<{ id: string }>) | undefined;
+  const invocations = new Map<string, Agent>();
+  const catalog = () =>
+    Object.fromEntries(
+      definitions.map((definition) => [
+        definition.name,
+        new Agent({
+          id: `cube-role-${definition.name}`,
+          name: definition.name,
+          model: options.config.model,
+          description: `${definition.description}. Runs in the background; completion is delivered to this thread. Supply relevant constraints and expected evidence.`,
+          instructions: definition.instructions,
+        }),
+      ]),
+    );
+  let listed = catalog();
+  function readAgents(context?: RequestContext): Record<string, Agent> {
+    const id = context?.get(key) as string | undefined;
+    if (!id) return listed;
+    const agent = invocations.get(id);
+    if (!agent) throw new Error("Subagent invocation is unavailable");
+    return { [agent.name]: agent };
+  }
+  const hooks: ToolHooks = {
+    beforeToolCall: async ({ toolName, input, context }) => {
+      if (
+        !toolName.startsWith("agent-") ||
+        !definitions.some((role) => `agent-${role.name}` === toolName)
+      )
+        return;
+      const ctx = context as MastraToolInvocationOptions;
+      const controller = ctx.requestContext?.get("controller") as { threadId?: string } | undefined;
+      const threadId = controller?.threadId;
+      const runId = ctx.requestContext?.get("cubeBackgroundRunId") as string | undefined;
+      if (!threadId || !runId || !ctx.toolCallId || !dispatch)
+        throw new Error("Delegation requires an active parent run");
+      // Native delegation supplies parent memory IDs before this hook; never reuse them for a child.
+      const {
+        threadId: _threadId,
+        resourceId: _resourceId,
+        ...assignment
+      } = input as NativeSubagentInput;
+      const job = await dispatch({
+        role: toolName.slice(6),
+        input: assignment,
+        projectRoot: options.projectRoot,
+        parentThreadId: threadId,
+        runId,
+        toolCallId: ctx.toolCallId,
+      });
+      return {
+        proceed: false,
+        output: {
+          text: `Background subagent accepted: ${job.id}. Completion will be delivered automatically in this thread.`,
+        },
+      };
+    },
+  };
+  async function prepare(inputInvocation: NativeInvocation): Promise<NativeSubagentExecution> {
+    const invocation = structuredClone(inputInvocation);
+    if (invocations.has(invocation.id)) throw new Error("Subagent is already prepared");
+    const { definition } = invocation;
+    const skills = restrictCubeSkills(options.skills, definition.skills);
+    if (definition.skills) {
+      const available = await skills.list();
+      for (const name of definition.skills)
+        if (!available.some((skill) => skill.name === name && skill.enabled))
+          throw new Error(`Unavailable child skill: ${name}`);
+    }
+    options.mcp.readToolNames(definition.mcpServers);
+    const tools = createCubeTools(
+      invocation.executionRoot,
+      () => options.readPermissions().workspace_only,
+      options.config.background_tasks,
+      invocation.projectRoot,
+      (name) => resolveCubeToolPermission(name, options.readPermissions()) === "ask",
+    );
+    try {
+      const workspace = await createMastraWorkspace(
+        new WorkspaceManager(options.home, invocation.executionRoot),
+        skills,
+        () => options.readPermissions().workspace_only,
+      );
+      const baseline = structuredClone(invocation.instructions);
+      if (invocation.executionRoot !== invocation.projectRoot)
+        baseline.sources = baseline.sources.map((source) => {
+          const remap = (value: string) => {
+            const rel = path.relative(invocation.projectRoot, value);
+            return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+              ? path.join(invocation.executionRoot, rel)
+              : value;
+          };
+          return {
+            ...source,
+            path: remap(source.path),
+            scope: source.scope === "global" ? "global" : remap(source.scope),
+          };
+        });
+      const history: NativeSubagentExecution["history"] = {};
+      const agent = new Agent({
+        id: `cube-role-${definition.name}-${invocation.id}`,
+        name: definition.name,
+        description: definition.description,
+        model: [buildModelConfig(invocation.modelId, invocation.reasoningEffort) as any],
+        memory: new Memory({
+          storage: options.storage,
+          vector: false,
+          options: {
+            lastMessages: false,
+            generateTitle: false,
+            semanticRecall: false,
+            workingMemory: { enabled: false },
+            observationalMemory: false,
+          },
+        }),
+        workspace,
+        skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
+        instructions: [
+          { role: "system", content: baseline.soul },
+          { role: "system", content: definition.instructions },
+          {
+            role: "system",
+            content: `Working directory: ${invocation.executionRoot}. Commands use ${process.platform === "win32" ? "cmd.exe" : "/bin/sh"} and have no TTY. Provide a brief command reason. Commands run on the host, not an OS sandbox. Your task/history are private. Report actual checks and changed files; worktree changes require deliberate integration.`,
+          },
+        ],
+        tools: () =>
+          Object.fromEntries(
+            Object.entries({
+              ...tools.forModel(invocation.modelId),
+              ask_user: cubeAskUserTool,
+              fetch: webFetchTool,
+              ...options.mcp.readTools(definition.mcpServers),
+            }).filter(([name]) => subagentAllowsTool(definition, name)),
+          ),
+        inputProcessors: [
+          {
+            id: "cube-role-history",
+            processInput: ({ messageList }) => {
+              const message = messageList.get.input
+                .db()
+                .find((message) => message.threadId && message.resourceId);
+              if (message) {
+                history.threadId = message.threadId;
+                history.resourceId = message.resourceId;
+              }
+              return messageList;
+            },
+          },
+          createSkillsProcessor(skills),
+          {
+            id: "cube-role-context",
+            processLLMRequest: ({ prompt }) => {
+              const texts = [
+                formatAgentsContext(baseline.sources),
+                formatMemorySnapshot(baseline.durableMemory),
+              ].filter(Boolean);
+              let index = 0;
+              while (index < prompt.length && prompt[index]?.role === "system") index++;
+              return {
+                prompt: [
+                  ...prompt.slice(0, index),
+                  ...texts.map((text) => ({
+                    role: "user" as const,
+                    content: [{ type: "text" as const, text }],
+                  })),
+                  ...prompt.slice(index),
+                ],
+              };
+            },
+            processInputStep: ({ tools: available }) => {
+              const allowed = Object.fromEntries(
+                Object.entries(available ?? {}).filter(([name]) =>
+                  subagentAllowsTool(definition, name),
+                ),
+              );
+              return { tools: allowed, activeTools: Object.keys(allowed) };
+            },
+          },
+        ],
+        defaultOptions: () => ({
+          onChunk: (chunk) => {
+            history.runId = chunk.runId;
+          },
+          requireToolApproval: ({ toolName }) =>
+            resolveCubeToolPermission(
+              toolName,
+              options.readPermissions(),
+              options.mcp.readToolNames().includes(toolName) ? "ask" : "allow",
+            ) === "ask",
+          hooks: {
+            beforeToolCall: ({ toolName }) => {
+              if (
+                resolveCubeToolPermission(
+                  toolName,
+                  options.readPermissions(),
+                  options.mcp.readToolNames().includes(toolName) ? "ask" : "allow",
+                ) === "deny"
+              )
+                return { proceed: false as const, output: `Permission denied: ${toolName}` };
+            },
+          },
+        }),
+      });
+      invocations.set(invocation.id, agent);
+      const requestContext = new RequestContext();
+      requestContext.set(key, invocation.id);
+      const native = await options.parent.getToolsForExecution({
+        requestContext,
+        threadId: invocation.id,
+        resourceId: `${invocation.projectRoot}:subagent:${invocation.id}`,
+        methodType: "stream",
+        backgroundTaskEnabled: false,
+        delegation: { messageFilter: () => [], hookErrorStrategy: "throw" },
+      });
+      const executor = native[`agent-${definition.name}`]?.execute;
+      if (!executor) throw new Error("Native delegation tool is unavailable");
+      return {
+        agent,
+        tools,
+        history,
+        async run(input, runOptions, suspend) {
+          let resumed = false;
+          let resumeData: unknown;
+          let runId: string | undefined;
+          let currentCall: any;
+          let raw: any;
+          do {
+            resumed = false;
+            raw = await executor(
+              {
+                ...input,
+                threadId: invocation.id,
+                resourceId: `${invocation.projectRoot}:subagent:${invocation.id}`,
+                ...(runId ? { suspendedToolRunId: runId } : {}),
+              },
+              {
+                ...runOptions,
+                messages: [],
+                requestContext,
+                ...(resumeData !== undefined ? { resumeData } : {}),
+                outputWriter: async (chunk: any) => {
+                  const event = chunk.payload?.output ?? chunk;
+                  const data = event.data ?? event.payload;
+                  const type = event.type?.replace(/^data-/, "");
+                  if (
+                    ["tool-call", "tool-call-approval", "tool-call-suspended"].includes(type) &&
+                    data?.toolCallId
+                  ) {
+                    const display =
+                      event.metadata?.mastra?.toolPayloadTransform?.display?.approval?.transformed;
+                    currentCall = { ...data, ...(display ? { args: display } : {}) };
+                  }
+                },
+                suspend: async (payload: any, detail: any) => {
+                  const approval = detail?.requireToolApproval;
+                  const call = currentCall?.toolCallId
+                    ? currentCall
+                    : typeof approval === "object"
+                      ? approval
+                      : undefined;
+                  if (!detail?.runId || !call?.toolCallId || !call.toolName)
+                    throw new Error("Native suspension has no tool identity");
+                  runId = detail.runId;
+                  resumeData = await suspend({
+                    runId: detail.runId,
+                    toolCallId: call.toolCallId,
+                    toolName: call.toolName,
+                    args: call.args ?? {},
+                    suspendPayload: payload,
+                    approval: !!approval,
+                  });
+                  resumed = true;
+                },
+              },
+            );
+          } while (resumed && !runOptions.abortSignal?.aborted);
+          if (runOptions.abortSignal?.aborted)
+            throw runOptions.abortSignal.reason ?? new Error("Subagent cancelled");
+          if (!raw?.text?.trim()) throw new Error("Subagent ended without a final report");
+          return {
+            text: raw.text,
+            threadId: raw.subAgentThreadId,
+            resourceId: raw.subAgentResourceId,
+            runId: history.runId ?? runId,
+            finishReason: raw.finishReason,
+            toolActivity: (raw.subAgentToolResults ?? []).map((item: any) => ({
+              toolName: item.toolName,
+              toolCallId: item.toolCallId,
+              isError: item.isError,
+            })),
+          };
+        },
+        async dispose() {
+          await tools.dispose();
+          invocations.delete(invocation.id);
+        },
+      };
+    } catch (error) {
+      await tools.dispose();
+      invocations.delete(invocation.id);
+      throw error;
+    }
+  }
+  return {
+    readAgents,
+    hooks,
+    prepare,
+    setDefinitions(next: readonly SubagentDefinition[]) {
+      definitions = structuredClone(next);
+      listed = catalog();
+    },
+    setDispatch(next: typeof dispatch) {
+      dispatch = next;
+    },
+  };
+}
 
 export type ChildToolActivity = {
   toolCallId: string;
@@ -34,46 +415,8 @@ export type ChildToolActivity = {
   isError?: boolean;
   denied?: boolean;
 };
-export type ChildRunResult = {
-  runId: string;
-  status: "completed" | "failed" | "cancelled";
-  text: string;
-  error?: string;
-  startedAt: number;
-  completedAt: number;
-  toolActivity: ChildToolActivity[];
-};
-export type CreateSubagentChildOptions = {
-  id: string;
-  projectRoot: string;
-  executionRoot: string;
-  cwd: string;
-  definition: SubagentDefinition;
-  modelId: string;
-  reasoningEffort?: ReasoningEffort;
-  instructions: InstructionSnapshot;
-  readPermissions: () => CubeConfig["permissions"];
-  home: HomeManager;
-  config: CubeConfig;
-  logger?: IMastraLogger;
-  gateways: MastraModelGatewayInterface[];
-  skills: CubeSkills;
-  mcp: Pick<CubeMcp, "readTools" | "readToolNames">;
-  recall?: ReturnType<typeof createMemoryRecall>["tool"];
-  readModel: (id: string) => Promise<{ limits: ContextLimits }>;
-  createContext: (getAgent: () => Agent, storage: () => Promise<MemoryStorage>) => CubeContext;
-};
-export type SubagentChild = {
-  session: Session;
-  agent: Awaited<ReturnType<typeof createCubeAgent>>;
-  tools: CubeTools;
-  context: CubeContext;
-  run(content: string): Promise<ChildRunResult>;
-  drain(): Promise<void>;
-  dispose(): Promise<void>;
-};
-
 export function subagentAllowsTool(definition: SubagentDefinition, name: string): boolean {
+  if (name.startsWith("agent-")) return false;
   const bare = name.replace(/^controllerBuiltIn[._]/, "");
   if (
     [
@@ -91,247 +434,9 @@ export function subagentAllowsTool(definition: SubagentDefinition, name: string)
     ].includes(bare)
   )
     return false;
-  if (definition.name === "explore" && EXPLORE_AGENT.disallowedTools!.includes(bare))
-    return false;
-  return !definition.disallowedTools?.includes(bare) &&
-    (!definition.tools || definition.tools.includes(bare));
-}
-
-export async function createSubagentChild(
-  options: CreateSubagentChildOptions,
-): Promise<SubagentChild> {
-  const { home, id, projectRoot, executionRoot, definition, logger } = options;
-  const skills = restrictCubeSkills(options.skills, definition.skills);
-  const mcp = {
-    readTools: () => options.mcp.readTools(definition.mcpServers),
-    readToolNames: () => options.mcp.readToolNames(definition.mcpServers),
-  };
-  // Resolve explicit references before allocating child resources or calling a model.
-  if (definition.skills) {
-    const catalog = await skills.list();
-    for (const name of definition.skills) {
-      if (!catalog.some(skill => skill.name === name && skill.enabled))
-        throw new Error(`Unavailable child skill: ${name}`);
-    }
-  }
-  mcp.readToolNames();
-  const config = structuredClone(options.config);
-  config.model = options.modelId;
-  config.model_config = { reasoning_effort: options.reasoningEffort };
-  config.permissions = options.readPermissions();
-  config.memory.generate_title.enabled = false;
-  config.memory.semantic_recall.enabled = false;
-  config.memory.embedder.enabled = false;
-  config.memory.vector.enabled = false;
-  const workspace = new WorkspaceManager(home, executionRoot);
-  const tools = createCubeTools(
-    executionRoot,
-    () => options.readPermissions().workspace_only,
-    config.background_tasks,
-    projectRoot,
+  if (definition.name === "explore" && EXPLORE_AGENT.disallowedTools!.includes(bare)) return false;
+  return (
+    !definition.disallowedTools?.includes(bare) &&
+    (!definition.tools || definition.tools.includes(bare))
   );
-  const store = new LibSQLStore({
-    id: `cube-subagent-${id}`,
-    url: `file:${home.getMemoryDbPath()}`,
-  });
-  let mastra: Mastra | undefined;
-  let agent!: Awaited<ReturnType<typeof createCubeAgent>>;
-  const storage = async () => {
-    const memory = await store.getStore("memory");
-    if (!memory) throw new Error("Child memory storage is unavailable");
-    return memory;
-  };
-  const context = options.createContext(() => agent, storage);
-  const snapshot = structuredClone(options.instructions);
-  if (executionRoot !== projectRoot) {
-    const remap = (source: string) => {
-      const relative = path.relative(projectRoot, source);
-      return relative !== ".." &&
-        !relative.startsWith(`..${path.sep}`) &&
-        !path.isAbsolute(relative)
-        ? path.join(executionRoot, relative)
-        : source;
-    };
-    snapshot.sources = snapshot.sources.map((source) => ({
-      ...source,
-      path: remap(source.path),
-      scope: source.scope === "global" ? "global" : remap(source.scope),
-    }));
-    snapshot.explored = snapshot.explored.map(remap);
-  }
-  const pending = new Set<Promise<void>>();
-  const drain = async () => {
-    while (pending.size) await Promise.allSettled([...pending]);
-  };
-  try {
-    agent = await createCubeAgent(
-      home,
-      workspace,
-      config,
-      logger,
-      tools,
-      {
-        context,
-        readModel: options.readModel,
-        ...(options.recall
-          ? { recallTool: options.recall, readMemory: async () => snapshot.durableMemory ?? null }
-          : {}),
-      },
-      mcp,
-      {
-        id: `cube-subagent-${id}`,
-        snapshot,
-        skills,
-        roleInstructions:
-          `${definition.instructions}\nAssigned working directory: ${options.cwd}. ` +
-          "Use that cwd for commands where appropriate. Your history is private; report evidence to your parent.",
-        allowTool: (name) => subagentAllowsTool(definition, name),
-      },
-    );
-    const controller = await createCubeController(
-      home,
-      workspace,
-      config,
-      agent,
-      options.gateways,
-      skills,
-      undefined,
-      {
-        id: `cube-child-controller-${id}`,
-        storage: store,
-        allowTool: (name) => subagentAllowsTool(definition, name),
-      },
-    );
-    mastra = new Mastra({
-      agents: { child: agent },
-      agentControllers: { child: controller },
-      storage: store,
-      logger: logger ?? false,
-      gateways: Object.fromEntries(options.gateways.map((gateway) => [gateway.id, gateway])),
-    });
-    const session = await controller.createSession({
-      resourceId: projectRoot,
-      scope: id,
-      id,
-      ownerId: projectRoot,
-      threadId: id,
-    });
-    await configureCubePermissions(session, options.readPermissions(), mcp.readToolNames());
-    let current: { text: string; error?: string; runId?: string } | undefined;
-    for (const method of ["stream", "resumeStream"] as const) {
-      const original = agent[method].bind(agent) as (...args: any[]) => Promise<any>;
-      agent[method] = ((...args: any[]) => {
-        const output = original(...args);
-        const attempt = current;
-        const completion = output
-          .then(async (result) => {
-            if (attempt) attempt.runId = result.runId ?? attempt.runId;
-            await result.consumeStream();
-            if (attempt) attempt.text = (await result.text) ?? "";
-          })
-          .catch((error) => {
-            if (attempt) attempt.error = error instanceof Error ? error.message : String(error);
-          });
-        pending.add(completion);
-        void completion.finally(() => pending.delete(completion));
-        return output;
-      }) as typeof agent.stream & typeof agent.resumeStream;
-    }
-    let active: Promise<ChildRunResult> | undefined;
-    let disposed = false;
-    const run = (content: string): Promise<ChildRunResult> => {
-      if (disposed || active)
-        return Promise.reject(new Error("Child is disposed or already running"));
-      const startedAt = Date.now();
-      const attempt: NonNullable<typeof current> = { text: "" };
-      current = attempt;
-      const activity = new Map<string, ChildToolActivity>();
-      active = runWithCubeLogContext({ threadId: id }, async () => {
-        let finish!: (reason: "completed" | "failed" | "cancelled") => void;
-        const ended = new Promise<"completed" | "failed" | "cancelled">((resolve) => {
-          finish = resolve;
-        });
-        const stop = session.subscribe((event: AgentControllerEvent) => {
-          attempt.runId ??= session.getCurrentRunId() ?? undefined;
-          if (event.type === "error") attempt.error = event.error.message;
-          if (event.type === "tool_start")
-            activity.set(event.toolCallId, {
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-            });
-          if (event.type === "tool_end")
-            Object.assign(activity.get(event.toolCallId) ?? {}, {
-              isError: event.isError,
-              denied: event.denied,
-            });
-          if (event.type === "agent_end" && event.reason !== "suspended")
-            finish(
-              event.reason === "aborted"
-                ? "cancelled"
-                : event.reason === "error"
-                  ? "failed"
-                  : "completed",
-            );
-        });
-        try {
-          await configureCubePermissions(
-            session,
-            options.readPermissions(),
-            mcp.readToolNames(),
-          );
-          await session.followUp({ content });
-          const status = await ended;
-          await drain();
-          const runId = attempt.runId;
-          if (!runId) throw new Error("Child turn ended without a native run identity");
-          if (status === "completed" && !attempt.text.trim() && !attempt.error)
-            attempt.error = "Child ended without a final report";
-          return {
-            runId,
-            status: status === "completed" && attempt.error ? "failed" : status,
-            text: attempt.text,
-            ...(attempt.error ? { error: attempt.error } : {}),
-            startedAt,
-            completedAt: Date.now(),
-            toolActivity: [...activity.values()],
-          };
-        } finally {
-          stop();
-        }
-      });
-      void active
-        .finally(() => {
-          active = undefined;
-          current = undefined;
-        })
-        .catch(() => undefined);
-      return active;
-    };
-    return {
-      session,
-      agent,
-      tools,
-      context,
-      run,
-      drain,
-      dispose: async () => {
-        if (disposed) return;
-        disposed = true;
-        session.abort();
-        context.cancel();
-        await tools.dispose();
-        await Promise.allSettled([active, context.drain(), drain()]);
-        session.thread.detachFromCurrent();
-        await session.thread.clearAndReleaseLock();
-        await controller.deleteSession({ resourceId: projectRoot, scope: id });
-        await mastra!.shutdown();
-      },
-    };
-  } catch (error) {
-    context.cancel();
-    await tools.dispose();
-    await drain();
-    await mastra?.shutdown();
-    throw error;
-  }
 }

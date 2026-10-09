@@ -1,27 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { HomeManager, RunnableConfigSchema } from "@cube/workspace";
-import type { ChildRunResult, MemoryStorage, SubagentChild } from "@cube/agent";
+import type { NativeInvocation, NativeSubagentExecution, MemoryStorage, ProcessRegistry, NativeSubagentGate } from "@cube/agent";
+import { BackgroundService } from "../../src/services/background.service.js";
 import { SubagentService, type SubagentRecord } from "../../src/services/subagent.service.js";
 
 const { LibSQLStore } = createRequire(import.meta.resolve("@cube/agent"))("@mastra/libsql");
 const until = async (check: () => boolean | Promise<boolean>) => {
-  for (let i = 0; i < 300; i++) {
-    if (await check()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
+  for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail("Condition did not settle");
 };
+const emptyProcesses: ProcessRegistry = { list: () => [], get: () => { throw new Error("No process"); }, stop: async () => { throw new Error("No process"); }, subscribe: () => () => {} };
 
-async function fixture(concurrency = 2) {
-  const root = await mkdtemp(path.join(process.env.CUBE_SUBAGENT_TEST_ROOT ?? os.tmpdir(), "cube-subagents-"));
+async function fixture(timeout = 0) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cube-native-jobs-"));
   const home = new HomeManager({ cubeHome: path.join(root, "home"), userHome: root });
   await home.ensure();
   const store = new LibSQLStore({ id: randomUUID(), url: `file:${home.getMemoryDbPath()}` });
@@ -30,287 +27,162 @@ async function fixture(concurrency = 2) {
   const parent = randomUUID();
   await storage.saveThread({ thread: { id: parent, resourceId: root, title: "Parent",
     createdAt: new Date(), updatedAt: new Date(), metadata: { existing: true } } });
-  const owner = { projectRoot: root, parentThreadId: parent };
-  const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test", subagents: { concurrency } });
-  const pending = new Map<string, { content: string; finish: (status?: ChildRunResult["status"], text?: string) => void }>();
-  const attempts: { id: string; content: string }[] = [];
-  const deliveries: SubagentRecord[] = [];
-  const notices: string[] = [];
-  let failDelivery = false;
-  let running = 0, peak = 0;
-  const options = { home, projectRoot: root, config, storage: async () => storage,
+  const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test", subagents: { timeout_ms: timeout } });
+  const pending = new Map<string, (text?: string) => void>();
+  const prepared: NativeInvocation[] = [];
+  const disposed: string[] = [];
+  const deliveries: string[] = [];
+  const background = new BackgroundService({ history: () => store.getStore("backgroundTasks"), processes: emptyProcesses,
+    workspaceRoot: root, currentThread: () => parent, notice: () => {}, redact: async text => text,
+    drain: async () => {}, continueProcess: async () => {}, delegationConfig: config.subagents });
+  const options = { home, projectRoot: root, config, storage: async () => storage, background,
     readParent: async () => ({ modelId: "google/test", instructions: { soul: "Snapshot", sources: [], explored: [] } }),
     resolveModel: async () => ({ modelId: "google/test" }), toolNames: async () => ["read_file", "write_file"],
     currentThread: () => parent, redact: async (text: string) => text.replaceAll("fixture-secret", "[Redacted]"),
-    notice: (text: string) => notices.push(text),
-    deliver: async (record: SubagentRecord) => { if (failDelivery) throw new Error("delivery offline"); deliveries.push(record); },
-    createChild: async (record: SubagentRecord): Promise<SubagentChild> => ({
-      session: { subscribe: () => () => {}, abort: () => pending.get(record.id)?.finish("cancelled"), getCurrentRunId: () => record.runId },
-      tools: { processes: { list: () => [] }, discardPreview: () => {} }, agent: {}, context: {},
-      run: async (content: string) => {
-        attempts.push({ id: record.id, content }); running++; peak = Math.max(peak, running);
-        return new Promise<ChildRunResult>(resolve => pending.set(record.id, { content, finish: (status = "completed", text = "report") => {
-          pending.delete(record.id); running--;
-          resolve({ runId: randomUUID(), status, text, startedAt: Date.now(), completedAt: Date.now(), toolActivity: [],
-            ...(status === "failed" ? { error: "provider failed" } : {}) });
-        } }));
-      }, drain: async () => {}, dispose: async () => {},
-    } as unknown as SubagentChild),
+    notice: () => {}, publishCatalog: () => {},
+    deliver: async (record: SubagentRecord) => { deliveries.push(record.id); },
+    createExecution: async (invocation: NativeInvocation): Promise<NativeSubagentExecution> => {
+      prepared.push(invocation);
+      return {
+        history: {},
+        agent: {} as NativeSubagentExecution["agent"],
+        tools: { processes: { ...emptyProcesses }, setTaskHandler: () => {}, discardPreview: () => {}, hasPreview: () => false } as unknown as NativeSubagentExecution["tools"],
+        run: async (_input, runOptions) => {
+          const text = await new Promise<string>((resolve, reject) => {
+            pending.set(invocation.id, (text = "report") => resolve(text));
+            runOptions.abortSignal?.addEventListener("abort", () => reject(runOptions.abortSignal?.reason), { once: true });
+          });
+          pending.delete(invocation.id);
+          return { text, toolActivity: [], threadId: "history-" + invocation.id, resourceId: "private-resource" };
+        },
+        dispose: async () => { disposed.push(invocation.id); },
+      };
+    },
   };
-  const service = new SubagentService(options);
-  await service.reloadCatalog();
-  return { service, options, owner, storage, attempts, pending, deliveries, notices,
-    peak: () => peak, failDelivery: (value: boolean) => { failDelivery = value; },
-    async close() {
-      await service.shutdown(); await store.close();
-      // Native SQLite transaction handles on Windows release fully on process exit.
-      if (!process.env.CUBE_SUBAGENT_TEST_ROOT) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    } };
+  const service = new SubagentService(options); await service.reloadCatalog();
+  const owner = { projectRoot: root, parentThreadId: parent };
+  const dispatch = (prompt: string, role = "worker", callId = randomUUID()) => service.dispatch({ ...owner, role, input: { prompt }, runId: "parent-run", toolCallId: callId });
+  return { root, home, config, storage, store, background, service, options, owner, prepared, pending, deliveries, disposed, dispatch,
+    async close() { await background.shutdown(); await service.shutdown(); await store.close();
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } };
 }
-const task = (description: string) => ({ agent: "worker", description, task: description });
 
-if (process.platform === "win32" && !process.env.CUBE_SUBAGENT_TEST_ROOT) {
-  test("subagents service integration (isolated SQLite fixtures)", { timeout: 90000 }, async t => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "cube-subagents-suite-"));
+test("one-shot acceptance is idempotent, FIFO and scoped; restart reads history without execution", { timeout: 20000 }, async () => {
+  const f = await fixture();
+  try {
+    const first = await f.dispatch("one", "worker", "first-call");
+    assert.deepEqual(await f.dispatch("one", "worker", "first-call"), first);
+    const second = await f.dispatch("two"); const third = await f.dispatch("three");
+    await until(() => f.prepared.length === 2);
+    assert.equal(f.service.runningCount(), 2);
+    assert.equal((await f.service.get(f.owner, { id: third.id, view: "status" })).status, "queued");
+    assert.equal((await f.background.list()).length, 0);
+    await assert.rejects(f.service.get({ ...f.owner, parentThreadId: randomUUID() }, { id: first.id, view: "status" }), /Unknown/);
+    await f.service.interrupt(f.owner, third.id);
+    f.pending.get(first.id)!(); f.pending.get(second.id)!();
+    await until(async () => !f.service.isBusy() && (await f.service.list(f.owner)).every(record => ["completed", "cancelled"].includes(record.status)));
+    assert.equal(f.prepared.length, 2);
+    assert.equal((await f.service.get(f.owner, { id: first.id, view: "result" })).status, "completed");
+    assert.equal(f.deliveries.filter(id => id === first.id).length, 1);
+    assert.equal(f.config.subagents.timeout_ms, 0);
+    const record = await f.background.getDelegation(first.id, f.owner.parentThreadId);
+    assert.equal(record.timeoutMs, 0);
+    const restored = new BackgroundService({ history: () => f.store.getStore("backgroundTasks"), processes: emptyProcesses,
+      workspaceRoot: f.root, currentThread: () => f.owner.parentThreadId, notice: () => {}, redact: async text => text,
+      drain: async () => {}, continueProcess: async () => {} });
     try {
-      const env = { ...process.env, CUBE_SUBAGENT_TEST_ROOT: root };
-      delete env.NODE_TEST_CONTEXT;
-      const result = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", import.meta.filename], { env, windowsHide: true });
-      t.diagnostic(result.stdout);
-      assert.equal(result.stderr, "");
-      assert.match(result.stdout, /fail 0/);
-    } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
-  });
-} else {
-
-test("global FIFO slots and child follow-ups do not bypass concurrency or ownership", async () => {
-  const f = await fixture();
-  try {
-    const spawned = await f.service.spawn(f.owner, { tasks: [task("one"), task("two"), task("three")] });
-    const [a, b, c] = spawned.agents;
-    await until(() => f.pending.size === 2);
-    assert.equal(f.service.runningCount(), 2, "queued third child is not running");
-    assert.equal(f.service.runningCount(randomUUID()), 0, "other parents have a separate count");
-    assert.equal(f.service.runningCount(null), 0);
-    assert.deepEqual(f.attempts.map(item => item.content), ["one", "two"]);
-    assert.equal((await f.service.send(f.owner, { id: a!.id, message: "follow-up" })).queued, true);
-    await assert.rejects(f.service.get({ ...f.owner, parentThreadId: randomUUID() }, { id: a!.id, view: "status" }), /Unknown/);
-    f.pending.get(a!.id)!.finish();
-    await until(() => f.pending.has(c!.id));
-    assert.equal(f.attempts[2]!.content, "three");
-    f.pending.get(b!.id)!.finish();
-    await until(() => f.attempts.some(item => item.content === "follow-up"));
-    assert.equal(f.peak(), 2);
-    await f.service.interrupt(f.owner, a!.id);
-    f.pending.get(c!.id)!.finish();
-    await until(async () => (await f.service.list(f.owner)).every(item => ["completed", "cancelled"].includes(item.status)));
-    assert.equal(f.service.runningCount(), 0);
-    assert.equal((await f.storage.getThreadById({ threadId: f.owner.parentThreadId }))!.metadata?.existing, true);
+      const stored = await restored.getDelegation(first.id, f.owner.parentThreadId);
+      assert.equal(stored.result?.text, "report"); assert.equal(stored.status, "completed");
+      await assert.rejects(restored.cancelDelegation(first.id, f.owner.parentThreadId), /read-only/);
+    } finally { await restored.shutdown(); }
   } finally { await f.close(); }
 });
 
-test("chain substitutes actual initial report and cancels all dependent steps on failure", async () => {
-  const f = await fixture();
+test("native gates retain the slot and require exact job/run/call identity; positive timeout includes waiting", { timeout: 60000 }, async () => {
+  const f = await fixture(1000);
   try {
-    const spawned = await f.service.spawn(f.owner, { chain: [task("one"), task("two {previous}"), task("three {previous}")] });
-    await until(() => f.pending.has(spawned.agents[0]!.id));
-    f.pending.get(spawned.agents[0]!.id)!.finish("completed", "verified first");
-    await until(() => f.pending.has(spawned.agents[1]!.id));
-    assert.equal(f.attempts[1]!.content, "two verified first");
-    f.pending.get(spawned.agents[1]!.id)!.finish("failed");
-    await until(async () => (await f.service.list(f.owner)).find(item => item.id === spawned.agents[2]!.id)?.status === "cancelled");
-    assert.equal(f.attempts.length, 2);
-    assert.equal((await f.service.get(f.owner, { id: spawned.agents[1]!.id, view: "result" })).status, "failed");
-  } finally { await f.close(); }
-});
-
-test("role isolation defaults apply before dispatch and explicit spawn wins for single and chain", async () => {
-  const f = await fixture();
-  try {
-    const directory = path.join(f.owner.projectRoot, ".cube", "agents");
-    await mkdir(directory, { recursive: true });
-    await writeFile(path.join(directory, "worker.md"), "---\ndescription: Isolated worker\nisolation: worktree\n---\nWork");
-    await f.service.reloadCatalog();
-    await assert.rejects(f.service.spawn(f.owner, { chain: [task("work"), { ...task("inspect"), agent: "explore" }] }), /different isolation/);
-    assert.deepEqual(await f.service.list(f.owner), [], "reject incompatible chain before persisting any child");
-    await assert.rejects(f.service.spawn(f.owner, task("needs git")), /Git|git|repository/);
-    assert.equal(f.attempts.length, 0, "a worktree role must not silently execute in the main directory");
-    const spawned = await f.service.spawn(f.owner, { ...task("explicit shared"), isolation: "none" });
-    assert.equal(spawned.agents[0]!.isolation, "none");
-    await until(() => f.pending.has(spawned.agents[0]!.id));
-    f.pending.get(spawned.agents[0]!.id)!.finish();
-    await until(() => f.deliveries.length === 1);
-    const chain = await f.service.spawn(f.owner, { isolation: "none", chain: [task("work"), { ...task("inspect"), agent: "explore" }] });
-    assert.ok(chain.agents.every(child => child.isolation === "none"));
-    await f.service.interrupt(f.owner, chain.agents[0]!.id);
-  } finally { await f.close(); }
-});
-
-test("bounded continuation retains oversized evidence and rejects tampering, wrong view and stale results", { timeout: 60000 }, async () => {
-  const f = await fixture();
-  try {
-    const id = (await f.service.spawn(f.owner, task("large report"))).agents[0]!.id;
-    await until(() => f.pending.has(id));
-    const text = "Việt😀 fixture-secret ".repeat(8000);
-    f.pending.get(id)!.finish("completed", text);
-    await until(async () => (await f.service.list(f.owner))[0]!.status === "completed");
-    let page = await f.service.get(f.owner, { id, view: "result" });
-    const firstCursor = page.nextCursor!;
-    let joined = "";
-    for (;;) {
-      assert.ok(Buffer.byteLength(JSON.stringify(page)) < 16384);
-      assert.ok("text" in page.data);
-      joined += page.data.text;
-      if (!page.nextCursor) break;
-      page = await f.service.get(f.owner, { id, view: "result", cursor: page.nextCursor });
-    }
-    assert.equal(JSON.parse(joined).text, text.replaceAll("fixture-secret", "[Redacted]"));
-    await assert.rejects(f.service.get(f.owner, { id, view: "result", cursor: firstCursor + "x" }), /Invalid/);
-    await assert.rejects(f.service.get(f.owner, { id, view: "transcript", cursor: firstCursor }), /owner\/view/);
-    await f.service.send(f.owner, { id, message: "new attempt" });
-    await until(() => f.pending.has(id));
-    f.pending.get(id)!.finish("completed", "");
-    await until(async () => {
-      const view = await f.service.get(f.owner, { id, view: "result" });
-      return !view.truncated && JSON.parse(view.data.text).text === "";
+    let seen: NativeSubagentGate | undefined;
+    const record = { parentThreadId: f.owner.parentThreadId, projectRoot: f.root, agent: "worker", description: "question",
+      definition: { name: "worker", description: "work", instructions: "work", source: "builtin" as const },
+      modelId: "google/test", instructions: { soul: "", sources: [], explored: [] }, task: "task", cwd: f.root,
+      isolation: "none" as const, checkoutAvailable: true, parentRunId: "run", toolCallId: "call" };
+    const job = await f.background.enqueueDelegation(record, {
+      execute: async (_record, _signal, suspend) => {
+        seen = { runId: "native-run", toolCallId: "same-call", toolName: "ask_user", args: {}, suspendPayload: {}, approval: false };
+        await suspend(seen);
+        return { text: "answered", toolActivity: [], status: "completed", startedAt: Date.now(), completedAt: Date.now() };
+      }, deliver: async () => {},
     });
-    await assert.rejects(f.service.get(f.owner, { id, view: "result", cursor: firstCursor }), /stale/);
+    await until(() => !!seen);
+    assert.equal(f.background.delegationRunningCount(f.owner.parentThreadId), 1);
+    await assert.rejects(f.background.resumeDelegation({ jobId: job.id, runId: "wrong", toolCallId: "same-call" }, {}), /no longer active/);
+    await until(async () => (await f.background.getDelegation(job.id, f.owner.parentThreadId)).status === "cancelled");
+    assert.match((await f.background.getDelegation(job.id, f.owner.parentThreadId)).error!, /timeout/);
+    await assert.rejects(f.background.resumeDelegation({ jobId: job.id, runId: "native-run", toolCallId: "same-call" }, {}), /no longer active/);
   } finally { await f.close(); }
 });
 
-test("delivery failure preserves actual result; recovery persists it without waking or replaying work", async () => {
-  const f = await fixture();
-  let recovered: SubagentService | undefined;
-  try {
-    f.failDelivery(true);
-    const id = (await f.service.spawn(f.owner, task("completed but offline"))).agents[0]!.id;
-    await until(() => f.pending.has(id));
-    f.pending.get(id)!.finish("completed", "verified");
-    await until(() => f.notices.length > 0);
-    assert.equal((await f.service.list(f.owner))[0]!.status, "completed");
-    await f.service.shutdown();
-    const wakes: boolean[] = [];
-    recovered = new SubagentService({ ...f.options, createChild: async () => { throw new Error("Recovery must not replay"); },
-      deliver: async (_record, wake) => { wakes.push(wake); } });
-    assert.equal((await recovered.list(f.owner))[0]!.status, "completed");
-    await recovered.list(f.owner);
-    assert.deepEqual(wakes, [false]);
-    assert.equal(f.attempts.length, 1);
-  } finally { await recovered?.shutdown(); await f.close(); }
-});
-
-test("restart marks in-flight records unattached; non-Git batch preparation never starts models", async () => {
-  const f = await fixture();
-  let recovered: SubagentService | undefined;
-  try {
-    await assert.rejects(f.service.spawn(f.owner, { tasks: [task("normal"), { ...task("isolated"), isolation: "worktree" }] }));
-    assert.equal(f.attempts.length, 0);
-    assert.ok((await f.service.list(f.owner)).every(item => item.status === "failed"));
-    const id = randomUUID();
-    const source = (await f.storage.listThreads({ filter: { resourceId: f.owner.projectRoot } })).threads.find(item => item.metadata?.cubeSubagent)!;
-    const record = { ...source.metadata!.cubeSubagent as SubagentRecord, id, status: "waiting_approval", queuedMessages: 2 };
-    await f.storage.saveThread({ thread: { ...source, id, metadata: { cubeSubagent: record } } });
-    recovered = new SubagentService(f.options);
-    const restored = await recovered.get(f.owner, { id, view: "status" });
-    assert.equal(restored.status, "unattached");
-    assert.equal((restored.data as { queuedMessages: number }).queuedMessages, 0);
-    assert.equal(f.attempts.length, 0);
-  } finally { await recovered?.shutdown(); await f.close(); }
-});
-
-test("factory failure is inspectable, delivered and never reuses a previous report", async () => {
+test("captured role settings survive reload; failed preparation settles and private transcript uses native IDs", { timeout: 20000 }, async () => {
   const f = await fixture();
   try {
-    f.options.createChild = async () => { throw new Error("Unavailable child credential"); };
-    const id = (await f.service.spawn(f.owner, task("failure"))).agents[0]!.id;
-    await until(() => f.deliveries.length === 1);
-    const result = await f.service.get(f.owner, { id, view: "result" });
-    assert.equal(result.status, "failed");
-    assert.match(JSON.parse(result.data.text).error, /Unavailable child credential/);
-    assert.equal(result.runId, undefined, "a dispatch failure must not invent a native run ID");
-    assert.ok(f.deliveries[0]!.pendingDelivery);
+    await assert.rejects(f.service.dispatch({ ...f.owner, role: "worker", input: { prompt: "wrong", threadId: "foreign" }, runId: "run", toolCallId: "wrong" }), /private child history/);
+    const a = await f.dispatch("one"); const b = await f.dispatch("two");
+    const dir = path.join(f.root, ".agents", "agents"); await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "custom.md"), "---\ndescription: Custom\n---\nORIGINAL_ROLE");
+    await f.service.reloadCatalog();
+    const c = await f.dispatch("three", "custom");
+    await writeFile(path.join(dir, "custom.md"), "---\ndescription: Custom\n---\nNEW_ROLE");
+    await f.service.reloadCatalog();
+    await until(() => f.pending.has(a.id) && f.pending.has(b.id));
+    f.pending.get(a.id)!(); await until(() => f.pending.has(c.id));
+    assert.equal(f.prepared.find(item => item.id === c.id)!.definition.instructions, "ORIGINAL_ROLE");
+    f.pending.get(b.id)!(); f.pending.get(c.id)!();
+    await until(() => !f.service.isBusy());
+    const settled = await f.background.getDelegation(c.id, f.owner.parentThreadId);
+    await f.storage.saveThread({ thread: { id: settled.result!.threadId!, resourceId: "private-resource", title: "Private fixture", createdAt: new Date(), updatedAt: new Date() } });
+    await f.storage.saveMessages({ messages: [{ id: randomUUID(), role: "assistant", threadId: settled.result!.threadId!, resourceId: "private-resource", createdAt: new Date(),
+      content: { format: 2, parts: [{ type: "text", text: "ACTUAL_PRIVATE_FIXTURE" }] } }] });
+    const view = await f.service.get(f.owner, { id: c.id, view: "transcript" });
+    assert.ok("text" in view.data && view.data.text.includes("ACTUAL_PRIVATE_FIXTURE"));
+    f.options.createExecution = async () => { throw new Error("prepare failed"); };
+    const failed = await f.dispatch("failure");
+    await until(async () => (await f.service.get(f.owner, { id: failed.id, view: "status" })).status === "failed");
+    assert.equal(f.service.runningCount(), 0);
+    const large = { ...settled.result!, text: "fixture-secret" + "a".repeat(24000) };
+    settled.result = large; await f.background.updateDelegation(settled);
+    const page = await f.service.get(f.owner, { id: c.id, view: "result" });
+    assert.ok(page.truncated && page.nextCursor); assert.ok("text" in page.data && !page.data.text.includes("fixture-secret"));
+    await assert.rejects(f.service.get(f.owner, { id: b.id, view: "result", cursor: page.nextCursor }), /owner\/view/);
   } finally { await f.close(); }
 });
 
-test("interrupt cancels pending processes before running ones and deletion still allows shutdown", async () => {
+test("cancelled jobs retain native history and parent deletion does not deliver a completion", { timeout: 60000 }, async () => {
   const f = await fixture();
-  const statuses = new Map([["A", "running"], ["B", "pending"]]);
-  const order: string[] = [];
-  const create = f.options.createChild;
-  f.options.createChild = async record => {
-    const child = await create(record);
-    child.tools.processes = { list: () => [...statuses].map(([id, status]) => ({ id, result: { status } })),
-      stop: async id => {
-        order.push(id); const wasRunning = statuses.get(id) === "running"; statuses.set(id, "cancelled");
-        if (wasRunning && statuses.get("B") === "pending") statuses.set("B", "running");
-      } } as unknown as SubagentChild["tools"]["processes"];
-    return child;
-  };
   try {
-    const id = (await f.service.spawn(f.owner, task("process owner"))).agents[0]!.id;
-    await until(() => f.pending.has(id));
-    f.pending.get(id)!.finish();
-    await until(() => f.deliveries.length === 1);
-    await f.service.interrupt(f.owner, id);
-    assert.deepEqual(order, ["B", "A"]);
-    assert.ok([...statuses.values()].every(status => status === "cancelled"));
+    f.options.createExecution = async invocation => {
+      const history = { threadId: "native-" + invocation.id, resourceId: "private-" + invocation.id };
+      return { history, agent: {} as NativeSubagentExecution["agent"],
+        tools: { processes: { ...emptyProcesses }, setTaskHandler: () => {} } as unknown as NativeSubagentExecution["tools"],
+        dispose: async () => {}, run: async (_input, _options, suspend) => {
+          await f.storage.saveThread({ thread: { id: history.threadId, resourceId: history.resourceId, title: "Private", createdAt: new Date(), updatedAt: new Date() } });
+          await f.storage.saveMessages({ messages: [{ id: randomUUID(), role: "user", ...history, createdAt: new Date(),
+            content: { format: 2, parts: [{ type: "text", text: "CANCELLED_PRIVATE_TASK" }] } }] });
+          await suspend({ runId: "native-run", toolCallId: "question", toolName: "ask_user", args: {}, suspendPayload: {}, approval: false });
+          throw new Error("Unexpected continuation");
+        } };
+    };
+    const cancelled = await f.dispatch("cancel");
+    await until(async () => (await f.background.getDelegation(cancelled.id, f.owner.parentThreadId)).status === "waiting_input");
+    await f.service.interrupt(f.owner, cancelled.id);
+    const result = await f.service.get(f.owner, { id: cancelled.id, view: "result" });
+    assert.ok("text" in result.data && JSON.parse(result.data.text).status === "cancelled");
+    const view = await f.service.get(f.owner, { id: cancelled.id, view: "transcript" });
+    assert.ok("text" in view.data && view.data.text.includes("CANCELLED_PRIVATE_TASK"));
+    const waiting = await f.dispatch("delete");
+    await until(async () => (await f.background.getDelegation(waiting.id, f.owner.parentThreadId)).status === "waiting_input");
+    f.deliveries.length = 0;
     await f.service.beforeDelete(f.owner.parentThreadId);
-    await f.service.shutdown();
+    await f.background.beforeDelete(f.owner.parentThreadId);
+    assert.deepEqual(f.deliveries, []);
   } finally { await f.close(); }
 });
-
-test("worktree removal excludes concurrent follow-ups and retains result/transcript inspection", async () => {
-  const f = await fixture();
-  const git = (...args: string[]) => promisify(execFile)("git", args, { cwd: f.owner.projectRoot, windowsHide: true });
-  let release!: () => void;
-  let paused = false;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const list = f.storage.listThreads.bind(f.storage);
-  try {
-    await git("init"); await git("config", "user.name", "Cube Test");
-    await git("config", "user.email", "cube@example.invalid");
-    await writeFile(path.join(f.owner.projectRoot, ".gitignore"), "home/\n");
-    await writeFile(path.join(f.owner.projectRoot, "fixture.txt"), "fixture\n");
-    await git("add", ".gitignore", "fixture.txt"); await git("commit", "-m", "fixture");
-    const id = (await f.service.spawn(f.owner, { ...task("owned checkout"), isolation: "worktree" })).agents[0]!.id;
-    await until(() => f.pending.has(id)); f.pending.get(id)!.finish();
-    await until(() => f.deliveries.length === 1);
-    f.storage.listThreads = async input => { paused = true; await gate; return list(input); };
-    const removal = f.service.removeWorktree(f.owner, id, true);
-    await until(() => paused);
-    await assert.rejects(f.service.send(f.owner, { id, message: "must not run" }), /unavailable/);
-    release(); await removal;
-    assert.equal(f.attempts.length, 1);
-    const changes = await f.service.get(f.owner, { id, view: "changes" });
-    assert.match(changes.data.unavailable!, /removed/);
-    assert.equal((await f.service.get(f.owner, { id, view: "result" })).status, "completed");
-    await assert.rejects(f.service.send(f.owner, { id, message: "removed checkout" }), /unavailable/);
-  } finally { release(); f.storage.listThreads = list; await f.close(); }
-});
-
-test("recovered partial preparation cannot run in the main checkout and can release owned resources", async () => {
-  const f = await fixture();
-  let recovered: SubagentService | undefined;
-  const git = (...args: string[]) => promisify(execFile)("git", args, { cwd: f.owner.projectRoot, windowsHide: true });
-  try {
-    await git("init"); await git("config", "user.name", "Cube Test");
-    await git("config", "user.email", "cube@example.invalid");
-    await writeFile(path.join(f.owner.projectRoot, "fixture.txt"), "fixture\n");
-    await git("add", "fixture.txt"); await git("commit", "-m", "fixture");
-    const id = (await f.service.spawn(f.owner, { ...task("partial checkout"), isolation: "worktree" })).agents[0]!.id;
-    await until(() => f.pending.has(id)); f.pending.get(id)!.finish();
-    await until(() => f.deliveries.length === 1);
-    await f.service.shutdown();
-    const thread = await f.storage.getThreadById({ threadId: id });
-    const record = thread!.metadata!.cubeSubagent as SubagentRecord;
-    await f.storage.patchThread({ id, metadata: { cubeSubagent: { ...record, status: "failed", checkoutAvailable: false } } });
-    recovered = new SubagentService(f.options);
-    await assert.rejects(recovered.send(f.owner, { id, message: "must not fall back to main" }), /unavailable/);
-    await assert.rejects(recovered.beforeDelete(f.owner.parentThreadId), /retained/);
-    await recovered.removeWorktree(f.owner, id, true);
-    await recovered.beforeDelete(f.owner.parentThreadId);
-    assert.equal(await readFile(path.join(f.owner.projectRoot, "fixture.txt"), "utf8"), "fixture\n");
-    await assert.rejects(git("rev-parse", "--verify", record.baseline!.ref));
-  } finally { await recovered?.shutdown(); await f.close(); }
-});
-}

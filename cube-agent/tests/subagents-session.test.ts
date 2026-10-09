@@ -5,252 +5,232 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { MockLanguageModelV3 } from "ai/test";
-import { HomeManager, WorkspaceManager, RunnableConfigSchema, AuthStore, parseMcpConfig } from "@cube/workspace";
-import { createSubagentChild, subagentAllowsTool, type SubagentChild, type CreateSubagentChildOptions } from "../src/agents/subagent.agent.js";
-import { MCPClient } from "@mastra/mcp";
-import { createTool } from "@mastra/core/tools";
-import { z } from "zod";
-import { CubeMcp } from "../src/mcp/client.js";
-import { CubeContext } from "../src/context.js";
+import { Agent, isUserAuthoredMessage } from "@mastra/core/agent";
+import { Mastra } from "@mastra/core";
+import { Memory } from "@mastra/memory";
+import { LibSQLStore } from "@mastra/libsql";
+import { RequestContext } from "@mastra/core/request-context";
+import { HomeManager, WorkspaceManager, RunnableConfigSchema, createBootstrap } from "@cube/workspace";
+import { createNativeSubagents, subagentAllowsTool, type NativeSubagentExecution, type NativeSubagentGate } from "../src/agents/subagent.agent.js";
 import { createCubeSkills } from "../src/skills.js";
-import type { MemoryStorage } from "@mastra/core/storage";
+import { createCubeMastra } from "../src/bootstrap.js";
+import { configureCubePermissions } from "../src/permission.js";
 
-test("child Session executes isolated history and approval without title or semantic model calls", { timeout: 20000 }, async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "cube-child-session-"));
-  const home = new HomeManager({ cubeHome: path.join(temp, "home"), userHome: temp });
-  await home.ensure();
-  const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test" });
-  const definition = { name: "worker", description: "test worker", instructions: "Do the task", source: "builtin" as const };
-  const prompts: unknown[] = [];
-  const exposed: string[][] = [];
-  let readStorage!: () => Promise<MemoryStorage>;
-  let calls = 0;
-  const model = new MockLanguageModelV3({ doStream: async ({ prompt, tools }) => {
-    prompts.push(prompt);
-    exposed.push((tools ?? []).map(tool => tool.name));
-    const turn = calls++;
+function model(reply: (prompt: unknown, tools: string[]) => string | { name: string; args: unknown }) {
+  return new MockLanguageModelV3({ doStream: async ({ prompt, tools }) => {
+    const output = reply(prompt, (tools ?? []).map(tool => tool.name));
     return { stream: new ReadableStream({ start(stream) {
       stream.enqueue({ type: "stream-start", warnings: [] });
-      if (turn === 0 || turn === 3) stream.enqueue({ type: "tool-call", toolCallId: turn === 0 ? "same-call" : "question-call", toolName: turn === 0 ? "write_file" : "ask_user",
-        input: JSON.stringify(turn === 0 ? { path: "child.txt", content: "child content" } : { question: "Continue?" }) });
-      else if (turn === 1 || turn === 4) {
+      if (typeof output === "string") {
         stream.enqueue({ type: "text-start", id: "reply" });
-        stream.enqueue({ type: "text-delta", id: "reply", delta: turn === 1 ? "Changed child.txt; verified by readback." : "Question cancelled; continuing normally." });
+        stream.enqueue({ type: "text-delta", id: "reply", delta: output });
         stream.enqueue({ type: "text-end", id: "reply" });
-      }
-      stream.enqueue({ type: "finish", finishReason: { unified: turn === 0 || turn === 3 ? "tool-calls" : "stop", raw: turn === 0 || turn === 3 ? "tool_calls" : "stop" },
+      } else stream.enqueue({ type: "tool-call", toolCallId: "same-call", toolName: output.name, input: JSON.stringify(output.args) });
+      stream.enqueue({ type: "finish", finishReason: { unified: typeof output === "string" ? "stop" : "tool-calls", raw: typeof output === "string" ? "stop" : "tool_calls" },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
       stream.close();
     } }) };
   } });
-  const child = await createSubagentChild({ id: randomUUID(), projectRoot: temp, executionRoot: temp, cwd: temp,
-    definition, modelId: "google/test", instructions: { soul: "Cube test", sources: [], explored: [] },
-    readPermissions: () => config.permissions, home, config, gateways: [],
-    skills: await createCubeSkills(home, new WorkspaceManager(home, temp), []),
-    mcp: { readTools: () => ({}), readToolNames: () => [] }, readModel: async () => ({ limits: { context: 100000, output: 4096 } }),
-    createContext: (_agent, storage) => {
-      readStorage = storage;
-      return new CubeContext({ storage, policy: config.memory.compaction,
-        protectedTools: new Set(), summarize: async () => { throw new Error("No compact expected"); } });
-    },
-  });
-  child.agent.model = model;
-  let approvals = 0;
-  let cancelled: Promise<void> | undefined;
-  const stop = child.session.subscribe(event => {
-    if (event.type === "tool_approval_required") {
-      approvals++;
-      child.session.respondToToolApproval({ toolCallId: event.toolCallId, decision: "approve" });
-    }
-    if (event.type === "tool_suspended" && event.toolName === "ask_user")
-      cancelled = child.session.respondToToolSuspension({ toolCallId: event.toolCallId, resumeData: { cancelled: true } });
-  });
-  try {
-    await child.session.thread.create({ id: child.session.identity.getId(), title: "Assigned task" });
-    const result = await child.run("Write child.txt");
-    assert.equal(result.status, "completed");
-    assert.equal(result.text, "Changed child.txt; verified by readback.");
-    assert.equal(await readFile(path.join(temp, "child.txt"), "utf8"), "child content");
-    assert.equal(approvals, 1);
-    assert.equal(calls, 2);
-    assert.match(JSON.stringify(prompts[0]), /Write child.txt/);
-    assert.doesNotMatch(JSON.stringify(prompts[0]), /parent secret conversation/);
-    assert.ok(exposed.every(tools => !tools.some(name => /spawn_agent|subagent$/.test(name))));
-    const empty = await child.run("Return nothing");
-    assert.equal(empty.text, "", "an empty new response must not reuse an older report");
-    assert.equal(empty.status, "failed", "no final report must not advance a dependent chain");
-    assert.notEqual(empty.runId, result.runId);
-    const question = await child.run("Ask one question; continue after cancellation");
-    await cancelled;
-    assert.equal(question.status, "completed");
-    assert.match(JSON.stringify(prompts.at(-1)), /User declined to answer the question/);
-    const stored = await (await readStorage()).listMessages({ threadId: child.session.identity.getId(), resourceId: temp,
-      perPage: 100, page: 0, orderBy: { field: "createdAt", direction: "ASC" } });
-    assert.match(JSON.stringify(stored.messages), /User declined to answer the question/);
-  } finally {
-    stop();
-    await child.dispose();
-    await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
-});
+}
 
-test("child tool policy never exposes delegation and explore/custom policy narrows final tools", () => {
-  const explore = { name: "explore", source: "builtin" as const, description: "inspect", instructions: "inspect" };
-  assert.equal(subagentAllowsTool(explore, "write_file"), false);
-  assert.equal(subagentAllowsTool(explore, "spawn_agent"), false);
-  assert.equal(subagentAllowsTool(explore, "read_file"), true);
-  assert.equal(subagentAllowsTool({ ...explore, name: "custom", tools: ["read_file"] }, "execute_command"), false);
-  assert.equal(subagentAllowsTool({ ...explore, name: "custom", tools: ["read_file"], disallowedTools: ["read_file"] }, "controllerBuiltIn.read_file"), false);
-  assert.equal(subagentAllowsTool({ ...explore, name: "custom", disallowedTools: ["execute_command"] }, "read_file"), true);
-  assert.equal(subagentAllowsTool({ ...explore, name: "custom", disallowedTools: ["execute_command"] }, "execute_command"), false);
-  assert.equal(subagentAllowsTool({ ...explore, name: "custom", tools: [] }, "read_file"), false);
-});
-
-test("child skill/server scopes reach native tools and model input without preloading or changing parent", { timeout: 30000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cube-child-scopes-"));
+async function fixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cube-native-child-"));
   const home = new HomeManager({ cubeHome: path.join(root, "home"), userHome: root });
+  // Native SQLite assertions do not need a persistent file; restart is covered in runtime/package smoke.
+  home.getMemoryDbPath = () => ":memory:";
   await home.ensure();
-  const blockedPath = path.join(home.getSkillDir(), "blocked", "SKILL.md");
-  const allowedDir = path.join(root, ".agents", "skills", "allowed");
-  await mkdir(path.dirname(blockedPath), { recursive: true });
-  await mkdir(path.join(allowedDir, "references"), { recursive: true });
-  await writeFile(blockedPath, "---\nname: blocked\ndescription: Blocked skill\n---\nBLOCKED_SECRET_BODY");
-  await writeFile(path.join(allowedDir, "SKILL.md"), "---\nname: allowed\ndescription: Allowed skill\n---\nALLOWED_BODY");
-  await writeFile(path.join(allowedDir, "references", "check.md"), "ALLOWED_REFERENCE");
-  const skills = await createCubeSkills(home, new WorkspaceManager(home, root), []);
-  const mcp = new CubeMcp({ auth: new AuthStore(home), workspaceRoot: root });
-  const tool = createTool({ id: "lookup", description: "Lookup", inputSchema: z.object({}), execute: async () => "MCP_RESULT" });
-  let discovery = 0;
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({
-    tools: discovery++ === 0 ? { remote_lookup: tool } : { other_lookup: tool }, errors: {}, errorDetails: {},
-  }));
-  t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test" });
-  const options: CreateSubagentChildOptions = {
-    id: randomUUID(), projectRoot: root, executionRoot: root, cwd: root,
-    definition: { name: "worker", description: "scoped", instructions: "Do the task", source: "builtin",
-      skills: ["allowed"], mcpServers: ["docs"], disallowedTools: ["read_file", "ask_user"] },
-    modelId: "google/test", instructions: { soul: "Cube test", sources: [], explored: [] },
-    readPermissions: () => config.permissions, home, config, gateways: [], skills, mcp,
-    readModel: async () => ({ limits: { context: 100000, output: 4096 } }),
-    createContext: (_agent, storage) => new CubeContext({ storage, policy: config.memory.compaction,
-      protectedTools: new Set(), summarize: async () => { throw new Error("No compact expected"); } }),
+  const workspace = new WorkspaceManager(home, root);
+  const store = new LibSQLStore({ id: randomUUID(), url: ":memory:" });
+  let factory!: ReturnType<typeof createNativeSubagents>;
+  const parent = new Agent({ id: "native-parent", model: "google/test", memory: new Memory({ storage: store, options: { generateTitle: false, lastMessages: false } }),
+    agents: ({ requestContext }) => factory.readAgents(requestContext),
+    defaultOptions: ({ requestContext }) => ({ hooks: factory.hooks, onChunk: chunk => requestContext.set("cubeBackgroundRunId", chunk.runId) }) });
+  const mastra = new Mastra({ agents: { parent }, storage: store, logger: false });
+  const skills = await createCubeSkills(home, workspace, []);
+  factory = createNativeSubagents({ home, config, projectRoot: root, storage: store, parent, skills,
+    mcp: { readTools: () => ({}), readToolNames: () => [] }, readPermissions: () => config.permissions });
+  const executions: NativeSubagentExecution[] = [];
+  const prepare = async (name = "worker", extra = {}) => {
+    const execution = await factory.prepare({ id: randomUUID(), projectRoot: root, executionRoot: root, modelId: "google/test",
+      definition: { name, source: "builtin", description: "work", instructions: "Fixed role", ...extra },
+      instructions: { soul: "Cube", sources: [], explored: [] } });
+    executions.push(execution); return execution;
   };
-  let child: SubagentChild | undefined;
+  const run = (execution: NativeSubagentExecution, prompt: string, suspend: (gate: NativeSubagentGate) => Promise<unknown> = async () => { throw new Error("Unexpected gate"); }) =>
+    execution.run({ prompt }, { toolCallId: "parent-call", messages: [{ role: "user", content: "PARENT_SECRET" }] }, suspend);
+  return { root, home, config, store, factory, parent, prepare, run, skills,
+    async close() { await Promise.all(executions.map(execution => execution.dispose())); await mastra.shutdown(); await store.close();
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } };
+}
+
+test("native delegation exposes role tools and stores only actual private child history", { timeout: 30000 }, async () => {
+  const f = await fixture();
   try {
-    await mcp.reload(parseMcpConfig({ mcpServers: { docs: { command: "node" }, other: { command: "node" } } }), async () => undefined);
-    await assert.rejects(createSubagentChild({ ...options, definition: { ...options.definition, skills: ["missing"] } }), /Unavailable child skill/);
-    await assert.rejects(createSubagentChild({ ...options, definition: { ...options.definition, mcpServers: ["missing"] } }), /no longer configured/);
-    child = await createSubagentChild(options);
-    const requests: string[] = [];
-    const exposed: string[][] = [];
-    child.agent.model = new MockLanguageModelV3({ doStream: async ({ prompt, tools }) => {
-      requests.push(JSON.stringify(prompt));
-      exposed.push((tools ?? []).map(tool => tool.name));
-      const first = requests.length === 1;
-      return { stream: new ReadableStream({ start(stream) {
-        stream.enqueue({ type: "stream-start", warnings: [] });
-        if (first) {
-          for (const [id, name, input] of [
-            ["load", "skill", { name: "allowed" }],
-            ["reference", "skill_read", { skillName: "allowed", path: "references/check.md" }],
-            ["blocked", "skill_read", { skillName: blockedPath, path: "SKILL.md" }],
-            ["search", "skill_search", { query: "BLOCKED_SECRET_BODY" }],
-          ] as const) stream.enqueue({ type: "tool-call", toolCallId: id, toolName: name, input: JSON.stringify(input) });
-        } else {
-          stream.enqueue({ type: "text-start", id: "reply" });
-          stream.enqueue({ type: "text-delta", id: "reply", delta: "Scoped task complete." });
-          stream.enqueue({ type: "text-end", id: "reply" });
-        }
-        stream.enqueue({ type: "finish", finishReason: { unified: first ? "tool-calls" : "stop", raw: first ? "tool_calls" : "stop" },
-          usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
-        stream.close();
-      } }) };
-    } });
-    await child.session.thread.create({ id: options.id });
-    const result = await child.run("Inspect the permitted skill using its native tools.");
-    assert.equal(result.status, "completed", result.error);
-    assert.equal(requests.length, 2);
-    assert.match(requests[0]!, /<name>allowed<\/name>/);
-    assert.doesNotMatch(requests[0]!, /<name>blocked<\/name>|ALLOWED_BODY|BLOCKED_SECRET_BODY/);
-    assert.match(requests[1]!, /ALLOWED_BODY/);
-    assert.match(requests[1]!, /ALLOWED_REFERENCE/);
-    const toolResults = JSON.stringify(JSON.parse(requests[1]!)
-      .filter((message: { role: string }) => message.role === "tool")
-      .flatMap((message: { content: { output: unknown }[] }) => message.content.map(part => part.output)));
-    assert.doesNotMatch(toolResults, /BLOCKED_SECRET_BODY/, "search query may be retained, but excluded skill content must not be returned");
-    assert.match(requests[1]!, /not found|No results found/);
-    assert.ok(exposed.every(names => names.includes("remote_lookup") && !names.includes("other_lookup") && !names.includes("read_file") && !names.includes("ask_user")));
-    assert.deepEqual((await skills.list()).map(skill => skill.name), ["allowed", "blocked"]);
-    assert.deepEqual(mcp.readToolNames(), ["other_lookup", "remote_lookup"]);
-  } finally {
-    await child?.dispose(); await mcp.dispose();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
+    const execution = await f.prepare();
+    const prompts: unknown[] = [];
+    execution.agent.model = model((prompt, tools) => { prompts.push(prompt); assert.ok(!tools.some(name => name.startsWith("agent-"))); return "Evidence-backed result"; });
+    const result = await f.run(execution, "Assigned focused task");
+    assert.equal(result.text, "Evidence-backed result");
+    assert.ok(result.runId, "native execution must retain its actual run ID");
+    assert.doesNotMatch(JSON.stringify(prompts), /PARENT_SECRET/);
+    assert.match(JSON.stringify(prompts), /Assigned focused task/);
+    const messages = await (await f.store.getStore("memory"))!.listMessages({ threadId: result.threadId!, resourceId: result.resourceId!, perPage: 100, page: 0 });
+    assert.match(JSON.stringify(messages.messages), /Assigned focused task/);
+    assert.match(JSON.stringify(messages.messages), /Evidence-backed result/);
+    assert.notEqual(result.resourceId, f.root);
+    let dispatched = 0;
+    f.factory.setDispatch(async request => { dispatched++; assert.equal(request.input.prompt, "Delegate task"); assert.equal(request.parentThreadId, "parent-thread"); return { id: "accepted-job" }; });
+    let calls = 0;
+    f.parent.model = model((_prompt, tools) => { assert.ok(tools.includes("agent-worker") && tools.includes("agent-explore")); return calls++ === 0 ? { name: "agent-worker", args: { prompt: "Delegate task" } } : "Parent continued"; });
+    const context = new RequestContext(); context.set("controller", { threadId: "parent-thread" });
+    const output = await f.parent.stream("PARENT_SECRET", { requestContext: context, maxSteps: 3 });
+    await output.consumeStream();
+    assert.equal(dispatched, 1);
+    assert.equal(await output.text, "Parent continued");
+  } finally { await f.close(); }
 });
 
-test("two real child Sessions keep identical call IDs, approvals and history private", { timeout: 60000 }, async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "cube-child-gates-"));
-  const home = new HomeManager({ cubeHome: path.join(temp, "home"), userHome: temp });
-  await home.ensure();
-  await writeFile(path.join(temp, "fixture.txt"), "READ_EVIDENCE");
-  const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test",
-    permissions: { require_approval_for: ["read_file"] } });
-  const skills = await createCubeSkills(home, new WorkspaceManager(home, temp), []);
-  const children: SubagentChild[] = [];
-  const approvals = new Map<string, string>();
-  const prompts = new Map<string, unknown[]>();
-  const exposed: string[][] = [];
+test("same-role jobs keep identical approval IDs separate and cancelled questions continue", { timeout: 30000 }, async () => {
+  const f = await fixture();
   try {
-    for (const name of ["first", "second"]) {
-      const child = await createSubagentChild({ id: randomUUID(), projectRoot: temp, executionRoot: temp, cwd: temp,
-        definition: { name, description: name, instructions: "Inspect", source: "builtin", tools: ["read_file"] },
-        modelId: "google/test", instructions: { soul: "Cube", sources: [], explored: [] },
-        home, config, readPermissions: () => config.permissions, gateways: [], skills,
-        mcp: { readTools: () => ({}), readToolNames: () => [] }, readModel: async () => ({ limits: { context: 100000, output: 4096 } }),
-        createContext: (_agent, storage) => new CubeContext({ storage, policy: config.memory.compaction,
-          protectedTools: new Set(), summarize: async () => { throw new Error("No compact expected"); } }),
-      });
-      children.push(child);
+    const gates: { gate: NativeSubagentGate; answer: (data: unknown) => void }[] = [];
+    const children = await Promise.all([f.prepare(), f.prepare()]);
+    const prompts: unknown[][] = [[], []];
+    for (const [index, child] of children.entries()) {
       let calls = 0;
-      prompts.set(name, []);
-      child.agent.model = new MockLanguageModelV3({ doStream: async ({ prompt, tools }) => {
-        prompts.get(name)!.push(prompt);
-        exposed.push((tools ?? []).map(tool => tool.name));
-        const tool = calls++ === 0;
-        return { stream: new ReadableStream({ start(stream) {
-          stream.enqueue({ type: "stream-start", warnings: [] });
-          if (tool) stream.enqueue({ type: "tool-call", toolCallId: "reused-call", toolName: "read_file", input: '{"path":"fixture.txt"}' });
-          else { stream.enqueue({ type: "text-start", id: "answer" }); stream.enqueue({ type: "text-delta", id: "answer", delta: name }); stream.enqueue({ type: "text-end", id: "answer" }); }
-          stream.enqueue({ type: "finish", finishReason: { unified: tool ? "tool-calls" : "stop", raw: tool ? "tool_calls" : "stop" },
-            usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } } });
-          stream.close();
-        } }) };
-      } });
-      child.session.subscribe(event => { if (event.type === "tool_approval_required") approvals.set(name, event.toolCallId); });
-      await child.session.thread.create({ id: child.session.identity.getId(), title: name });
+      child.agent.model = model(prompt => { prompts[index]!.push(prompt); return calls++ === 0 ?
+        { name: "write_file", args: { path: `child-${index}.txt`, content: "CHILD_OK" } } : "Report actual outcome"; });
     }
-    const turns = children.map((child, i) => child.run(`PRIVATE_TASK_${i}`));
-    const deadline = Date.now() + 20000;
-    while (approvals.size < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
-    assert.equal(approvals.size, 2);
-    assert.ok(exposed.every(names => names.length === 1 && names[0] === "read_file"), "filter the full native/controller toolset");
-    children[0]!.session.respondToToolApproval({ toolCallId: "reused-call", decision: "approve" });
-    const first = await turns[0];
-    assert.equal(first!.text, "first");
-    assert.equal(children[1]!.session.approval.getToolCallId(), "reused-call");
-    assert.ok(children[1]!.session.run.isRunning());
-    children[1]!.session.respondToToolApproval({ toolCallId: "reused-call", decision: "decline", declineContext: { reason: "User declined tool execution." } });
-    const second = await turns[1];
-    assert.equal(second!.text, "second");
-    assert.match(JSON.stringify(prompts.get("first")!.at(-1)), /READ_EVIDENCE/);
-    assert.match(JSON.stringify(prompts.get("second")!.at(-1)), /User declined tool execution/);
-    assert.doesNotMatch(JSON.stringify(prompts.get("first")), /PRIVATE_TASK_1/);
-    assert.doesNotMatch(JSON.stringify(prompts.get("second")), /PRIVATE_TASK_0/);
-    await children[0]!.dispose();
-    assert.equal((await children[1]!.run("FOLLOW_UP_SECOND")).text, "second", "disposing one child must not close its sibling storage");
+    const runs = children.map((child, index) => f.run(child, `PRIVATE_TASK_${index}`, gate => new Promise(resolve => { gates[index] = { gate, answer: resolve }; })));
+    for (let i = 0; gates.filter(Boolean).length < 2 && i < 300; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(gates.filter(Boolean).length, 2);
+    assert.equal(gates[0]!.gate.toolCallId, gates[1]!.gate.toolCallId);
+    assert.notEqual(gates[0]!.gate.runId, gates[1]!.gate.runId);
+    assert.ok(children[0]!.tools.hasPreview("same-call"));
+    assert.ok("preview" in gates[0]!.gate.args);
+    gates[0]!.answer({ approved: true }); gates[1]!.answer({ approved: false, reason: "User declined tool execution." });
+    const results = await Promise.all(runs);
+    assert.equal(await readFile(path.join(f.root, "child-0.txt"), "utf8"), "CHILD_OK");
+    await assert.rejects(readFile(path.join(f.root, "child-1.txt")), /ENOENT/);
+    assert.notEqual(results[0]!.threadId, results[1]!.threadId);
+    assert.match(JSON.stringify(prompts[1]), /User declined tool execution/);
+    assert.doesNotMatch(JSON.stringify(prompts[0]), /PRIVATE_TASK_1/);
+    const asking = await f.prepare(); let calls = 0; const questionPrompts: unknown[] = [];
+    asking.agent.model = model(prompt => { questionPrompts.push(prompt); return calls++ === 0 ?
+      { name: "ask_user", args: { question: "Continue?" } } : "Question cancelled; continuing normally"; });
+    assert.match((await f.run(asking, "Ask once", async gate => { assert.equal(gate.approval, false); assert.equal(gate.toolName, "ask_user"); return { cancelled: true }; })).text, /continuing/);
+    assert.match(JSON.stringify(questionPrompts), /User declined to answer the question/);
+  } finally { await f.close(); }
+});
+
+test("native allow/deny, role tools and skill scopes do not alter parent policy", { timeout: 30000 }, async () => {
+  const f = await fixture();
+  try {
+    const allowedDir = path.join(f.root, ".agents", "skills", "allowed");
+    await mkdir(allowedDir, { recursive: true });
+    await writeFile(path.join(allowedDir, "SKILL.md"), "---\nname: allowed\ndescription: Allowed skill\n---\nALLOWED_BODY");
+    f.config.permissions.allow_for = ["write_file"];
+    f.config.permissions.require_approval_for = [];
+    const execution = await f.prepare("scoped", { skills: ["allowed"], tools: ["write_file", "skill"] });
+    const prompts: unknown[] = []; let calls = 0;
+    execution.agent.model = model((prompt, tools) => { prompts.push(prompt);
+      assert.ok(tools.every(name => ["write_file", "skill"].includes(name)));
+      return calls++ === 0 ? { name: "write_file", args: { path: "allowed.txt", content: "ALLOW" } } : "Allowed write"; });
+    await f.run(execution, "Write allowed file");
+    assert.equal(await readFile(path.join(f.root, "allowed.txt"), "utf8"), "ALLOW");
+    assert.doesNotMatch(JSON.stringify(prompts[0]), /ALLOWED_BODY/);
+    await assert.rejects(f.prepare("missing", { skills: ["missing"] }), /Unavailable child skill/);
+    f.config.permissions.deny_for = ["write_file"]; calls = 0;
+    execution.agent.model = model(() => calls++ === 0 ? { name: "write_file", args: { path: "denied.txt", content: "DENY" } } : "Denied write");
+    await f.run(execution, "Denied write");
+    await assert.rejects(readFile(path.join(f.root, "denied.txt")), /ENOENT/);
+    assert.equal(subagentAllowsTool({ name: "explore", source: "builtin", instructions: "", description: "" }, "write_file"), false);
+    assert.equal(subagentAllowsTool({ name: "custom", source: "project", instructions: "", description: "", tools: ["read_file"], disallowedTools: ["read_file"] }, "read_file"), false);
+  } finally { await f.close(); }
+});
+
+test("native children fail closed for retired permission rules", { timeout: 30000 }, async () => {
+  const f = await fixture();
+  try {
+    f.config.permissions.require_approval_for = ["create_file"];
+    f.config.permissions.allow_for = ["write_file", "execute_command"];
+    const child = await f.prepare(); let calls = 0; const prompts: unknown[] = [];
+    child.agent.model = model(prompt => { prompts.push(prompt); return calls++ === 0 ?
+      { name: "write_file", args: { path: "retired.txt", content: "MUST_NOT_WRITE" } } : "Permission denied"; });
+    await f.run(child, "Attempt a write with retired permission names");
+    await assert.rejects(readFile(path.join(f.root, "retired.txt")), /ENOENT/);
+    assert.match(JSON.stringify(prompts), /Permission denied/);
+    calls = 0; prompts.length = 0;
+    child.agent.model = model(prompt => { prompts.push(prompt); return calls++ === 0 ?
+      { name: "execute_command", args: { command: "echo SHOULD_NOT_EXECUTE", reason: "Test retired rule" } } : "Permission denied"; });
+    await f.run(child, "Attempt a command with retired permission names");
+    assert.match(JSON.stringify(prompts), /Permission denied: execute_command/);
+    assert.doesNotMatch(JSON.stringify(prompts), /completed.*exit/);
+  } finally { await f.close(); }
+});
+
+test("cancelled native questions retain actual private history identity", { timeout: 30000 }, async () => {
+  const f = await fixture();
+  try {
+    const child = await f.prepare(); const abort = new AbortController();
+    child.agent.model = model(() => ({ name: "ask_user", args: { question: "Continue?" } }));
+    await assert.rejects(child.run({ prompt: "TASK_BEFORE_CANCEL" }, { toolCallId: "parent-call", messages: [], abortSignal: abort.signal }, async () => {
+      abort.abort(new Error("Test cancellation")); throw abort.signal.reason;
+    }), /Test cancellation/);
+    const history = (child as NativeSubagentExecution & { history?: { threadId?: string; resourceId?: string } }).history;
+    assert.ok(history?.threadId && history.resourceId);
+    const messages = await (await f.store.getStore("memory"))!.listMessages({ threadId: history.threadId, resourceId: history.resourceId, perPage: 100, page: 0 });
+    assert.match(JSON.stringify(messages.messages), /TASK_BEFORE_CANCEL/);
+  } finally { await f.close(); }
+});
+
+test("Controller dispatches native roles and completion preserves a queued parent prompt", { timeout: 30000 }, async () => {
+  const f = await fixture();
+  await createBootstrap(f.home).run();
+  const composition = await createCubeMastra(f.home, new WorkspaceManager(f.home, f.root), f.config);
+  const session = await composition.controller.createSession({ resourceId: f.root });
+  const started = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
+  const ended = Promise.withResolvers<void>(); const prompts: string[] = []; const errors: unknown[] = [];
+  let dispatched = 0; let calls = 0; let turns = 0;
+  composition.subagents.setDispatch(async request => {
+    dispatched++; assert.equal(request.input.prompt, "Delegate task"); assert.equal(request.parentThreadId, "controller-parent");
+    assert.equal(request.input.threadId, undefined);
+    assert.equal(request.input.resourceId, undefined);
+    return { id: "controlled-job" };
+  });
+  const base = model((prompt, tools) => {
+    prompts.push(JSON.stringify(prompt)); assert.ok(tools.includes("agent-worker"));
+    return calls++ === 0 ? { name: "agent-worker", args: { prompt: "Delegate task" } } : "Parent continued";
+  });
+  composition.agent.model = new MockLanguageModelV3({ doStream: async options => {
+    if (calls === 1) { started.resolve(); await release.promise; }
+    return base.doStream(options);
+  } });
+  const stop = session.subscribe(event => {
+    if (event.type === "error") { errors.push(event.error); started.reject(event.error); ended.reject(event.error); }
+    if (event.type === "agent_end" && ++turns >= 2) ended.resolve();
+  });
+  try {
+    await configureCubePermissions(session, f.config.permissions);
+    await session.thread.create({ id: "controller-parent" });
+    const first = session.followUp({ content: "Delegate once" });
+    await started.promise;
+    await session.followUp({ content: "QUEUED_PARENT_PROMPT" });
+    const record = { id: "controlled-job", parentThreadId: "controller-parent", projectRoot: f.root, agent: "worker",
+      pendingDelivery: "subagent-controlled-job", result: { text: "CHILD_EVIDENCE", toolActivity: [], status: "completed" as const } };
+    const delivered = composition.deliverSubagentResult(record, true);
+    release.resolve();
+    await delivered; await first; await ended.promise;
+    await composition.deliverSubagentResult(record, true);
+    assert.equal(dispatched, 1, JSON.stringify(prompts.map(text => JSON.parse(text).filter((message: { role: string }) => message.role === "tool")))); assert.equal(session.followUps.count(), 0); assert.deepEqual(errors, []);
+    const messages = await session.thread.listMessages({ threadId: "controller-parent" });
+    assert.equal(messages.filter(message => message.id === record.pendingDelivery).length, 1);
+    assert.equal(messages.filter(message => isUserAuthoredMessage(message) && JSON.stringify(message.content).includes("QUEUED_PARENT_PROMPT")).length, 1);
+    assert.ok(prompts.some(prompt => prompt.includes("CHILD_EVIDENCE")));
   } finally {
-    await Promise.allSettled(children.map(child => child.dispose()));
-    await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    release.resolve(); stop(); session.abort();
+    session.thread.detachFromCurrent(); await session.thread.clearAndReleaseLock();
+    await composition.shutdown(); await f.close();
   }
 });

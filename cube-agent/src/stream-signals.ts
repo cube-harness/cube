@@ -1,6 +1,6 @@
 import type { Agent } from "@mastra/core/agent";
 import type { MemoryStorage } from "@mastra/core/storage";
-import type { ChildRunResult } from "./agents/subagent.agent.js";
+import type { NativeSubagentResult } from "./agents/subagent.agent.js";
 import type { ProcessRecord } from "./tools/command.tools.js";
 
 export type ChildCompletion = {
@@ -8,7 +8,9 @@ export type ChildCompletion = {
   parentThreadId: string;
   projectRoot: string;
   agent: string;
-  result?: ChildRunResult;
+  status?: string;
+  history?: Pick<NativeSubagentResult, "threadId" | "resourceId" | "runId">;
+  result?: NativeSubagentResult & { status: "completed" | "failed" | "cancelled"; error?: string };
   error?: string;
   pendingDelivery?: string;
   worktree?: { path: string };
@@ -82,8 +84,8 @@ export function createStreamSignals(agent: Agent, storage: () => Promise<MemoryS
     const existing = await memory.listMessagesById({ messageIds: [record.pendingDelivery] });
     if (existing.messages.some((message) => message.threadId === record.parentThreadId)) return;
     const result = record.result ?? {
-      runId: undefined,
-      status: "failed",
+      ...record.history,
+      status: record.status === "cancelled" ? "cancelled" : "failed",
       text: "",
       error: record.error,
     };
@@ -102,13 +104,15 @@ export function createStreamSignals(agent: Agent, storage: () => Promise<MemoryS
             agent: record.agent,
             runId: result.runId,
             status: result.status,
+            nativeThreadId: "threadId" in result ? result.threadId : undefined,
+            toolActivity: "toolActivity" in result ? result.toolActivity.slice(-12) : [],
             report,
             error: result.error?.slice(0, 1000),
             worktree: record.worktree?.path,
             requiresIntegration: !!record.worktree,
             truncated: report !== result.text,
-            readMore: { id: record.id, view: "result" },
-            evidence: { id: record.id, view: "transcript" },
+            readMore: { tool: "manage_task", action: "get", id: record.id, view: "result" },
+            evidence: { tool: "manage_task", action: "get", id: record.id, view: "transcript" },
           }),
       },
       {

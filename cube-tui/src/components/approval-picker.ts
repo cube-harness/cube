@@ -19,6 +19,7 @@ export interface ApprovalPickerOptions {
   environment?: string;
   reason?: string;
   label?: string;
+  title?: string;
   onDecision: (decision: ToolApprovalDecision) => void;
 }
 
@@ -198,11 +199,11 @@ export class ApprovalPicker implements Component, Focusable {
     const cardContentLines: string[] = [
       ...(this.options.label ? [appTheme.ui.primary(this.options.label)] : []),
       appTheme.ui.text.bold(
-        this.parsed.preview
+        this.options.title ?? (this.parsed.preview
           ? "Would you like to apply the proposed file changes?"
           : this.parsed.command
             ? "Would you like to run the following command?"
-            : `Would you like to run the tool: ${this.options.toolName}?`,
+            : `Would you like to run the tool: ${this.options.toolName}?`),
       ),
     ];
     for (const [label, value] of [

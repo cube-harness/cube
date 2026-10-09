@@ -1,5 +1,4 @@
 import { Mastra } from "@mastra/core";
-import type { ToolsInput } from "@mastra/core/agent";
 import type { MemoryStorage } from "@mastra/core/storage";
 import { randomUUID } from "node:crypto";
 import type { ProcessRecord } from "./tools/command.tools.js";
@@ -30,24 +29,7 @@ import { createCubeGateways, type CubeGatewayComposition } from "./gateways/fact
 import { toMastraRouterId, getCanonicalModelId, gatewayDescriptors } from "./gateways/types.js";
 import { createCubeTools, type CubeTools } from "./tools/cube-tools.js";
 import { CubeContext } from "./context.js";
-import {
-  createSubagentChild,
-  type CreateSubagentChildOptions,
-  type SubagentChild,
-} from "./agents/subagent.agent.js";
-
-type ChildCreation = Pick<
-  CreateSubagentChildOptions,
-  | "id"
-  | "projectRoot"
-  | "executionRoot"
-  | "cwd"
-  | "definition"
-  | "modelId"
-  | "reasoningEffort"
-  | "instructions"
-  | "readPermissions"
->;
+import { createNativeSubagents } from "./agents/subagent.agent.js";
 
 export interface CubeMastraComposition {
   agent: Awaited<ReturnType<typeof createCubeAgent>>;
@@ -64,8 +46,7 @@ export interface CubeMastraComposition {
   setMemoryNotice: (handler: (message: string) => void) => void;
   drain: (threadId?: string) => Promise<void>;
   continueProcess: (record: ProcessRecord, wake: boolean) => Promise<void>;
-  createChild: (options: ChildCreation) => Promise<SubagentChild>;
-  setSubagentTools: (read: () => ToolsInput) => void;
+  subagents: ReturnType<typeof createNativeSubagents>;
   deliverSubagentResult: (record: ChildCompletion, wake: boolean) => Promise<void>;
   shutdown: () => Promise<void>;
 }
@@ -201,7 +182,7 @@ export const createCubeMastra = async (
         },
       });
     const context = createContext(() => agent, storage);
-    let subagentTools: () => ToolsInput = () => ({});
+    let nativeSubagents: ReturnType<typeof createNativeSubagents> | undefined;
     const agent = await createCubeAgent(
       home,
       workspace,
@@ -233,7 +214,7 @@ export const createCubeMastra = async (
           : {}),
       },
       mcp,
-      { extraTools: () => subagentTools() },
+      { agents: context => nativeSubagents?.readAgents(context) ?? {}, toolHooks: () => nativeSubagents?.hooks },
     );
     const summarizer = createSummarizerAgent(
       async ({ requestContext }) =>
@@ -311,6 +292,8 @@ export const createCubeMastra = async (
       gateways: gateways.record,
     });
 
+    nativeSubagents = createNativeSubagents({ home, config, projectRoot: root, storage: mastra.getStorage()!, parent: agent,
+      skills: agent.cubeSkills, mcp, readPermissions: () => config.permissions });
     const shutdownMastra = mastra.shutdown.bind(mastra);
     let shutdownPromise: Promise<void> | undefined;
 
@@ -319,23 +302,7 @@ export const createCubeMastra = async (
       controller,
       mastra,
       continueProcess: streamSignals.continueProcess,
-      setSubagentTools: (read) => {
-        subagentTools = read;
-      },
-      createChild: (childOptions) =>
-        createSubagentChild({
-          ...childOptions,
-          home,
-          config,
-          logger: logging.logger,
-          gateways: gateways.ordered,
-          skills: agent.cubeSkills,
-          mcp,
-          recall: recall?.tool,
-          readModel,
-          createContext: (getChild, childStorage) =>
-            createContext(() => getChild() as typeof agent, childStorage),
-        }),
+      subagents: nativeSubagents,
       deliverSubagentResult: streamSignals.deliverSubagentResult,
       redact: async (text) => redactMemoryText(text, await secrets()),
       logger: logging.logger,

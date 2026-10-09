@@ -156,11 +156,14 @@ test("ChatScreen mounts its concrete components in one stable order", () => {
   const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });
   screen.mount({ onSubmit: async () => undefined });
 
+  const approvalHint = fake.added[4]!;
+  assert.deepEqual(approvalHint.render(80), []);
   assert.deepEqual(fake.added, [
     screen.banner,
     screen.infoBox,
     screen.messageList,
     screen.workingIndicator,
+    approvalHint,
     screen.promptEditor,
     screen.footer,
   ]);

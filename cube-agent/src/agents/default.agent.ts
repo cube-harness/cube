@@ -1,6 +1,7 @@
 import { createCodingAgent } from "@mastra/core/coding-agent";
-import type { ToolsInput } from "@mastra/core/agent";
-import type { InputProcessor } from "@mastra/core/processors";
+import type { Agent } from "@mastra/core/agent";
+import type { ToolHooks } from "@mastra/core/tools";
+import type { RequestContext } from "@mastra/core/request-context";
 import type { IMastraLogger } from "@mastra/core/logger";
 import {
   type CubeConfig,
@@ -33,9 +34,8 @@ export type CubeAgentOptions = {
   id?: string;
   snapshot?: InstructionSnapshot;
   skills?: Awaited<ReturnType<typeof createCubeSkills>>;
-  roleInstructions?: string;
-  extraTools?: () => ToolsInput;
-  allowTool?: (name: string) => boolean;
+  agents?: (context: RequestContext) => Record<string, Agent>;
+  toolHooks?: () => ToolHooks | undefined;
 };
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
@@ -179,12 +179,9 @@ export const createCubeAgent = async (
   const agent = createCodingAgent({
     id: options.id ?? "cube-agent",
     name: "Cube Agent",
+    agents: ({ requestContext }) => options.agents?.(requestContext) ?? {},
     model: [modelConfig as any],
-    instructions: options.roleInstructions ? () => [
-      { role: "system" as const, content: snapshot.soul },
-      { role: "system" as const, content: executionInstructions() },
-      { role: "system" as const, content: options.roleInstructions! },
-    ] : [
+    instructions: [
       { role: "system", content: snapshot.soul },
       { role: "system", content: executionInstructions() },
     ],
@@ -225,13 +222,6 @@ export const createCubeAgent = async (
             ),
           ]
         : []),
-      ...(options.allowTool ? [{
-        id: "cube-subagent-tool-policy",
-        processInputStep: ({ tools: available }) => {
-          const allowed = Object.fromEntries(Object.entries(available ?? {}).filter(([name]) => options.allowTool!(name)));
-          return { tools: allowed, activeTools: Object.keys(allowed) };
-        },
-      } satisfies InputProcessor] : []),
     ],
     workspace: mastraWorkspace,
     skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
@@ -241,7 +231,6 @@ export const createCubeAgent = async (
       ...(contextManager?.recallTool ? { memory_recall: contextManager.recallTool } : {}),
       fetch: webFetchTool,
       ...mcp?.readTools(),
-      ...options.extraTools?.(),
     }),
     defaultOptions: ({ requestContext }) => {
       const controller = requestContext.get("controller") as { threadId?: string } | undefined;
@@ -257,6 +246,7 @@ export const createCubeAgent = async (
         });
       };
       return {
+        hooks: options.toolHooks?.(),
         onChunk: (chunk) => {
           runId = chunk.runId;
           requestContext.set("cubeBackgroundRunId", runId);
@@ -311,7 +301,7 @@ export const createCubeAgent = async (
       contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
-      if (!options.roleInstructions) agent.__updateInstructions([
+      agent.__updateInstructions([
         { role: "system", content: replacement.soul },
         { role: "system", content: executionInstructions() },
       ]);

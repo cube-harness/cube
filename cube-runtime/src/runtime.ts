@@ -1,4 +1,5 @@
-import type { Session, InstructionInfo, CubeTools, CubeContext, SubagentTarget } from "@cube/agent";
+import type { Session, InstructionInfo, CubeTools, CubeContext } from "@cube/agent";
+import type { SubagentTarget } from "./services/subagent.service.js";
 import { toRuntimeNotice } from "./types.js";
 import type { MemoryService } from "./services/memory.service.js";
 import type { BackgroundService } from "./services/background.service.js";
@@ -155,11 +156,17 @@ export class CubeRuntime {
   }
 
   respondToApproval(input: ToolApprovalResponse): void {
-    const child = input.target ? this.subagents?.getChild(input.target) : undefined;
-    if (input.target && (!child || child.session.approval.getToolCallId() !== input.toolCallId))
-      throw new Error("This child approval is no longer active");
-    const tools = child?.tools ?? this.dependencies.tools;
-    const session = child?.session ?? this.dependencies.session;
+    const tools = input.target ? this.subagents?.preview(input.target) : this.dependencies.tools;
+    const session = this.dependencies.session;
+    const respond = (approved: boolean, reason?: string) => {
+      if (input.target) {
+        void this.subagents!.respond(input.target, { approved, ...(reason ? { reason } : {}) })
+          .catch(error => this.notify(toRuntimeNotice(error).message));
+      } else {
+        session.respondToToolApproval({ decision: approved ? "approve" : "decline", toolCallId: input.toolCallId,
+          ...(reason ? { declineContext: { reason } } : {}) });
+      }
+    };
     if (
       input.decision !== "decline" &&
       tools &&
@@ -168,40 +175,21 @@ export class CubeRuntime {
     ) {
       const reason =
         "This file approval has no valid live preview. Request a fresh tool call before approving.";
-      session.respondToToolApproval({
-        decision: "decline",
-        toolCallId: input.toolCallId,
-        declineContext: { reason },
-      });
+      respond(false, reason);
       tools.discardPreview(input.toolCallId);
       throw new Error(reason);
     }
     if (input.decision === "decline") tools?.discardPreview(input.toolCallId);
-    if (input.decision === "approve_prefix") {
+    if (input.decision === "approve_prefix" && !input.target) {
       session.grantTool(input.toolName);
     }
-    session.respondToToolApproval({
-      decision: input.decision === "decline" ? "decline" : "approve",
-      toolCallId: input.toolCallId,
-      ...(input.decision === "decline" && input.declineReason
-        ? { declineContext: { reason: input.declineReason } }
-        : {}),
-    });
+    respond(input.decision !== "decline", input.decision === "decline" ? input.declineReason ?? "User declined tool execution." : undefined);
   }
 
   respondToSuspension(input: ToolSuspensionResponse): Promise<void> {
     if (input.target) {
-      const child = this.subagents?.getChild(input.target);
-      if (
-        !child ||
-        child.session.suspensions.get({ toolCallId: input.toolCallId })?.runId !==
-          input.target.runId
-      )
-        throw new Error("This child question is no longer active");
-      return child.session.respondToToolSuspension({
-        toolCallId: input.toolCallId,
-        resumeData: input.resumeData,
-      });
+      if (!this.subagents) throw new Error("This child question is no longer active");
+      return this.subagents.respond(input.target, input.resumeData);
     }
     return this.dependencies.session.respondToToolSuspension(input);
   }
@@ -212,14 +200,15 @@ export class CubeRuntime {
   }
 
   async cancelSuspension(toolCallId: string, target?: SubagentTarget): Promise<void> {
-    const child = target ? this.subagents?.getChild(target) : undefined;
-    if (target && !child) throw new Error("This child question is no longer active");
-    const session = child?.session ?? this.dependencies.session;
+    if (target) {
+      if (!this.subagents) throw new Error("This child question is no longer active");
+      return this.subagents.respond(target, { cancelled: true });
+    }
+    const session = this.dependencies.session;
     const suspension = session.suspensions.get({ toolCallId });
     if (!suspension) return;
     if (suspension.toolName !== "ask_user") {
-      if (child) child.session.abort();
-      else this.interrupt();
+      this.interrupt();
       return;
     }
     // Resume with a decline so the native loop persists the result and continues.

@@ -13,6 +13,7 @@ declare module "@earendil-works/pi-tui" {
     "cube.turn.interrupt": true;
     "cube.app.exit": true;
     "cube.transcript.toggle": true;
+    "cube.subagent.approvals": true;
     "cube.approval.approve": true;
     "cube.approval.approvePrefix": true;
     "cube.approval.decline": true;
@@ -35,6 +36,10 @@ export const CUBE_KEYBINDINGS = {
   "cube.transcript.toggle": {
     defaultKeys: "ctrl+t",
     description: "Toggle reasoning and expanded tool transcripts",
+  },
+  "cube.subagent.approvals": {
+    defaultKeys: "ctrl+k",
+    description: "Review pending subagent approvals",
   },
   "cube.approval.approve": {
     defaultKeys: "y",
