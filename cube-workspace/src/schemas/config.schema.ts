@@ -153,6 +153,7 @@ const configSettingsShape = {
   subagents: z.object({
     concurrency: z.number().int().min(1).max(32).default(DEFAULT_SUBAGENTS.concurrency),
     model: modelReference.default(DEFAULT_SUBAGENTS.model),
+    reasoning_effort: ReasoningEffortSchema.optional(),
     timeout_ms: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_SUBAGENTS.timeout_ms),
   }).strict().default(DEFAULT_SUBAGENTS),
   background_tasks: z.object({

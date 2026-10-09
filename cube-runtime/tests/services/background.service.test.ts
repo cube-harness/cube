@@ -17,8 +17,11 @@ function fixture() {
     async getTask(id) { return tasks.get(id) ?? null; },
     async listTasks(filter) {
       const matches = [...tasks.values()].filter(task => task.resourceId === filter.resourceId &&
-        task.agentId === filter.agentId && task.threadId === filter.threadId);
-      return { tasks: matches.slice(0, filter.perPage ?? 100), total: matches.length };
+        task.agentId === filter.agentId && task.threadId === filter.threadId &&
+        (!filter.toolName || task.toolName === filter.toolName) && (!filter.runId || task.runId === filter.runId) &&
+        (!filter.toolCallId || task.toolCallId === filter.toolCallId));
+      const size = filter.perPage ?? 100;
+      return { tasks: matches.slice((filter.page ?? 0) * size, ((filter.page ?? 0) + 1) * size), total: matches.length };
     },
   };
   const emit = (record: ProcessRecord) => { for (const listener of listeners) listener(structuredClone(record)); };
@@ -49,6 +52,49 @@ function fixture() {
   };
 }
 
+const delegation = (call: string) => ({ parentThreadId: "owner", projectRoot: "workspace", agent: "worker", description: call,
+  parentRunId: "run", toolCallId: call, definition: { name: "worker", source: "builtin" as const, description: "work", instructions: "work" },
+  modelId: "google/test", instructions: { soul: "Cube", sources: [], explored: [] }, task: "work", cwd: "workspace",
+  isolation: "none" as const, checkoutAvailable: true });
+const finished = () => ({ text: "done", toolActivity: [], status: "completed" as const, startedAt: Date.now(), completedAt: Date.now() });
+
+test("shutdown aborts every child and drains processes even after delivery failure", async () => {
+  const f = fixture();
+  let aborted = false; let started = false;
+  await f.service.enqueueDelegation(delegation("failed-delivery"), { execute: async () => finished(),
+    deliver: async () => { throw new Error("delivery failed"); } });
+  for (let i = 0; !f.notices.length && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(f.notices.length);
+  await f.service.enqueueDelegation(delegation("waiting"), { execute: async (_record, signal) => {
+    started = true;
+    await new Promise<void>(resolve => signal.addEventListener("abort", () => { aborted = true; resolve(); }, { once: true }));
+    return finished();
+  }, deliver: async () => {} });
+  for (let i = 0; !started && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(started);
+  f.process("server", { timeoutMs: null });
+  await assert.rejects(f.service.shutdown(), /delivery failed/);
+  assert.equal(aborted, true);
+  assert.equal(f.service.delegationRunningCount("owner"), 0);
+  assert.ok(f.order.includes("stop:server") && f.order.includes("drain:all"));
+  assert.equal(f.listeners.size, 0);
+});
+
+test("deleting a parent suppresses child completion before cancellation starts", async () => {
+  const f = fixture(); const delivered: string[] = [];
+  await f.service.enqueueDelegation(delegation("waiting"), { execute: async (_record, _signal, suspend) => {
+    await suspend({ runId: "child-run", toolCallId: "question", toolName: "ask_user", args: {}, suspendPayload: {}, approval: false });
+    return finished();
+  }, deliver: async record => { delivered.push(record.id); } });
+  for (let i = 0; f.tasks.values().next().value?.status !== "suspended" && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  try {
+    await f.service.beforeDelete("owner");
+    assert.deepEqual(delivered, []);
+    assert.equal(f.service.delegationRunningCount("owner"), 0);
+    assert.ok(f.order.includes("drain:owner"));
+  } finally { await f.service.shutdown(); }
+});
+
 test("tasks persist per thread and share one ID with live processes", async () => {
   const f = fixture();
   try {
@@ -73,6 +119,36 @@ test("tasks persist per thread and share one ID with live processes", async () =
     assert.equal(restored.status, "unattached");
     await assert.rejects(f.service.stop(live), /read-only/);
   } finally { await f.service.shutdown(); }
+});
+
+test("delegation jobs queue separately from commands and retain slots while waiting", async () => {
+  const f = fixture();
+  const started: string[] = [];
+  const releases: (() => void)[] = [];
+  const input = (name: string) => ({ parentThreadId: "owner", projectRoot: "workspace", agent: "worker", description: name, parentRunId: "parent-run", toolCallId: name,
+    definition: { name: "worker", source: "builtin" as const, description: "work", instructions: "work" },
+    modelId: "google/test", instructions: { soul: "Cube", sources: [], explored: [] }, task: "work", cwd: "workspace",
+    isolation: "none" as const, checkoutAvailable: true });
+  const execute = async (record: { description: string }) => {
+    started.push(record.description);
+    await new Promise<void>(resolve => releases.push(resolve));
+    return { text: "done", toolActivity: [], status: "completed" as const, startedAt: Date.now(), completedAt: Date.now() };
+  };
+  try {
+    const first = await f.service.enqueueDelegation(input("one"), { execute, deliver: async () => {} });
+    await f.service.enqueueDelegation(input("two"), { execute, deliver: async () => {} });
+    const third = await f.service.enqueueDelegation(input("three"), { execute, deliver: async () => {} });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(started, ["one", "two"]);
+    assert.equal(f.service.delegationRunningCount("owner"), 2);
+    assert.equal((await f.service.list()).length, 0, "delegation records are not command history");
+    await f.service.cancelDelegation(third.id, "owner");
+    releases.forEach(release => release());
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(started.includes("three"), false);
+    assert.equal((await f.service.getDelegation(first.id, "owner")).status, "completed");
+    await assert.rejects(f.service.getDelegation(first.id, "other"), /Unknown/);
+  } finally { releases.forEach(release => release()); await f.service.shutdown(); }
 });
 
 test("foreign handles are rejected and foreground commands never become tasks", async () => {

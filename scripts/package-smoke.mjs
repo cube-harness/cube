@@ -6,12 +6,10 @@ import path from "node:path";
 // This file runs inside the deployed app, never resolves dependencies via the repo.
 const { McpService, SubagentService } = await import("@cube/runtime");
 const { CubeHome, CubeWorkspace, createBootstrap, ConfigStore, RunnableConfigSchema, McpStore, AuthStore } = await import("@cube/workspace");
-const { createCubeAgent, INITIALIZE_PROMPT, CubeMcp, BUILTIN_SUBAGENTS, createSubagentChild, createSubagentTools } = await import("@cube/agent");
+const { createCubeMastra, INITIALIZE_PROMPT, CubeMcp, BUILTIN_SUBAGENTS, createNativeSubagents } = await import("@cube/agent");
 assert.equal(typeof SubagentService, "function");
-assert.equal(typeof createSubagentChild, "function");
+assert.equal(typeof createNativeSubagents, "function");
 assert.deepEqual(BUILTIN_SUBAGENTS.map(role => role.name), ["explore", "worker"]);
-assert.deepEqual(Object.keys(createSubagentTools("/smoke", () => BUILTIN_SUBAGENTS, {})).sort(),
-  ["get_agent", "interrupt_agent", "list_agents", "send_message", "spawn_agent"]);
 const { createWorkspaceTools } = await import("@mastra/core/workspace");
 const { RequestContext } = await import("@mastra/core/request-context");
 const { LibSQLStore } = await import("@mastra/libsql");
@@ -20,6 +18,7 @@ const cwd = process.cwd();
 let agent;
 let storage;
 let mcp;
+let composition;
 try {
   const project = path.join(scratch, "project with spaces");
   await mkdir(project);
@@ -35,7 +34,11 @@ try {
   assert.deepEqual(JSON.parse(await readFile(home.getAuthPath(), "utf8")), { api_keys: {}, oauth: {} });
   assert.ok(INITIALIZE_PROMPT.length > 0);
   const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
-  agent = await createCubeAgent(home, CubeWorkspace(home, project), config);
+  composition = await createCubeMastra(home, CubeWorkspace(home, project), config);
+  agent = composition.agent;
+  const native = await agent.getToolsForExecution({ requestContext: new RequestContext(), methodType: "stream", backgroundTaskEnabled: false });
+  assert.ok(native["agent-worker"]?.execute && native["agent-explore"]?.execute);
+  assert.equal(native.spawn_agent, undefined);
   const workspace = await agent.getWorkspace();
   const filesystem = await workspace.resolveFilesystem({ requestContext: new RequestContext() });
   assert.equal(filesystem.basePath, project);
@@ -61,7 +64,7 @@ try {
   console.log("package-smoke: native tools, command, templates and SQLite OK outside checkout");
 } finally {
   await mcp?.dispose();
-  await agent?.disposeTools();
+  await composition?.shutdown();
   await storage?.close();
   process.chdir(cwd);
   await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -1,5 +1,5 @@
 import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
-import type { SubagentTarget } from "@cube/agent";
+import type { SubagentTarget } from "./services/subagent.service.js";
 import type { SubagentInteraction } from "./services/subagent.service.js";
 import type {
   ApiKeyGatewayId,

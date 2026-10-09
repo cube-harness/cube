@@ -6,6 +6,9 @@ import type {
   ProcessRegistry,
 } from "@cube/agent";
 import { stripVTControlCharacters } from "node:util";
+import { randomUUID } from "node:crypto";
+import type { NativeSubagentGate } from "@cube/agent";
+import type { SubagentRecord, SubagentTarget } from "./subagent.service.js";
 import {
   toRuntimeNotice,
   type BackgroundJobRef,
@@ -15,6 +18,14 @@ import {
 
 type History = Pick<BackgroundTasksStorage, "createTask" | "updateTask" | "listTasks" | "getTask">;
 const active = (status: string) => ["pending", "running", "suspended"].includes(status);
+type DelegationCallbacks = {
+  execute(record: SubagentRecord, signal: AbortSignal, suspend: (gate: NativeSubagentGate) => Promise<unknown>): Promise<NonNullable<SubagentRecord["result"]>>;
+  deliver(record: SubagentRecord, wake: boolean): Promise<void>;
+  cleanup?(): Promise<void>;
+};
+type DelegationJob = { record: SubagentRecord; callbacks: DelegationCallbacks; abort: AbortController;
+  completion?: Promise<void>; gate?: NativeSubagentGate;
+  answer?: { resolve(value: unknown): void; reject(error: unknown): void } };
 
 export class BackgroundService {
   private readonly deleted = new Set<string>();
@@ -31,6 +42,11 @@ export class BackgroundService {
   private closing = false;
   private shutdownPromise?: Promise<void>;
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  private readonly delegations = new Map<string, DelegationJob>();
+  private readonly delegationQueue: string[] = [];
+  private delegationSlots = 0;
+  private readonly acceptances = new Map<string, Promise<{ id: string }>>();
+  private readonly deliveries = new Map<string, Promise<void>>();
 
   constructor(
     private readonly options: {
@@ -42,9 +58,199 @@ export class BackgroundService {
       redact: (text: string) => Promise<string>;
       drain: (threadId?: string) => Promise<void>;
       continueProcess: (record: ProcessRecord, wake: boolean) => Promise<void>;
+      delegationConfig?: { concurrency: number; timeout_ms: number };
     },
   ) {
     this.attach(options.processes, options.continueProcess);
+  }
+
+  enqueueDelegation(
+    input: Omit<SubagentRecord, "id" | "status" | "createdAt" | "canInterrupt">,
+    callbacks: DelegationCallbacks,
+  ): Promise<{ id: string }> {
+    const key = JSON.stringify([input.parentThreadId, input.parentRunId, input.toolCallId]);
+    const existing = this.acceptances.get(key);
+    if (existing) return existing;
+    const accepted = this.acceptDelegation(input, callbacks);
+    this.acceptances.set(key, accepted);
+    void accepted.catch(() => this.acceptances.delete(key));
+    return accepted;
+  }
+
+  private async acceptDelegation(
+    input: Omit<SubagentRecord, "id" | "status" | "createdAt" | "canInterrupt">,
+    callbacks: DelegationCallbacks,
+  ): Promise<{ id: string }> {
+    if (this.closing || this.deleted.has(input.parentThreadId) || input.projectRoot !== this.options.workspaceRoot)
+      throw new Error("Delegation owner is unavailable");
+    if (!input.parentRunId || !input.toolCallId) throw new Error("Delegation requires a parent run/tool call");
+    const stored = await (await this.options.history())?.listTasks({ agentId: "cube-agent", resourceId: input.projectRoot,
+      threadId: input.parentThreadId, runId: input.parentRunId, toolCallId: input.toolCallId });
+    const previous = stored?.tasks.find(task => task.args.kind === "delegation");
+    if (previous) return { id: previous.id };
+    const record: SubagentRecord = { ...structuredClone(input), id: randomUUID(), createdAt: Date.now(), status: "queued",
+      timeoutMs: this.options.delegationConfig?.timeout_ms ?? 0, canInterrupt: true };
+    // Persist acceptance before acknowledging or starting work.
+    await this.saveDelegation(record, true);
+    if (this.closing || this.deleted.has(record.parentThreadId)) {
+      record.status = "cancelled"; await this.saveDelegation(record); throw new Error("Delegation owner closed during acceptance");
+    }
+    this.delegations.set(record.id, { record, callbacks, abort: new AbortController() });
+    this.delegationQueue.push(record.id); this.pumpDelegations(); this.changed();
+    return { id: record.id };
+  }
+
+  private saveDelegation(record: SubagentRecord, create = false): Promise<void> {
+    const snapshot = structuredClone(record);
+    const write = this.pending.then(async () => {
+      const history = await this.options.history();
+      if (!history) throw new Error("Background history storage is unavailable");
+      const status = snapshot.status === "queued" ? "pending" : snapshot.status === "waiting_approval" || snapshot.status === "waiting_input" ? "suspended" : snapshot.status === "unattached" ? "failed" : snapshot.status;
+      if (create) await history.createTask({ id: snapshot.id, toolName: `agent-${snapshot.agent}`, toolCallId: snapshot.toolCallId!,
+        runId: snapshot.parentRunId!, agentId: "cube-agent", resourceId: snapshot.projectRoot, threadId: snapshot.parentThreadId,
+        status, args: { kind: "delegation" }, result: snapshot, createdAt: new Date(snapshot.createdAt),
+        retryCount: 0, maxRetries: 0, timeoutMs: snapshot.timeoutMs ?? 0 });
+      else if (!(await history.updateTask(snapshot.id, { status, result: snapshot,
+        completedAt: snapshot.completedAt ? new Date(snapshot.completedAt) : undefined }))) throw new Error("Delegation history record is missing");
+    });
+    this.pending = write.catch(error => this.error(error));
+    return write;
+  }
+
+  async updateDelegation(record: SubagentRecord): Promise<void> { await this.saveDelegation(record); this.changed(); }
+
+  private pumpDelegations(): void {
+    while (!this.closing && this.delegationSlots < (this.options.delegationConfig?.concurrency ?? 2) && this.delegationQueue.length) {
+      const id = this.delegationQueue.shift()!;
+      const job = this.delegations.get(id)!;
+      if (job.abort.signal.aborted) continue;
+      this.delegationSlots++;
+      job.completion = this.executeDelegation(job).finally(() => { this.delegationSlots--; this.pumpDelegations(); this.changed(); });
+      void job.completion.catch(error => this.error(error));
+    }
+  }
+
+  private async executeDelegation(job: DelegationJob): Promise<void> {
+    const { record, abort, callbacks } = job;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    record.status = "running"; record.startedAt = Date.now(); this.changed();
+    const timeout = record.timeoutMs ?? 0;
+    const deadline = record.startedAt + timeout;
+    const check = () => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        abort.abort(new Error("Subagent timeout")); job.answer?.reject(abort.signal.reason);
+        void callbacks.cleanup?.().catch(error => this.error(error));
+      } else { timer = setTimeout(check, Math.min(remaining, 2147483647)); timer.unref(); }
+    };
+    if (timeout > 0) check();
+    try {
+      await this.saveDelegation(record);
+      abort.signal.throwIfAborted();
+      record.result = await callbacks.execute(record, abort.signal, async gate => {
+        abort.signal.throwIfAborted();
+        job.gate = gate; record.gate = gate; record.runId = gate.runId;
+        record.status = gate.approval ? "waiting_approval" : "waiting_input";
+        const answer = new Promise<unknown>((resolve, reject) => { job.answer = { resolve, reject }; });
+        const cancel = () => job.answer?.reject(abort.signal.reason);
+        abort.signal.addEventListener("abort", cancel, { once: true });
+        try {
+          await this.saveDelegation(record); this.changed();
+          return await answer;
+        } finally {
+          abort.signal.removeEventListener("abort", cancel); job.answer = undefined; job.gate = undefined; record.gate = undefined;
+          record.status = "running"; this.changed();
+        }
+      });
+      abort.signal.throwIfAborted();
+      record.status = record.result.status;
+    } catch (error) {
+      record.status = abort.signal.aborted ? "cancelled" : "failed";
+      record.error = await this.options.redact(toRuntimeNotice(error).message);
+      await callbacks.cleanup?.();
+    } finally {
+      clearTimeout(timer); record.completedAt = Date.now(); record.gate = undefined;
+      record.pendingDelivery = `subagent-${record.id}`;
+      await this.saveDelegation(record); this.changed();
+    }
+    if (!this.closing && !this.deleted.has(record.parentThreadId)) {
+      await this.deliverDelegation(record, callbacks.deliver, this.options.currentThread() === record.parentThreadId);
+    }
+  }
+
+  async getDelegation(id: string, parentThreadId: string): Promise<SubagentRecord> {
+    const live = this.delegations.get(id)?.record;
+    if (live) {
+      if (live.parentThreadId !== parentThreadId || this.deleted.has(parentThreadId)) throw new Error("Unknown subagent");
+      return live;
+    }
+    await this.pending;
+    if (this.deleted.has(parentThreadId)) throw new Error("Unknown subagent");
+    const task = await (await this.options.history())?.getTask(id);
+    if (!task || task.args.kind !== "delegation" || task.resourceId !== this.options.workspaceRoot || task.threadId !== parentThreadId || task.agentId !== "cube-agent") throw new Error("Unknown subagent");
+    const record = structuredClone(task.result) as SubagentRecord;
+    if (["queued", "running", "waiting_approval", "waiting_input"].includes(record.status)) { record.status = "unattached"; record.gate = undefined; }
+    return record;
+  }
+
+  async listDelegations(parentThreadId: string): Promise<SubagentRecord[]> {
+    await this.pending;
+    const history = await this.options.history();
+    const ids = new Set<string>();
+    for (let page = 0; history; page++) {
+      const stored = await history.listTasks({ agentId: "cube-agent", resourceId: this.options.workspaceRoot,
+        threadId: parentThreadId, page, perPage: 100, orderDirection: "desc" });
+      for (const task of stored.tasks) if (task.args.kind === "delegation") ids.add(task.id);
+      if ((page + 1) * 100 >= stored.total) break;
+    }
+    for (const job of this.delegations.values()) if (job.record.parentThreadId === parentThreadId) ids.add(job.record.id);
+    return Promise.all([...ids].map(id => this.getDelegation(id, parentThreadId)));
+  }
+
+  delegationRunningCount(threadId: string | null): number {
+    return [...this.delegations.values()].filter(job => job.record.parentThreadId === threadId && ["running", "waiting_approval", "waiting_input"].includes(job.record.status)).length;
+  }
+  delegationBusy(): boolean { return this.delegationSlots > 0 || this.delegationQueue.length > 0; }
+
+  deliverDelegation(record: SubagentRecord, deliver: DelegationCallbacks["deliver"], wake = false): Promise<void> {
+    const pending = this.deliveries.get(record.id);
+    if (pending) return pending;
+    const sent = (async () => {
+      if (this.closing || this.deleted.has(record.parentThreadId) || record.delivered === record.pendingDelivery) return;
+      await deliver(record, wake);
+      record.delivered = record.pendingDelivery;
+      await this.saveDelegation(record);
+    })();
+    this.deliveries.set(record.id, sent);
+    void sent.finally(() => this.deliveries.delete(record.id)).catch(() => undefined);
+    return sent;
+  }
+
+  assertDelegationGate(target: SubagentTarget): void {
+    const job = this.delegations.get(target.jobId);
+    if (!job?.answer || job.abort.signal.aborted || job.gate?.runId !== target.runId || job.gate?.toolCallId !== target.toolCallId)
+      throw new Error("Subagent interaction is no longer active");
+  }
+
+  async resumeDelegation(target: SubagentTarget, resumeData: unknown): Promise<void> {
+    this.assertDelegationGate(target);
+    const job = this.delegations.get(target.jobId)!;
+    const answer = job.answer!; job.answer = undefined; answer.resolve(resumeData);
+  }
+  async cancelDelegation(id: string, parentThreadId: string): Promise<void> {
+    const job = this.delegations.get(id);
+    const record = job?.record ?? await this.getDelegation(id, parentThreadId);
+    if (record.parentThreadId !== parentThreadId) throw new Error("Unknown subagent");
+    if (!job) throw new Error("This subagent is read-only history");
+    job.abort.abort(new Error("Subagent cancelled")); job.answer?.reject(job.abort.signal.reason);
+    const queued = this.delegationQueue.indexOf(id);
+    if (queued >= 0) {
+      this.delegationQueue.splice(queued, 1); record.status = "cancelled"; record.completedAt = Date.now();
+      record.error = "Subagent cancelled before execution"; record.pendingDelivery = `subagent-${record.id}`;
+      await this.saveDelegation(record);
+      if (!this.closing && !this.deleted.has(parentThreadId)) await this.deliverDelegation(record, job.callbacks.deliver);
+    }
+    await job.callbacks.cleanup?.(); await job.completion; this.changed();
   }
 
   attach(
@@ -224,10 +430,11 @@ export class BackgroundService {
       agentId: "cube-agent",
       resourceId: this.options.workspaceRoot,
       threadId,
+      toolName: "execute_command",
       perPage: 100,
       orderDirection: "desc",
     });
-    const jobs = new Map((stored?.tasks ?? []).map((task) => [task.id, this.task(task)]));
+    const jobs = new Map((stored?.tasks ?? []).filter(task => task.toolName === "execute_command").map((task) => [task.id, this.task(task)]));
     for (const record of this.liveProcesses()) {
       if (this.owns(record) && record.threadId === threadId)
         jobs.set(record.id, this.process(record));
@@ -262,6 +469,7 @@ export class BackgroundService {
     const task = await history?.getTask(id);
     if (
       !task ||
+      task.toolName !== "execute_command" ||
       !threadId ||
       task.threadId !== threadId ||
       task.agentId !== "cube-agent" ||
@@ -329,7 +537,10 @@ export class BackgroundService {
 
   async beforeDelete(threadId: string): Promise<void> {
     this.deleted.add(threadId);
-    await Promise.all(
+    const outcomes = await Promise.allSettled([
+      ...[...this.delegations.values()].filter(job => job.record.parentThreadId === threadId)
+        .map(job => this.cancelDelegation(job.record.id, threadId)),
+      ...
       this.liveProcesses()
         .filter(
           (record) =>
@@ -339,10 +550,12 @@ export class BackgroundService {
             active(record.result.status),
         )
         .map((record) => this.registryFor(record.id).stop(record.id)),
-    );
+    ]);
     await this.pending;
     await this.options.drain(threadId);
     this.changed();
+    const failed = outcomes.find(outcome => outcome.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
   }
 
   async drain(): Promise<void> {
@@ -354,14 +567,15 @@ export class BackgroundService {
       this.closing = true;
       if (this.refreshTimer) clearTimeout(this.refreshTimer);
       this.listeners.clear();
-      const outcomes = await Promise.allSettled(
-        this.liveProcesses()
+      const outcomes = await Promise.allSettled([
+        ...[...this.delegations.values()].map(job => this.cancelDelegation(job.record.id, job.record.parentThreadId)),
+        ...this.liveProcesses()
           .filter((record) => this.owns(record) && active(record.result.status))
           .sort(
             (a, b) => Number(b.result.status === "pending") - Number(a.result.status === "pending"),
           )
           .map((record) => this.registryFor(record.id).stop(record.id)),
-      );
+      ]);
       await this.pending;
       for (const entry of this.registries.values()) entry.stop();
       this.registries.clear();

@@ -11,9 +11,8 @@ export {
   buildModelConfig,
 } from "./agents/default.agent.js";
 export { createCubeController } from "./agents/controller.js";
-export { createSubagentChild, subagentAllowsTool, BUILTIN_SUBAGENTS } from "./agents/subagent.agent.js";
-export type { CreateSubagentChildOptions, SubagentChild, ChildRunResult, ChildToolActivity } from "./agents/subagent.agent.js";
-export * from "./tools/subagent.tools.js";
+export { createNativeSubagents, subagentAllowsTool, BUILTIN_SUBAGENTS } from "./agents/subagent.agent.js";
+export type { NativeInvocation, NativeSubagentResult, NativeSubagentInput, NativeSubagentGate, NativeSubagentExecution, SubagentDispatchRequest } from "./agents/subagent.agent.js";
 export type { InstructionInfo, InstructionSnapshot } from "./prompts/system.prompt.js";
 export { configureCubePermissions, resolveCubeToolCategory } from "./permission.js";
 export {

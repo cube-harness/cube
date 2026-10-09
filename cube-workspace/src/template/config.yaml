@@ -24,7 +24,8 @@ telemetry: false
 subagents:
   concurrency: 2
   model: inherit
-  timeout_ms: 0 # No overall child-turn deadline; includes approval waits when positive.
+  # reasoning_effort: medium # Shared optional default; custom role Markdown wins.
+  timeout_ms: 0 # No timeout. Positive milliseconds include approval waits, not queue time.
 
 background_tasks:
   enabled: true

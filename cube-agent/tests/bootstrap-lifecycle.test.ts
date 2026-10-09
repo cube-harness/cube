@@ -117,6 +117,14 @@ test("child result persists once without waking an idle parent or recreating a d
     assert.equal(saved.messages.length, 1);
     assert.equal(saved.messages[0]!.threadId, "result-parent");
     assert.match(JSON.stringify(saved.messages), /Child failed before execution/);
+    await composition.deliverSubagentResult({ ...record, status: "cancelled",
+      history: { threadId: "cancelled-native-thread", resourceId: "private-resource", runId: "cancelled-native-run" },
+      error: "Subagent cancelled", pendingDelivery: "cancelled-child-result" }, false);
+    const cancelled = await storage.listMessagesById({ messageIds: ["cancelled-child-result"] });
+    const cancelledText = JSON.stringify(cancelled.messages);
+    assert.match(cancelledText, /cancelled-native-thread/);
+    assert.match(cancelledText, /cancelled-native-run/);
+    assert.match(cancelledText, /\\"status\\":\\"cancelled\\"/);
     assert.equal(session.run.isRunning(), false);
     await session.thread.delete({ threadId: "result-parent" });
     await composition.deliverSubagentResult({ ...record, pendingDelivery: "late-child-result" }, true);

@@ -64,7 +64,9 @@ const commandInput = z.object({
 });
 const manageTaskInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }),
-  z.object({ action: z.enum(["get", "kill"]), id: z.string().uuid() }),
+  z.object({ action: z.enum(["get", "kill"]), id: z.string().uuid(),
+    view: z.enum(["status", "result", "transcript", "changes"]).optional(),
+    cursor: z.string().optional(), limit: z.number().int().min(1).max(100).optional() }),
 ]);
 export type ManageTaskInput = z.infer<typeof manageTaskInput>;
 
@@ -310,7 +312,7 @@ export function createCommandTools(
   });
   const manage_task = createTool({
     id: "manage_task",
-    description: "List background commands in this conversation, get their bounded logs/status, or kill an attached process tree. Use the same process_id returned by execute_command as id, never an OS PID. Historical tasks are read-only; logs are limited to 200 lines / 16 KiB.",
+    description: "List background commands and delegated subagent jobs in this conversation, inspect bounded status/result/transcript/changes, or kill attached work. Use the returned Cube job/process id, never an OS PID. Subagent result signals include the job id; use view:result or transcript for more evidence. Historical tasks are read-only; command logs are limited to 200 lines / 16 KiB.",
     inputSchema: manageTaskInput,
     execute: async (input, context) => {
       const threadId = context.agent?.threadId;

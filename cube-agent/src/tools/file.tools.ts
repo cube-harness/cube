@@ -142,7 +142,8 @@ const writeInput = z.object({
 });
 const patchInput = z.object({ patch: z.string().min(1).max(OPERATION_LIMIT) });
 
-export function createFileTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY) {
+export function createFileTools(root: string, workspaceOnly: boolean | (() => boolean) = DEFAULT_WORKSPACE_ONLY,
+  approvalPolicy?: (toolName: string) => boolean) {
   const isWorkspaceOnly = () => typeof workspaceOnly === "function" ? workspaceOnly() : workspaceOnly;
   const pending = new Map<
     string,
@@ -480,11 +481,15 @@ export function createFileTools(root: string, workspaceOnly: boolean | (() => bo
       outputSchema: fileMutationResultSchema,
       onInputAvailable: async ({ toolCallId, input }) => {
         await stage(toolCallId, input);
+        if (approvalPolicy && !approvalPolicy(id)) {
+          await approval({ toolCallId, input, toolName: id, target: "display", phase: "approval" });
+        }
       },
       requireApproval: async (input) => {
         // Mastra's predicate has no call ID; valid calls still go through Session permissions.
         const key = inputKey(input);
         const entries = [...pending.values()].filter((entry) => entry.inputKey === key);
+        if (approvalPolicy && !approvalPolicy(id)) return false;
         return (await Promise.all(entries.map((entry) => entry.result))).every(
           (result) => "files" in result,
         );

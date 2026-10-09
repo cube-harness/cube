@@ -56,10 +56,14 @@ export async function loadSubagentDefinitions(
       if (!entry.name.endsWith(".md")) continue;
       const name = entry.name.slice(0, -3);
       const file = path.join(directory, entry.name);
+      if (builtins.some(agent => agent.name === name)) {
+        errors.set(name, { name, source: file, message: `Agent name "${name}" is reserved by Cube; configure shared model/effort in config.yaml instead.` });
+        continue;
+      }
       agents.delete(name);
       errors.delete(name);
       try {
-        if (!/^[a-z][a-z0-9_-]*$/.test(name)) throw new Error("Use a lowercase agent filename, not a path");
+        if (!/^[a-z][a-z0-9_-]{0,56}$/.test(name)) throw new Error("Use a lowercase agent filename of at most 57 characters, not a path");
         if (!entry.isFile()) throw new Error("Agent definitions must be regular Markdown files");
         const text = await readFile(file, "utf8");
         const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/.exec(text);
