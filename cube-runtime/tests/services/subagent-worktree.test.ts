@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { HomeManager } from "@cube/workspace";
 import { captureSubagentBaseline, createSubagentWorktree, readSubagentChanges,
-  removeSubagentWorktree } from "../../src/services/subagent-worktree.js";
+  removeSubagentWorktree } from "../../src/services/worktree.service.js";
 
 const exec = promisify(execFile);
 test("isolated dirty snapshots preserve main index and compare child changes to captured content", async () => {

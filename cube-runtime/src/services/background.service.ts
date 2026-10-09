@@ -86,6 +86,13 @@ export class BackgroundService {
     return record.detached && record.workspaceRoot === this.options.workspaceRoot;
   }
 
+  runningCount(threadId: string | null = this.options.currentThread()): number {
+    if (!threadId) return 0;
+    return this.liveProcesses().filter(record =>
+      this.owns(record) && record.threadId === threadId && active(record.result.status),
+    ).length;
+  }
+
   private process(record: ProcessRecord): BackgroundJobDetail {
     const { result } = record;
     return {

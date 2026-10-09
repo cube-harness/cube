@@ -59,6 +59,8 @@ const createScreen = () => {
     clearConversation: () => calls.push(["clearConversation"]),
     setInfo: (info: unknown) => calls.push(["setInfo", info]),
     setStatusLine: (fields: string[]) => calls.push(["setStatusLine", fields]),
+    setActivityCounts: (background: number, subagents: number) => calls.push(["setActivityCounts", background, subagents]),
+    setSkillProvider: () => undefined,
     setSubmitHandler: (handler: unknown) => calls.push(["setSubmitHandler", handler]),
     pickModel: async () =>
       ({ modelId: "openrouter/test", reasoningEffort: "high" }) as ModelSelection,

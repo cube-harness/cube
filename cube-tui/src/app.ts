@@ -34,6 +34,7 @@ export type PreparedCube = {
 export class CubeApp {
   private unsubscribeRuntime: () => void = () => undefined;
   private unsubscribeInput: () => void = () => undefined;
+  private unsubscribeActivities: () => void = () => undefined;
   private readonly interactions = new Map<string, SubagentTarget | undefined>();
   private readonly cancelledInteractions = new Set<string>();
   private readonly questions = new Set<string>();
@@ -67,6 +68,10 @@ export class CubeApp {
       this.screen.mount({ onSubmit: (content) => this.submitPrompt(content) });
     }
     this.unsubscribeRuntime = this.runtime.subscribe((event) => this.handleRuntimeEvent(event));
+    const stopBackground = this.runtime.background?.subscribe(() => this.syncActivityCounts());
+    const stopSubagents = this.runtime.subagents?.subscribe(() => this.syncActivityCounts());
+    this.unsubscribeActivities = () => { stopBackground?.(); stopSubagents?.(); };
+    this.syncActivityCounts();
     this.unsubscribeInput = this.screen.addInputListener((data) => {
       if (matchesBinding(data, "cube.transcript.toggle")) {
         this.screen.messageList.toggleTranscript();
@@ -110,6 +115,8 @@ export class CubeApp {
     this.unsubscribeRuntime = () => undefined;
     this.unsubscribeInput();
     this.unsubscribeInput = () => undefined;
+    this.unsubscribeActivities();
+    this.unsubscribeActivities = () => undefined;
     this.runtime.interrupt();
     this.screen.stopTerminal();
   }
@@ -300,6 +307,7 @@ export class CubeApp {
           if (!target) this.cancelInteraction(key);
         return;
       case "thread_created":
+        this.syncActivityCounts();
         this.screen.setInfo({
           threadId: event.thread.id,
           threadTitle: event.thread.title,
@@ -314,6 +322,7 @@ export class CubeApp {
         this.updateTerminalTitle();
         return;
       case "thread_changed":
+        this.syncActivityCounts();
         this.screen.setInfo({
           threadId: event.threadId,
         });
@@ -323,6 +332,7 @@ export class CubeApp {
         this.updateTerminalTitle();
         return;
       case "thread_deleted":
+        this.syncActivityCounts();
         if (!this.runtime.thread.current()) {
           this.screen.setInfo({ threadId: "new thread", threadTitle: undefined });
           this.updateTerminalTitle();
@@ -353,6 +363,13 @@ export class CubeApp {
     this.cancelledInteractions.add(key);
     this.screen.cancelToolSuspension(key);
     this.screen.cancelApproval(key);
+  }
+
+  private syncActivityCounts(): void {
+    this.screen.setActivityCounts(
+      this.runtime.background?.runningCount() ?? 0,
+      this.runtime.subagents?.runningCount() ?? 0,
+    );
   }
 
   private queueInteraction(

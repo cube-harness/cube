@@ -89,6 +89,9 @@ test("global FIFO slots and child follow-ups do not bypass concurrency or owners
     const spawned = await f.service.spawn(f.owner, { tasks: [task("one"), task("two"), task("three")] });
     const [a, b, c] = spawned.agents;
     await until(() => f.pending.size === 2);
+    assert.equal(f.service.runningCount(), 2, "queued third child is not running");
+    assert.equal(f.service.runningCount(randomUUID()), 0, "other parents have a separate count");
+    assert.equal(f.service.runningCount(null), 0);
     assert.deepEqual(f.attempts.map(item => item.content), ["one", "two"]);
     assert.equal((await f.service.send(f.owner, { id: a!.id, message: "follow-up" })).queued, true);
     await assert.rejects(f.service.get({ ...f.owner, parentThreadId: randomUUID() }, { id: a!.id, view: "status" }), /Unknown/);
@@ -101,6 +104,7 @@ test("global FIFO slots and child follow-ups do not bypass concurrency or owners
     await f.service.interrupt(f.owner, a!.id);
     f.pending.get(c!.id)!.finish();
     await until(async () => (await f.service.list(f.owner)).every(item => ["completed", "cancelled"].includes(item.status)));
+    assert.equal(f.service.runningCount(), 0);
     assert.equal((await f.storage.getThreadById({ threadId: f.owner.parentThreadId }))!.metadata?.existing, true);
   } finally { await f.close(); }
 });

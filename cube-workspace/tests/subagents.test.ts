@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { HomeManager } from "../src/home-manager.js";
 import { ConfigSchema } from "../src/schemas/config.schema.js";
-import { loadSubagentDefinitions, type SubagentDefinition } from "../src/subagents.js";
+import { loadSubagentDefinitions, type SubagentDefinition } from "../src/subagents-manager.js";
 
 test("subagent defaults and partial overrides reject unsafe scheduling settings", () => {
   assert.deepEqual(ConfigSchema.parse({}).subagents, { concurrency: 2, model: "inherit", timeout_ms: 0 });

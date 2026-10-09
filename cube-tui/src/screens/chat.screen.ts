@@ -212,6 +212,11 @@ export class ChatScreen {
     this.options.tui.requestRender();
   }
 
+  setActivityCounts(background: number, subagents: number): void {
+    this.footer.setActivityCounts(background, subagents);
+    this.requestRender();
+  }
+
   private canReturnToBottom(): boolean {
     return this.promptEditor.focused && !this.promptEditor.isShowingAutocomplete()
       && this.transcript !== undefined && !this.transcript.isFollowingEnd;

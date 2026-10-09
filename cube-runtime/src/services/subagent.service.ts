@@ -65,6 +65,12 @@ export class SubagentService {
 
   readCatalog = (): readonly SubagentDefinition[] => this.catalog;
   isBusy = () => this.active.size > 0 || this.jobs.length > 0;
+  runningCount(parentThreadId: string | null = this.options.currentThread()): number {
+    if (!parentThreadId) return 0;
+    return [...this.records.values()].filter(record =>
+      record.parentThreadId === parentThreadId && this.active.has(record.id) && busy(record.status),
+    ).length;
+  }
   async reloadCatalog() {
     const loaded = await loadSubagentDefinitions(this.options.home, this.options.projectRoot, BUILTIN_SUBAGENTS);
     this.catalog = loaded.agents;
