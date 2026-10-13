@@ -220,14 +220,15 @@ export class CubeMcp {
     try {
       await this.createClient(name, server);
       if (!server.active || this.closing) throw new Error("MCP authentication was cancelled.");
-      const result = await server.client!.listToolsWithErrors({ perServerTimeoutMs: server.config.timeout });
+      const result = await server.client!.listToolsetsWithErrors({ perServerTimeoutMs: server.config.timeout });
       if (!server.active || this.closing || server.generation !== generation) return;
       const error = result.errors[name];
       if (error) throw new Error(error);
-      if (Object.keys(result.tools).some((tool) => !/^[A-Za-z0-9_-]{1,64}$/.test(tool)))
+      const tools = result.toolsets[name] ?? {};
+      if (Object.keys(tools).some((tool) => !/^[A-Za-z0-9_-]{1,64}$/.test(tool)))
         throw new Error("Server exposes a tool name incompatible with model tool identifiers (maximum 64 characters).");
-      server.tools = result.tools;
-      server.state.tools = Object.entries(result.tools).map(([tool, value]) => ({
+      server.tools = tools;
+      server.state.tools = Object.entries(tools).map(([tool, value]) => ({
         name: tool, description: this.safe(value.description ?? "", server.config),
       }));
       server.state.status = "connected";

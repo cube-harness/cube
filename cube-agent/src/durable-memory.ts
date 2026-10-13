@@ -143,12 +143,13 @@ export function createDurableMemory(options: {
   store: MemoryStore;
   storage: () => Promise<MemoryStorage>;
   projectRoot: string;
-  config: CubeConfig["memory"]["durable"];
+  config: Pick<CubeConfig["memory"]["durable"], "enabled" | "model" | "min_idle_hours">;
   runtimeId: string;
   logger?: IMastraLogger;
   resolveWriter: () => Promise<{ model: MastraModelConfig; limits: ContextLimits }>;
   secrets: () => Promise<string[]>;
   notice: (notice: { stage: string; threadId?: string; message: string }) => void;
+  onPublished?: () => void;
 }) {
   let pending: Promise<void> | undefined;
   let requested = false;
@@ -389,6 +390,11 @@ export function createDurableMemory(options: {
             signal,
           );
           try {
+            options.onPublished?.();
+          } catch (error) {
+            report("retrieval", error, threadId);
+          }
+          try {
             const thread = await storage.getThreadById({ threadId });
             if (thread)
               await storage.patchThread({
@@ -536,6 +542,7 @@ export function createDurableMemory(options: {
       },
       signal,
     );
+    try { options.onPublished?.(); } catch (error) { report("retrieval", error); }
   }
 
   return {

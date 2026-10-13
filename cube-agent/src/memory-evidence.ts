@@ -2,12 +2,14 @@ import type { MastraDBMessage } from "@mastra/core/agent";
 import type { MemoryStorage } from "@mastra/core/storage";
 import { memoryHash, normalizeProjectId, type EvidenceRef, type MemoryEntry } from "@cube/workspace";
 
-export function redactMemoryText(text: string, secrets: readonly string[] = []): string {
-  for (const secret of secrets) if (secret.length >= 8) text = text.split(secret).join("[Redacted]");
+export function redactMemoryText(text: string, secrets: readonly string[] = [], options: { preserveOffsets?: boolean } = {}): string {
+  const mask = (value: string, replacement = "[Redacted]") => options.preserveOffsets
+    ? value.replace(/[^\r\n]/g, " ") : replacement;
+  for (const secret of secrets) if (secret.length >= 8) text = text.split(secret).join(mask(secret));
   return text
-    .replace(/((?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password)\s*[=:]\s*["']?)(?:bearer\s+)?[^\s,"'}]+/gi, "$1[Redacted]")
-    .replace(/\b(?:sk-[\w-]{16,}|AIza[\w-]{20,})\b/g, "[Redacted]")
-    .replace(/[A-Za-z0-9+/]{256,}={0,2}/g, "[Binary/base64 omitted]");
+    .replace(/((?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password)\s*[=:]\s*["']?)(?:bearer\s+)?[^\s,"'}]+/gi, (value, label: string) => options.preserveOffsets ? mask(value) : `${label}[Redacted]`)
+    .replace(/\b(?:sk-[\w-]{16,}|AIza[\w-]{20,})\b/g, value => mask(value))
+    .replace(/[A-Za-z0-9+/]{256,}={0,2}/g, value => mask(value, "[Binary/base64 omitted]"));
 }
 
 function safeValue(value: unknown, omitted: Set<string>, secrets: readonly string[], depth = 0): unknown {

@@ -1,5 +1,3 @@
-import { ModelRouterEmbeddingModel } from "@mastra/core/llm";
-import { LibSQLVector } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import type { CubeConfig, HomeManager } from "@cube/workspace";
 
@@ -26,30 +24,8 @@ const resolveActiveAgentModel =
 const toModel = (model: string, activeModel: string) =>
   model === "inherit" ? resolveActiveAgentModel(activeModel) : model;
 
-const toSemanticRecall = (config: CubeConfig["memory"]["semantic_recall"]) => {
-  if (!config.enabled) return false;
-
-  return {
-    topK: config.top_k,
-    messageRange: config.message_range,
-    scope: config.scope,
-    ...(config.threshold === null ? {} : { threshold: config.threshold }),
-  };
-};
-
 export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
   const memoryConfig = config.memory;
-
-  const vector = memoryConfig.vector.enabled
-    ? new LibSQLVector({
-        id: "cube-vector",
-        url: `file:${home.getMemoryDbPath()}`,
-      })
-    : false;
-
-  const embedder = memoryConfig.embedder.enabled
-    ? new ModelRouterEmbeddingModel(memoryConfig.embedder.model!)
-    : undefined;
 
   const generateTitle = !memoryConfig.generate_title.enabled
     ? false
@@ -59,8 +35,7 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
       };
 
   return new Memory({
-    vector,
-    embedder,
+    vector: false,
     options: {
       // Cube invariants: keep complete coding-agent history and valid tool pairs.
       readOnly: false,
@@ -69,9 +44,7 @@ export const createMemory = (config: CubeConfig, home: HomeManager): Memory => {
       generateTitle: generateTitle as MastraMemoryOptions["generateTitle"],
       workingMemory: { enabled: false },
       observationalMemory: false,
-      semanticRecall: toSemanticRecall(
-        memoryConfig.semantic_recall,
-      ) as MastraMemoryOptions["semanticRecall"],
+      semanticRecall: false,
     },
   });
 };

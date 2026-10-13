@@ -21,7 +21,7 @@ test("MCP mutation guard prevents concurrent actions and clears after pre-URL lo
   let busy = true;
   const service = new McpService({ client, store, isBusy: () => busy, beforePublish: async () => undefined });
   t.after(async () => { await service.dispose(); await rm(root, { recursive: true, force: true }); });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: {}, errors: { docs: "Needs auth" }, errorDetails: {} }));
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => ({ toolsets: {}, errors: { docs: "Needs auth" }, errorDetails: {} }));
   t.mock.method(MCPClient.prototype, "getServerAuthState", () => "needs-auth");
   t.mock.method(MCPClient.prototype, "authenticate", async () => { throw new Error("No authorization URL"); });
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);

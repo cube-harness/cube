@@ -6,6 +6,7 @@ export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
 export const INHERIT_MODEL = "inherit";
 export const DEFAULT_WORKSPACE_ONLY = true;
+export const DEFAULT_COMMAND_TRUNCATION = { max_bytes: 256 * 1024, max_lines: 200 };
 export const DEFAULT_BACKGROUND_TASKS = {
   enabled: true,
   concurrency: 2,
@@ -16,10 +17,30 @@ export const DEFAULT_SUBAGENTS = {
   model: INHERIT_MODEL,
   timeout_ms: 0,
 } as const;
+export const MEMORY_RETRIEVAL_DEFAULTS = {
+  enabled: false,
+  model: null,
+  revision: null,
+  dimensions: null,
+  document_prefix: "",
+  query_prefix: "",
+  provider_options: { document: {}, query: {} },
+  chunk: { max_chars: 1024, overlap_chars: 128 },
+};
+export const MEMORY_RETRIEVAL_LIMITS = {
+  options_bytes: 16 * 1024,
+  prefix_chars: 512,
+  revision_chars: 256,
+  max_dimensions: 65536,
+  min_chunk_chars: 128,
+  max_chunk_chars: 16384,
+  manifest_bytes: 16 * 1024 * 1024,
+} as const;
 export const DURABLE_MEMORY_DEFAULTS = {
   enabled: true,
   model: INHERIT_MODEL,
   min_idle_hours: 6,
+  retrieval: MEMORY_RETRIEVAL_DEFAULTS,
 } as const;
 
 export const HOME_PATHS = {
@@ -48,7 +69,7 @@ export const MCP_DEFAULTS = {
 } as const;
 
 export const HOME_LIMITS = {
-  SOUL_MAX_CHARACTERS: 20000,
+  SOUL_MAX_CHARACTERS: 2000,
   MODEL_CATALOG_TTL_MS: 24 * 60 * 60 * 1000,
 } as const;
 

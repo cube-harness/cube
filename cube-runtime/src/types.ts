@@ -18,7 +18,7 @@ export type RuntimeNotice = {
   message: string;
 };
 
-export type BackgroundJobRef = { id: string };
+export type BackgroundJobRef = { id: string; cursor?: number; limit?: number };
 export type BackgroundJobSummary = BackgroundJobRef & {
   title: string; status: string; threadId?: string;
   createdAt: number; completedAt?: number; canStop: boolean;
@@ -28,6 +28,9 @@ export type BackgroundJobDetail = BackgroundJobSummary & {
   runId?: string; toolCallId?: string; exitCode?: number | null;
   output: string; truncated: boolean;
   ownerDeleted: boolean;
+  log_available?: boolean; output_complete?: boolean; next_cursor?: number;
+  output_warning?: string;
+  read_more?: { tool: "manage_task"; action: "get"; id: string; cursor: number };
 };
 
 export const toRuntimeNotice = (error: unknown): RuntimeNotice => {

@@ -98,7 +98,7 @@ export function createStreamSignals(agent: Agent, storage: () => Promise<MemoryS
         transient: false,
         metadata: { cube: { kind: "subagent-result", childId: record.id, runId: result.runId } },
         contents:
-          "Delegated child result, not a new human request or proof of correctness. Do not rerun it automatically.\n" +
+          "Delegated child result, not a new human request or proof of correctness. Do not rerun it automatically. Use manage_subagent with the job id and view:transcript to read partial saved work, including after failure; manage_task is only for command processes. Follow evidence below.\n" +
           JSON.stringify({
             id: record.id,
             agent: record.agent,
@@ -111,8 +111,8 @@ export function createStreamSignals(agent: Agent, storage: () => Promise<MemoryS
             worktree: record.worktree?.path,
             requiresIntegration: !!record.worktree,
             truncated: report !== result.text,
-            readMore: { tool: "manage_task", action: "get", id: record.id, view: "result" },
-            evidence: { tool: "manage_task", action: "get", id: record.id, view: "transcript" },
+            readMore: { tool: "manage_subagent", action: "get", id: record.id, view: "result" },
+            evidence: { tool: "manage_subagent", action: "get", id: record.id, view: "transcript" },
           }),
       },
       {

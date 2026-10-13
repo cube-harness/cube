@@ -91,6 +91,32 @@ const credential = {
   account_id: "account-1",
 };
 
+test("Google OAuth serializes Gemini 3 levels without budgets or custom sampling", async () => {
+  const requests: any[] = [];
+  const gateway = new OAuthGateway({
+    openai: { getValidCredential: async () => credential },
+    google: { getValidCredential: async () => ({ ...credential, project_id: "test-project" }) },
+  }, undefined, async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body)).request);
+    return Response.json({ response: {
+      candidates: [{ content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" }],
+    } });
+  });
+  const model = await gateway.resolveLanguageModel({
+    providerId: "google", modelId: "gemini-3.8-flash", apiKey: "test-token",
+  });
+  for (const effort of ["none", "high"]) {
+    const config = buildModelConfig("cube-oauth/google/gemini-3.8-flash", effort);
+    await model.doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      providerOptions: config.providerOptions,
+    });
+  }
+  assert.deepEqual(requests.map(request => request.generationConfig), [
+    {}, { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } },
+  ]);
+});
+
 test("Anthropic native Messages adapter preserves tools and refreshes bearer without an API key", async context => {
   let token = "initial";
   const requests: Array<{ url: string; headers: Headers; body: any }> = [];

@@ -28,6 +28,7 @@ export type { CubeTools } from "./tools/cube-tools.js";
 export { skillPathIdentity, type CubeSkills, type SkillChoice } from "./skills.js";
 export type { FileMutationResult, FileChange } from "./tools/file.tools.js";
 export type { CommandResult, ProcessRecord, ProcessRegistry, ManageTaskInput } from "./tools/command.tools.js";
+export type { ManageSubagentInput } from "./tools/subagent.tools.js";
 export { INITIALIZE_PROMPT } from "./prompts/initialize.prompt.js";
 export { CubeApiKeyGateway } from "./gateways/api-key.gateway.js";
 export {

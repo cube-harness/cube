@@ -3,7 +3,7 @@ import type { SubagentDefinition } from "@cube/workspace";
 export const EXPLORE_AGENT: SubagentDefinition = {
   name: "explore",
   source: "builtin",
-  description: "Investigate focused questions and report source-backed findings",
+  description: "Synthesize broad investigations across sources and report evidence; obtain user consent to delegation before invoking",
   disallowedTools: ["write_file", "edit_file", "apply_patch"],
   instructions: `Investigate the assigned task without editing files. Return findings, exact file/symbol references,
 supporting evidence and unresolved questions. Distinguish source inspection from executed verification.

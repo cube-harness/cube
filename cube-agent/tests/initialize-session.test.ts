@@ -3,6 +3,8 @@ import test from "node:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { isUserAuthoredMessage } from "@mastra/core/agent";
 import { MockLanguageModelV3 } from "ai/test";
 import { HomeManager, WorkspaceManager, createBootstrap, ConfigStore, RunnableConfigSchema } from "@cube/workspace";
@@ -13,14 +15,30 @@ import { PromptService } from "../../cube-runtime/src/services/prompt.service.js
 import { ThreadService } from "../../cube-runtime/src/services/thread.service.js";
 import type { SlashCommandContext } from "../../cube-runtime/src/slash-commands.js";
 
-test("/init reaches the model, writes AGENTS through approval and persists hidden context for later turns", { timeout: 30_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "cube-init-session-"));
+test("/init reaches the model, writes AGENTS through approval and persists hidden context for later turns", { timeout: 30_000 }, async t => {
+  const root = process.env.CUBE_INIT_TEST_ROOT ?? await mkdtemp(join(tmpdir(), "cube-init-session-"));
+  // Release native SQLite transaction handles before removing the fixture on Windows.
+  if (process.platform === "win32" && !process.env.CUBE_INIT_TEST_ROOT) {
+    try {
+      const env = { ...process.env, CUBE_INIT_TEST_ROOT: root };
+      delete env.NODE_TEST_CONTEXT;
+      const result = await promisify(execFile)(process.execPath,
+        ["--import", "tsx", "--test", import.meta.filename],
+        { env, windowsHide: true, timeout: 25_000 });
+      t.diagnostic(result.stdout);
+      assert.match(result.stdout, /fail 0/);
+      assert.equal(result.stderr, "");
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+    return;
+  }
   let composition: CubeMastraComposition | undefined;
   try {
     const project = join(root, "project");
     await mkdir(project);
     await writeFile(join(project, "README.md"), "Example Python project. Run pytest.\n");
-    const home = new HomeManager({ cubeHome: join(root, "home") });
+    const home = new HomeManager({ cubeHome: join(root, "home"), userHome: root });
     await createBootstrap(home).run();
     const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
     const workspace = new WorkspaceManager(home, project);
@@ -84,8 +102,10 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     assert.deepEqual(history, ["/init"]);
     assert.equal(requests.length, 3);
     for (const request of requests) {
-      assert.match(request, /analyze this codebase/);
-      assert.doesNotMatch(request, /\/init|cube-cli|cube-workspace/);
+      const conversation = JSON.stringify((JSON.parse(request) as { role: string }[])
+        .filter(message => message.role !== "system"));
+      assert.match(conversation, /analyze this codebase/);
+      assert.doesNotMatch(conversation, /\/init|cube-cli|cube-workspace/);
     }
     assert.match(requests[1]!, /Example Python project/);
     const messages = await session.thread.listMessages({ threadId: "init-thread" });
@@ -112,6 +132,7 @@ test("/init reaches the model, writes AGENTS through approval and persists hidde
     await session.thread.clearAndReleaseLock();
   } finally {
     await composition?.shutdown();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    if (!process.env.CUBE_INIT_TEST_ROOT)
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

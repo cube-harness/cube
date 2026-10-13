@@ -8,7 +8,8 @@ import { HomeManager, createMemoryStore } from "@cube/workspace";
 export async function memoryFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "cube-durable-test-"));
   const home = new HomeManager({ cubeHome: root });
-  const database = new LibSQLStore({ id: "memory-test", url: `file:${path.join(root, "test.sqlite")}` });
+  // Exercise SQLite APIs without native Windows file locks during fixture teardown.
+  const database = new LibSQLStore({ id: "memory-test", url: ":memory:" });
   await database.init();
   const storage = (await database.getStore("memory"))!;
   const store = createMemoryStore(home, root);

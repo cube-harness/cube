@@ -106,7 +106,7 @@ export class BackgroundService {
       const history = await this.options.history();
       if (!history) throw new Error("Background history storage is unavailable");
       const status = snapshot.status === "queued" ? "pending" : snapshot.status === "waiting_approval" || snapshot.status === "waiting_input" ? "suspended" : snapshot.status === "unattached" ? "failed" : snapshot.status;
-      if (create) await history.createTask({ id: snapshot.id, toolName: `agent-${snapshot.agent}`, toolCallId: snapshot.toolCallId!,
+      if (create) await history.createTask({ id: snapshot.id, toolName: snapshot.agent, toolCallId: snapshot.toolCallId!,
         runId: snapshot.parentRunId!, agentId: "cube-agent", resourceId: snapshot.projectRoot, threadId: snapshot.parentThreadId,
         status, args: { kind: "delegation" }, result: snapshot, createdAt: new Date(snapshot.createdAt),
         retryCount: 0, maxRetries: 0, timeoutMs: snapshot.timeoutMs ?? 0 });
@@ -281,9 +281,9 @@ export class BackgroundService {
     return [...this.registries.keys()].flatMap((registry) => registry.list());
   }
   private registryFor(id: string): ProcessRegistry {
-    const registry = [...this.registries.keys()].find((source) =>
-      source.list().some((record) => record.id === id),
-    );
+    const registry = [...this.registries.keys()].find(source => {
+      try { return source.get(id).id === id; } catch { return false; }
+    });
     if (!registry) throw new Error("Unknown background process.");
     return registry;
   }
@@ -318,6 +318,10 @@ export class BackgroundService {
       exitCode: result.exit_code,
       output: result.output,
       truncated: result.truncated,
+      log_available: result.log_available,
+      output_complete: result.output_complete,
+      output_warning: result.output_warning,
+      read_more: result.read_more,
       ownerDeleted: Boolean(record.threadId && this.deleted.has(record.threadId)),
     };
   }
@@ -347,23 +351,29 @@ export class BackgroundService {
         ? "Process is not attached to this Cube runtime; history is read-only."
         : (task.error?.message ?? result?.output ?? ""),
       truncated: result?.truncated ?? false,
+      log_available: false,
+      output_complete: false,
+      output_warning: "Full command output belongs to another or expired runtime; only the saved preview is available.",
       ownerDeleted: Boolean(task.threadId && this.deleted.has(task.threadId)),
     };
   }
 
-  private async safe(detail: BackgroundJobDetail): Promise<BackgroundJobDetail> {
+  private async safe(detail: BackgroundJobDetail, page = false): Promise<BackgroundJobDetail> {
     const clean = (text: string) =>
       this.options.redact(stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ""));
     const output = detail.output ? await clean(detail.output) : "";
-    const tail = output.split("\n").slice(-200).join("\n");
+    const tail = page ? output : output.split("\n").slice(-200).join("\n");
+    const bytes = Buffer.from(tail);
+    let start = Math.max(0, bytes.length - 16384);
+    while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
     return {
       ...detail,
       title: (await clean(detail.title)).replace(/\s+/g, " ").slice(0, 500),
       command: detail.command ? (await clean(detail.command)).slice(0, 1000) : undefined,
       reason: detail.reason ? (await clean(detail.reason)).slice(0, 500) : undefined,
       cwd: detail.cwd ? (await clean(detail.cwd)).slice(0, 1000) : undefined,
-      output: Buffer.from(tail).subarray(-16384).toString("utf8"),
-      truncated: detail.truncated || output !== tail || Buffer.byteLength(tail) > 16384,
+      output: page ? output : bytes.subarray(start).toString("utf8"),
+      truncated: detail.truncated || (!page && (output !== tail || Buffer.byteLength(tail) > 16384)),
     };
   }
 
@@ -455,14 +465,17 @@ export class BackgroundService {
   }
 
   async get(
-    { id }: BackgroundJobRef,
+    { id, cursor, limit }: BackgroundJobRef,
     threadId: string | null = this.options.currentThread(),
   ): Promise<BackgroundJobDetail> {
-    const live = this.liveProcesses().find((record) => record.id === id);
+    let registry: ProcessRegistry | undefined;
+    try { registry = this.registryFor(id); } catch { /* SQLite-only history has no output handle. */ }
+    const live = registry?.get(id);
     if (live) {
-      if (!this.owns(live) || !threadId || live.threadId !== threadId)
+      if (live.workspaceRoot !== this.options.workspaceRoot || !threadId || live.threadId !== threadId)
         throw new Error("Unknown background process.");
-      return this.safe(this.process(live));
+      const output = await registry?.readOutput?.(id, cursor, limit);
+      return this.safe({ ...this.process(live), ...output }, cursor !== undefined);
     }
     await this.pending;
     const history = await this.options.history();
@@ -475,7 +488,7 @@ export class BackgroundService {
       task.agentId !== "cube-agent" ||
       task.resourceId !== this.options.workspaceRoot
     )
-      throw new Error("Unknown background process.");
+      throw new Error("Unknown or expired command output in this thread; preserved logs are runtime-only. For a delegated subagent UUID, use manage_subagent with action:get and view:transcript or view:result.");
     return this.safe(this.task(task));
   }
 

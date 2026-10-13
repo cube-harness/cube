@@ -21,19 +21,10 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
   soul: { max_characters: 20_000 },
   memory: {
     storage: { provider: "sqlite", mode: "local" },
-    vector: { enabled: false, provider: "sqlite", mode: "local" },
-    embedder: { enabled: false, model: null },
     generate_title: {
       enabled: false,
       model: "inherit",
       instructions: "Generate a concise title under 80 characters.",
-    },
-    semantic_recall: {
-      enabled: false,
-      top_k: 4,
-      message_range: { before: 1, after: 1 },
-      scope: "resource",
-      threshold: null,
     },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
@@ -107,29 +98,21 @@ test("resolves inherit against the model currently active on the Cube agent", as
   }
 });
 
-test("uses Cube's local memory database for optional vector storage", async () => {
+test("durable retrieval does not enable embedding or semantic recall over raw history", async () => {
   const { home, root } = await createTestHome();
-  const previousOpenAiKey = process.env.OPENAI_API_KEY;
   let memory: any;
   try {
-    process.env.OPENAI_API_KEY = "cube-memory-test-key";
     const config = createConfig();
-    config.memory.vector.enabled = true;
-    config.memory.embedder.enabled = true;
-    config.memory.embedder.model = "openai/text-embedding-3-small";
-    config.memory.semantic_recall.enabled = true;
+    config.memory.durable.retrieval.enabled = true;
+    config.memory.durable.retrieval.model = "openai/text-embedding-3-small";
 
     memory = createMemory(config, home) as any;
 
-    assert.equal(memory.vector?.id, "cube-vector");
-    assert.equal(memory.vector?.constructor?.name, "LibSQLVector");
-    assert.equal(memory.embedder?.provider, "openai");
-    assert.equal(memory.embedder?.modelId, "text-embedding-3-small");
+    assert.equal(memory.vector, undefined);
+    assert.equal(memory.embedder, undefined);
+    assert.equal(memory.getMergedThreadConfig().semanticRecall, false);
     assert.equal(home.getMemoryDbPath(), path.join(root, "memories", "memory.sqlite"));
   } finally {
-    await memory?.vector?.close();
-    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = previousOpenAiKey;
     await removeTestHome(root);
   }
 });

@@ -13,7 +13,6 @@ import type { createMemoryRecall } from "../tools/memory-recall.tool.js";
 import { createMemoryProcessor } from "../processors/memory.processor.js";
 import { createMastraWorkspace } from "../workspace.js";
 import { createWorkspaceTools } from "@mastra/core/workspace";
-import { webFetchTool } from "@mastra/core/tools";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
 import { getCanonicalModelId } from "../gateways/types.js";
 import {
@@ -29,6 +28,10 @@ import type { CubeContext, ContextLimits } from "../context.js";
 import { createCubeSkills } from "../skills.js";
 import { createSkillsProcessor } from "../processors/skills.processor.js";
 import type { CubeMcp } from "../mcp/client.js";
+import { CUBE_SYSTEM_PROMPT } from "../prompts/default.prompt.js";
+import { buildExecutionInstructions } from "../prompts/environment.prompt.js";
+import { createEnvironmentProcessor } from "../processors/environment.processor.js";
+import { createSubagentToolsProcessor } from "../processors/subagent-tools.processor.js";
 
 export type CubeAgentOptions = {
   id?: string;
@@ -42,16 +45,14 @@ export const buildModelConfig = (modelId: string, effort?: string): Record<strin
   const canonicalModelId = getCanonicalModelId(modelId);
   const providerOptions: Record<string, any> = {};
 
-  if (
-    canonicalModelId.startsWith("google/gemini-3") &&
-    effort &&
-    effort !== "none" &&
-    effort !== "default"
-  ) {
-    providerOptions.google = {
-      thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
-    };
-  } else if (canonicalModelId.startsWith("google/")) {
+  if (canonicalModelId.startsWith("google/gemini-3")) {
+    // Gemini 3 cannot disable thinking with a numeric budget. Omit unsupported levels.
+    if (effort && ["minimal", "low", "medium", "high"].includes(effort)) {
+      providerOptions.google = {
+        thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
+      };
+    }
+  } else if (canonicalModelId.startsWith("google/gemini-2.5")) {
     if (effort === "max" || effort === "xhigh") {
       providerOptions.google = {
         thinkingConfig: { thinkingBudget: 32768, includeThoughts: true },
@@ -156,21 +157,13 @@ export const createCubeAgent = async (
   const paths = await workspace.getPaths();
   const cubeTools =
     tools ??
-    createCubeTools(paths.root, () => config.permissions.workspace_only, config.background_tasks);
+    createCubeTools(paths.root, () => config.permissions.workspace_only, config.background_tasks, paths.root, undefined,
+      { cacheDir: home.getToolOutputDir(), policy: config.truncation_policy.execute_command });
   let activeModel = config.model;
-  const executionInstructions = () =>
-    [
-      `Workspace: ${paths.root}. ${config.permissions.workspace_only ? "File paths and command cwd are restricted to this root." : "File paths and command cwd outside this root are allowed."} Commands run on the host and are NOT an OS sandbox.`,
-      process.platform === "win32"
-        ? `execute_command uses ${process.env.ComSpec || "cmd.exe"}. Use cmd syntax (dir, %VAR%, date /t, time /t).`
-        : "execute_command uses /bin/sh. Use POSIX shell syntax.",
-      "Commands have no TTY. Avoid interactive prompts, editors and pagers; use non-interactive options only when appropriate for the requested action.",
-      "Supply a brief reason for each command. cwd defaults to the workspace root.",
-      "Use the exposed file mutation tools for edits. File mutations accept UTF-8 text; binary/media editing is unsupported. Read and list paths are relative to the workspace root. Use execute_command for content searches with an available host search command.",
-    ].join("\n");
+  const executionInstructions = () => buildExecutionInstructions(paths.root, config.permissions.workspace_only);
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
-  const skills = options.skills ?? await createCubeSkills(home, workspace, config.skills.disabled);
+  const skills = options.skills ?? await createCubeSkills(home, workspace, config.skills.disabled, { logger });
   const mastraWorkspace = await createMastraWorkspace(
     workspace,
     skills,
@@ -181,11 +174,14 @@ export const createCubeAgent = async (
     name: "Cube Agent",
     agents: ({ requestContext }) => options.agents?.(requestContext) ?? {},
     model: [modelConfig as any],
-    instructions: [
+    instructions: () => [
+      { role: "system", content: CUBE_SYSTEM_PROMPT },
       { role: "system", content: snapshot.soul },
       { role: "system", content: executionInstructions() },
     ],
     inputProcessors: [
+      createEnvironmentProcessor(),
+      createSubagentToolsProcessor(context => options.agents?.(context) ?? {}),
       createSkillsProcessor(skills),
       createAgentsMdProcessor(
         () => context,
@@ -224,12 +220,11 @@ export const createCubeAgent = async (
         : []),
     ],
     workspace: mastraWorkspace,
-    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
+    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).agentPaths,
     basePath: paths.root,
     tools: () => ({
       ...cubeTools.forModel(activeModel),
       ...(contextManager?.recallTool ? { memory_recall: contextManager.recallTool } : {}),
-      fetch: webFetchTool,
       ...mcp?.readTools(),
     }),
     defaultOptions: ({ requestContext }) => {
@@ -301,10 +296,6 @@ export const createCubeAgent = async (
       contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
-      agent.__updateInstructions([
-        { role: "system", content: replacement.soul },
-        { role: "system", content: executionInstructions() },
-      ]);
       snapshot = replacement;
       context = formatted;
       result.instructionInfo = instructionInfo(replacement);

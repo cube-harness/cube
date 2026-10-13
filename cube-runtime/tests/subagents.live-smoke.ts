@@ -89,7 +89,7 @@ try {
     }
     if (event.type === "tool_start") { parentTools.push(event.toolName); toolNames.set(event.toolCallId, event.toolName); }
     if (event.type === "error") errors.push(event.error.message);
-    if (event.type === "tool_end" && toolNames.get(event.toolCallId)?.startsWith("agent-"))
+    if (event.type === "tool_end" && ["worker", "explore"].includes(toolNames.get(event.toolCallId) ?? ""))
       nativeResults.push(JSON.stringify(event.result).slice(0, 1500));
     if (event.type === "subagent_interaction" && event.event.type === "tool_suspended") {
       questionCancelled = true;
@@ -100,7 +100,7 @@ try {
     const existing = new Set((await service.list(owner)).map(item => item.id));
     await wait(async () => !runtime!.getDisplayState().isRunning);
     console.log(`[smoke] delegate ${role}`);
-    const submitted = await runtime!.prompt.submit(`Call agent-${role} exactly once with prompt: ${task}. Delegate it; do not do the task yourself. Do not use other agent tools or repeat the assignment. Report the returned background job ID and end this turn. The result arrives separately; do not poll or wait using tools.`);
+    const submitted = await runtime!.prompt.submit(`Call ${role} exactly once with prompt: ${task}. Delegate it; do not do the task yourself. Do not use other agent tools or repeat the assignment. Report the returned background job ID and end this turn. The result arrives separately; do not poll or wait using tools.`);
     console.log(`[smoke] parent ${role}: ${submitted.kind}`);
     assert.equal(submitted.kind, "submitted", JSON.stringify(submitted));
     let job: Awaited<ReturnType<typeof service.list>>[number] | undefined;

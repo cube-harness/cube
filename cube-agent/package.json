@@ -29,6 +29,7 @@
     "@mastra/mcp": "1.17.2",
     "@mastra/memory": "1.28.1",
     "@mastra/observability": "1.17.4",
+    "@mastra/rag": "2.6.7",
     "ai": "6.0.241",
     "diff": "8.0.4",
     "eventsource-parser": "3.1.0",

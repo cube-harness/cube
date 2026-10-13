@@ -7,6 +7,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createCommandTools } from "../src/tools/command.tools.js";
 import { RequestContext } from "@mastra/core/request-context";
 
+test("Windows commands use PowerShell literals and preserve UTF-8 and native exit codes", { skip: process.platform !== "win32" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-powershell-"));
+  const commands = createCommandTools(root);
+  t.after(async () => { await commands.dispose(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
+  const run = (command: string) => commands.tools.execute_command.execute!({ command, reason: "Verify PowerShell execution" } as never, {} as never) as Promise<any>;
+  const result = await run('[Console]::Write("Cube tiếng Việt — $($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)")');
+  assert.equal(result.output, "Cube tiếng Việt — 5.1");
+  assert.equal(result.exit_code, 0);
+  const nativeFailure = await run('node -e "process.exitCode=7"');
+  assert.equal(nativeFailure.exit_code, 7);
+  assert.equal(nativeFailure.status, "failed");
+  const scriptFailure = await run("Get-Content -LiteralPath './missing-file.txt'");
+  assert.equal(scriptFailure.status, "failed");
+  assert.notEqual(scriptFailure.exit_code, 0);
+});
+
 test("detached no-deadline process exposes owned immutable snapshots and terminal updates", { timeout: 15000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "cube-process-registry-"));
   const commands = createCommandTools(root);
@@ -125,9 +141,9 @@ test("one background queue enforces concurrency, cancellation and configured no-
   const { result: cancelled } = await commands.processes.stop(queued.process_id);
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelled.output, "");
-  const next = await run("echo NEXT", 0.3);
+  const next = await run("echo NEXT", 2);
   assert.equal(next.status, "pending");
-  await delay(400);
+  await delay(2100);
   assert.equal(commands.processes.get(next.process_id).result.status, "pending", "Deadline starts when execution starts, not in the queue");
   await commands.processes.stop(server.process_id);
   for (let i = 0; i < 100 && commands.processes.get(next.process_id).result.status === "running"; i++) await delay(20);
@@ -159,7 +175,10 @@ test("manage_task validates actions and forwards the native calling thread, not 
     await assert.rejects(manage.execute!({ action: "list" } as never, context), /unavailable/);
     const calls: unknown[] = [];
     commands.setTaskHandler(async (input, threadId) => { calls.push({ input, threadId }); return { tasks: [] }; });
-    assert.deepEqual(await manage.execute!({ action: "list", threadId: "foreign" } as never, context), { tasks: [] });
+    const foreign = await manage.execute!({ action: "list", threadId: "foreign" } as never, context) as any;
+    assert.equal(foreign.error, true);
+    assert.match(foreign.message, /threadId/);
+    assert.deepEqual(await manage.execute!({ action: "list" } as never, context), { tasks: [] });
     const id = "00000000-0000-4000-8000-000000000000";
     await manage.execute!({ action: "get", id } as never, context);
     await manage.execute!({ action: "kill", id } as never, context);
@@ -170,6 +189,9 @@ test("manage_task validates actions and forwards the native calling thread, not 
     ]);
     const invalid = await manage.execute!({ action: "kill", id: "1234" } as never, context).catch(error => error) as any;
     assert.ok(invalid instanceof Error || invalid.error || invalid.validationErrors);
+    const childView = await manage.execute!({ action: "get", id, view: "transcript" } as never, context) as any;
+    assert.equal(childView.error, true, "Command management must reject subagent-only arguments");
+    assert.match(childView.message, /view/);
     assert.equal(calls.length, 3);
   } finally { await commands.dispose(); }
 });

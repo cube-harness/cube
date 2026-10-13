@@ -4,6 +4,18 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { HOME_FILES } from "./constants.js";
 
+export async function getBuiltinSkillsPath(): Promise<string> {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const installed = path.join(currentDir, "skills");
+  try {
+    await access(installed);
+    return installed;
+  } catch {
+    const development = path.join(currentDir, "..", "src", "skills");
+    return await access(development).then(() => development, () => installed);
+  }
+}
+
 export class Bootstrap {
   constructor(private readonly home: HomeManager) {}
 

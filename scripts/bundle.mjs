@@ -84,6 +84,17 @@ export async function bundleApp(stageDir, target = `${process.platform}-${proces
     path.join(appDir, "template"),
     { recursive: true }
   );
+  for (const assetDir of [distDir, appDir]) {
+    await cp(path.join(root, "cube-workspace/src/skills"), path.join(assetDir, "skills"), {
+      recursive: true,
+    });
+    // The authoring checker reuses the installed YAML parser; bundle it for offline installs.
+    await esbuild.build({
+      ...commonEsbuildConfig,
+      entryPoints: [path.join(root, "cube-workspace/src/skills/skill-creator/scripts/quick_validate.mjs")],
+      outfile: path.join(assetDir, "skills/skill-creator/scripts/quick_validate.mjs"),
+    });
+  }
 
   // 5. Copy target platform's @libsql native binary into app/node_modules/@libsql/${nativeTarget}
   const nativeTarget = NATIVE_LIB_MAP[target] || target;
