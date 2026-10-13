@@ -190,9 +190,6 @@ test("startup reuses prepared resources and reads the committed model", { timeou
     await prepared.gateway.commitInitial({ draftId: draft.draftId, model: { modelId } });
     await ConfigStore(home).update(config => ({ ...config, telemetry: false,
       memory: { ...config.memory,
-        vector: { ...config.memory.vector, enabled: false },
-        embedder: { ...config.memory.embedder, enabled: false },
-        semantic_recall: { ...config.memory.semantic_recall, enabled: false },
         generate_title: { ...config.memory.generate_title, enabled: false },
       },
     }));
@@ -217,6 +214,13 @@ test("startup reuses prepared resources and reads the committed model", { timeou
       // Use the real Session gate to exercise the runtime's live-switch boundary.
       const session = (runtime as unknown as { dependencies: { session: import("@cube/agent").Session } }).dependencies.session;
       const tools = (runtime as unknown as { dependencies: { tools: import("@cube/agent").CubeTools } }).dependencies.tools;
+      const management = tools.forModel(modelId);
+      const caller = { agent: { threadId: "runtime-owner" } } as never;
+      assert.deepEqual(await management.manage_task.execute!({ action: "list" } as never, caller), { tasks: [] });
+      assert.deepEqual(await management.manage_subagent.execute!({ action: "list" } as never, caller), { subagents: [] });
+      const unknownJob = "00000000-0000-4000-8000-000000000000";
+      await assert.rejects(management.manage_task.execute!({ action: "get", id: unknownJob } as never, caller), /Unknown.*(?:process|output)/);
+      await assert.rejects(management.manage_subagent.execute!({ action: "get", id: unknownJob } as never, caller), /Unknown or unavailable subagent/);
       const externalPath = path.join(home.getRoot(), "external.txt");
       await writeFile(externalPath, "external fixture");
       const filesystem = await session.getWorkspace()!.resolveFilesystem({ requestContext: new RequestContext() });
@@ -231,15 +235,15 @@ test("startup reuses prepared resources and reads the committed model", { timeou
       assert.ok(runtime.suggestions.some((item) => item.name === "/permissions"));
       if (permissions.kind !== "permissions") throw new Error("Expected permission picker");
       const draftPermissions = permissions.permissions;
-      for (const name of ["execute_command", "edit_file", "write_file", "apply_patch", "read_file", "list_files", "ask_user", "fetch"])
+      for (const name of ["execute_command", "edit_file", "write_file", "apply_patch", "read_file", "list_files", "ask_user", "manage_task", "manage_subagent"])
         assert.ok(Object.hasOwn(draftPermissions.tools, name), `missing permission row: ${name}`);
       draftPermissions.workspaceOnly = true;
-      draftPermissions.tools.fetch = "deny";
+      draftPermissions.tools.read_file = "deny";
       draftPermissions.tools.write_file = "ask";
       await runtime.permission.set(draftPermissions);
       assert.equal(runtime.thread.current(), preservedThread, "Apply must not recreate the thread");
       assert.deepEqual(runtime.getInstructionInfo(), loadedInfo, "Apply must not reload project context");
-      assert.equal(session.resolveToolApproval("fetch"), "deny");
+      assert.equal(session.resolveToolApproval("read_file"), "deny");
       assert.equal(session.resolveToolApproval("write_file"), "ask");
       const restrictedFs = await session.getWorkspace()!.resolveFilesystem({ requestContext: new RequestContext() });
       await assert.rejects(restrictedFs!.readFile(externalPath), /Permission denied/);
@@ -258,10 +262,10 @@ test("startup reuses prepared resources and reads the committed model", { timeou
       await approval;
       session.approval.clearToolName();
       draftPermissions.workspaceOnly = false;
-      draftPermissions.tools.fetch = "allow";
+      draftPermissions.tools.read_file = "allow";
       draftPermissions.tools.write_file = "allow";
       await runtime.permission.set(draftPermissions);
-      assert.equal(session.resolveToolApproval("fetch"), "allow");
+      assert.equal(session.resolveToolApproval("read_file"), "allow");
       const reopenedFs = await session.getWorkspace()!.resolveFilesystem({ requestContext: new RequestContext() });
       assert.equal(String(await reopenedFs!.readFile(externalPath)), "updated");
       const grokRetry = await runtime.gateway.createStoredDraft("oauth/xai");

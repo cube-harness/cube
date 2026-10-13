@@ -1,10 +1,10 @@
 import type { InputProcessor } from "@mastra/core/processors";
 import { MEMORY_LIMITS, type MemorySnapshot } from "@cube/workspace";
-import { MEMORY_RECALL_PROMPT } from "../prompts/memory-recall.prompt.js";
+import { MEMORY_SNAPSHOT_PROMPT } from "../prompts/memory-recall.prompt.js";
 
 export function formatMemorySnapshot(snapshot: MemorySnapshot | undefined): string {
   if (!snapshot?.text.trim()) return "";
-  const text = `<durable_memory>\n${MEMORY_RECALL_PROMPT}\n${snapshot.text.replaceAll("<", "&lt;")}\n</durable_memory>`;
+  const text = `<durable_memory>\n${MEMORY_SNAPSHOT_PROMPT}\n${snapshot.text.replaceAll("<", "&lt;")}\n</durable_memory>`;
   if (Array.from(text).length > MEMORY_LIMITS.snapshot) throw new Error("Memory snapshot exceeds its context limit");
   return text;
 }

@@ -128,6 +128,7 @@ export class PetPanel extends Container {
   private visible = false;
   private timer?: NodeJS.Timeout;
   private lastFrame = -1;
+  private geometry = "";
 
   constructor(
     private readonly tui: TUI,
@@ -184,6 +185,10 @@ export class PetPanel extends Container {
       this.tui.terminal.rows >= rows + 5;
     if (!this.visible) {
       if (this.tui.terminal instanceof PetTerminal) this.tui.terminal.clearPet();
+      if (this.geometry) {
+        this.geometry = "";
+        this.tui.requestRender(true);
+      }
       return super.render(width);
     }
 
@@ -198,6 +203,12 @@ export class PetPanel extends Container {
       : super.render(leftWidth).map(line => truncateToWidth(line, leftWidth, ""));
     const top = header ? 0 : this.getTopRow();
     while (lines.length < top + rows) lines.push(chalk.bgHex(appTheme.surface.background)(" ".repeat(leftWidth)));
+    const geometry = `${width}:${lines.length}:${top}:${cols}:${rows}`;
+    if (geometry !== this.geometry) {
+      this.geometry = geometry;
+      // Sixel is outside the text diff: clear its old placement when a card grows or shrinks.
+      this.tui.requestRender(true);
+    }
     for (let i = 0; !header && i < lines.length; i++) {
       const line = lines[i]!;
       const padding = " ".repeat(width - visibleWidth(line));

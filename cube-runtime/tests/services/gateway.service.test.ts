@@ -48,10 +48,7 @@ const baseConfig = (): CubeConfigDocument => ({
   soul: { max_characters: 10_000 },
   memory: {
     storage: { provider: "sqlite", mode: "local" },
-    vector: { enabled: false, provider: "sqlite", mode: "local" },
-    embedder: { enabled: false, model: null },
     generate_title: { enabled: false, model: "google/gemini-test", instructions: "title" },
-    semantic_recall: { enabled: false, top_k: 1, message_range: { before: 0, after: 0 }, scope: "resource", threshold: null },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
 });

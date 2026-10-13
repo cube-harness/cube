@@ -195,7 +195,7 @@ const mapSessionMessage = (
   if (raw.role === "signal" && (
     signal?.tagName === "background_task" ||
     signal?.tagName === "subagent_result" ||
-    (signalType === "reactive" && ["skill-activation", "agents-discovery"].includes(String(cube?.kind)))
+    (signalType === "reactive" && ["skill-activation", "agents-discovery", "environment-context"].includes(String(cube?.kind)))
   ))
     return [];
   const userAuthored = raw.role === "user" || (raw.role === "signal" && ["user", "user-message"].includes(String(signalType)));
@@ -472,6 +472,10 @@ export class MessageList implements Component {
         command?.reason ?? (typeof args?.reason === "string" ? args.reason : undefined);
       const cwd = command?.cwd ?? (typeof args?.cwd === "string" ? args.cwd : undefined);
       for (const detail of [
+        (tool?.name.startsWith("agent-") ||
+          String(asRecord(tool?.result)?.text ?? "").startsWith("Background subagent accepted:")) &&
+          typeof args?.prompt === "string" &&
+          `Task: ${args.prompt}`,
         reason && `Reason: ${reason}`,
         cwd && `Directory: ${cwd}`,
         command &&

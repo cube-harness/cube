@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { MockLanguageModelV3 } from "ai/test";
-import { webFetchTool } from "@mastra/core/tools";
 import { CubeHome, CubeWorkspace, RunnableConfigSchema, createBootstrap } from "@cube/workspace";
 import { createCubeMastra } from "../src/bootstrap.js";
 import { configureCubePermissions } from "../src/permission.js";
@@ -130,7 +129,7 @@ test(`Cube background: ${mode}`, { timeout: 30000 }, async () => {
   const composition = await createCubeMastra(home, CubeWorkspace(home, root), config);
   assert.equal(composition.mastra.backgroundTaskManager, undefined);
   assert.equal(composition.agent.getBackgroundTasksConfig(), undefined);
-  assert.equal((await composition.agent.listTools({ resolveWebSearch: false })).fetch, webFetchTool);
+  assert.equal((await composition.agent.listTools({ resolveWebSearch: false })).fetch, undefined);
   const history = (await composition.mastra.getStorage()!.getStore("backgroundTasks"))!;
   const session = await composition.controller.createSession({ resourceId: root });
   const notices: string[] = [];

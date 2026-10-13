@@ -6,9 +6,12 @@ import {
   DEFAULT_LMSTUDIO_URL,
   HOME_LIMITS,
   DURABLE_MEMORY_DEFAULTS,
+  MEMORY_RETRIEVAL_DEFAULTS,
+  MEMORY_RETRIEVAL_LIMITS,
   INHERIT_MODEL,
   DEFAULT_BACKGROUND_TASKS,
   DEFAULT_SUBAGENTS,
+  DEFAULT_COMMAND_TRUNCATION,
 } from "../constants.js";
 
 export const GATEWAY_IDS = [
@@ -28,29 +31,12 @@ export type ApiKeyGatewayId = Extract<GatewayId, `api_key/${string}`>;
 export type LocalGatewayId = Extract<GatewayId, `local/${string}`>;
 
 const positiveInteger = z.number().int().positive();
-const nonNegativeInteger = z.number().int().nonnegative();
-const nullableString = z.string().min(1).nullable().default(null);
 const modelReference = z.string().min(1);
 
 const storage = z
   .object({
     provider: z.literal("sqlite").default("sqlite"),
     mode: z.literal("local").default("local"),
-  })
-  .strict();
-
-const vector = z
-  .object({
-    enabled: z.boolean().default(false),
-    provider: z.literal("sqlite").default("sqlite"),
-    mode: z.literal("local").default("local"),
-  })
-  .strict();
-
-const embedder = z
-  .object({
-    enabled: z.boolean().default(false),
-    model: nullableString,
   })
   .strict();
 
@@ -62,20 +48,38 @@ const generateTitle = z
   })
   .strict();
 
-const semanticRecall = z
-  .object({
-    enabled: z.boolean().default(false),
-    top_k: positiveInteger.default(4),
-    message_range: z
-      .object({
-        before: nonNegativeInteger.default(1),
-        after: nonNegativeInteger.default(1),
-      })
-      .strict().default({ before: 1, after: 1 }),
-    scope: z.enum(["resource", "thread"]).default("resource"),
-    threshold: z.number().min(0).max(1).nullable().default(null),
-  })
-  .strict();
+const retrievalDefaults = MEMORY_RETRIEVAL_DEFAULTS;
+const retrievalLimits = MEMORY_RETRIEVAL_LIMITS;
+export const MemoryRetrievalSchema = z.object({
+  enabled: z.boolean().default(retrievalDefaults.enabled),
+  model: z.string().trim().min(1).refine(value => {
+    const slash = value.indexOf("/");
+    const provider = value.slice(0, slash);
+    return slash > 0 && value.slice(slash + 1).trim().length > 0 &&
+      (ApiKeyProviderSchema.safeParse(provider).success || ["ollama", "lmstudio"].includes(provider));
+  }, "Use a concrete API-key or local provider/model for retrieval (not OAuth or inherit).")
+    .nullable().default(retrievalDefaults.model),
+  revision: z.string().trim().min(1).max(retrievalLimits.revision_chars).nullable().default(null),
+  dimensions: z.number().int().positive().max(retrievalLimits.max_dimensions).nullable().default(null),
+  document_prefix: z.string().max(retrievalLimits.prefix_chars).default(retrievalDefaults.document_prefix),
+  query_prefix: z.string().max(retrievalLimits.prefix_chars).default(retrievalDefaults.query_prefix),
+  provider_options: z.object({
+    document: z.record(z.string(), z.json()).default({}),
+    query: z.record(z.string(), z.json()).default({}),
+  }).strict().default(retrievalDefaults.provider_options),
+  chunk: z.object({
+    max_chars: z.number().int().min(retrievalLimits.min_chunk_chars).max(retrievalLimits.max_chunk_chars).default(retrievalDefaults.chunk.max_chars),
+    overlap_chars: z.number().int().nonnegative().default(retrievalDefaults.chunk.overlap_chars),
+  }).strict().default(retrievalDefaults.chunk),
+}).strict().superRefine((value, ctx) => {
+  if (value.enabled && !value.model) ctx.addIssue({ code: "custom", path: ["model"], message: "retrieval.model is required when enabled." });
+  if (value.chunk.overlap_chars >= value.chunk.max_chars) ctx.addIssue({ code: "custom", path: ["chunk", "overlap_chars"], message: "Overlap must be smaller than max_chars." });
+  const invalidOptions = (item: unknown): boolean => !!item && typeof item === "object" &&
+    Object.entries(item).some(([key, child]) => /^(headers?|authorization|api_?key|access_?token|refresh_?token|password|secret|base_?url|url|content|input|values|messages|data|base64|parts)$/i.test(key) || invalidOptions(child));
+  if (Buffer.byteLength(JSON.stringify(value.provider_options)) > retrievalLimits.options_bytes || invalidOptions(value.provider_options))
+    ctx.addIssue({ code: "custom", path: ["provider_options"], message: "Embedding options must be bounded JSON without credentials, headers, endpoint or input-payload overrides." });
+});
+export type MemoryRetrievalConfig = z.infer<typeof MemoryRetrievalSchema>;
 
 const compaction = z
   .object({
@@ -89,42 +93,16 @@ const compaction = z
 const memory = z
   .object({
     storage: storage.default(storage.parse({})),
-    vector: vector.default(vector.parse({})),
-    embedder: embedder.default(embedder.parse({})),
     generate_title: generateTitle.default(generateTitle.parse({})),
-    semantic_recall: semanticRecall.default(semanticRecall.parse({})),
     compaction: compaction.default(compaction.parse({})),
     durable: z.object({
       enabled: z.boolean().default(DURABLE_MEMORY_DEFAULTS.enabled),
       model: modelReference.default(DURABLE_MEMORY_DEFAULTS.model),
       min_idle_hours: z.number().finite().min(0).max(720).default(DURABLE_MEMORY_DEFAULTS.min_idle_hours),
+      retrieval: MemoryRetrievalSchema.default(MemoryRetrievalSchema.parse({})),
     }).strict().default(DURABLE_MEMORY_DEFAULTS),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    const vectorFeatureEnabled = value.vector.enabled && value.embedder.enabled;
-    if (value.embedder.enabled && value.embedder.model === null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["embedder", "model"],
-        message: "embedder.model is required when embedder.enabled is true.",
-      });
-    }
-    if (value.embedder.enabled && !value.vector.enabled) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["embedder", "enabled"],
-        message: "Embedder requires vector.enabled to be true.",
-      });
-    }
-    if (value.semantic_recall.enabled && !vectorFeatureEnabled) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["semantic_recall", "enabled"],
-        message: "Semantic Recall requires both Vector and Embedder to be enabled.",
-      });
-    }
-  });
+  .strict();
 
 export const ReasoningEffortSchema = z.enum([
   "none",
@@ -150,6 +128,12 @@ const soul = z
   .strict();
 
 const configSettingsShape = {
+  truncation_policy: z.object({
+    execute_command: z.object({
+      max_bytes: z.number().int().min(4).max(256 * 1024).default(DEFAULT_COMMAND_TRUNCATION.max_bytes),
+      max_lines: z.number().int().min(1).max(2000).default(DEFAULT_COMMAND_TRUNCATION.max_lines),
+    }).strict().default(DEFAULT_COMMAND_TRUNCATION),
+  }).strict().default({ execute_command: DEFAULT_COMMAND_TRUNCATION }),
   subagents: z.object({
     concurrency: z.number().int().min(1).max(32).default(DEFAULT_SUBAGENTS.concurrency),
     model: modelReference.default(DEFAULT_SUBAGENTS.model),

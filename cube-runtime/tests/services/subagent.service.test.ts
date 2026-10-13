@@ -148,11 +148,41 @@ test("captured role settings survive reload; failed preparation settles and priv
     const failed = await f.dispatch("failure");
     await until(async () => (await f.service.get(f.owner, { id: failed.id, view: "status" })).status === "failed");
     assert.equal(f.service.runningCount(), 0);
+    const failure = await f.service.get(f.owner, { id: failed.id, view: "result" });
+    assert.ok("text" in failure.data && JSON.parse(failure.data.text).error === "prepare failed");
+    await until(() => f.deliveries.includes(failed.id));
     const large = { ...settled.result!, text: "fixture-secret" + "a".repeat(24000) };
     settled.result = large; await f.background.updateDelegation(settled);
     const page = await f.service.get(f.owner, { id: c.id, view: "result" });
     assert.ok(page.truncated && page.nextCursor); assert.ok("text" in page.data && !page.data.text.includes("fixture-secret"));
     await assert.rejects(f.service.get(f.owner, { id: b.id, view: "result", cursor: page.nextCursor }), /owner\/view/);
+  } finally { await f.close(); }
+});
+
+test("a rate-limited child retains partial tool evidence without a final report", { timeout: 60000 }, async () => {
+  const f = await fixture();
+  try {
+    f.options.createExecution = async invocation => {
+      const history = { threadId: "native-" + invocation.id, resourceId: "private-" + invocation.id };
+      return { history, agent: {} as NativeSubagentExecution["agent"],
+        tools: { processes: { ...emptyProcesses }, setTaskHandler: () => {} } as unknown as NativeSubagentExecution["tools"],
+        dispose: async () => {}, run: async () => {
+          await f.storage.saveThread({ thread: { id: history.threadId, resourceId: history.resourceId, title: "Private", createdAt: new Date(), updatedAt: new Date() } });
+          await f.storage.saveMessages({ messages: [{ id: randomUUID(), role: "assistant", ...history, createdAt: new Date(),
+            content: { format: 2, parts: [{ type: "tool-invocation", toolInvocation: {
+              state: "result", toolCallId: "search-call", toolName: "search", args: { query: "fixture" }, result: "PARTIAL_SEARCH_EVIDENCE",
+            } }] } }] });
+          throw new Error("HTTP 429: upstream rate limited");
+        } };
+    };
+    const job = await f.dispatch("Investigate fixture", "explore");
+    await until(async () => (await f.service.get(f.owner, { id: job.id, view: "status" })).status === "failed");
+    const result = await f.service.get(f.owner, { id: job.id, view: "result" });
+    assert.ok("text" in result.data && JSON.parse(result.data.text).error === "HTTP 429: upstream rate limited");
+    const transcript = await f.service.get(f.owner, { id: job.id, view: "transcript" });
+    assert.ok("text" in transcript.data && transcript.data.text.includes("PARTIAL_SEARCH_EVIDENCE"));
+    assert.equal(f.service.runningCount(), 0);
+    assert.equal((await f.service.list(f.owner)).length, 1, "Reading evidence must not start another job");
   } finally { await f.close(); }
 });
 

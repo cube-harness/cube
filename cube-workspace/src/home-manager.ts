@@ -61,6 +61,14 @@ export class HomeManager {
     return path.join(this.getMemoryDir(), HOME_FILES.MEMORY_DB);
   }
 
+  getMemoryRetrievalDir(): string {
+    return path.join(this.root, "cache", "memory-retrieval");
+  }
+
+  getToolOutputDir(): string {
+    return path.join(this.root, "cache", "tool-output");
+  }
+
   getSoulPath(): string {
     return path.join(this.root, HOME_FILES.SOUL);
   }

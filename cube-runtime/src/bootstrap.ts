@@ -270,15 +270,15 @@ export const prepareCubeRuntime = async (
           delegationConfig: config.subagents,
         });
         composition.tools.setTaskHandler(async (input, threadId) => {
-          if (input.action === "list") return { tasks: await background.list(threadId), subagents: await subagents!.list({ projectRoot: workspacePaths.root, parentThreadId: threadId }) };
-          const owner = { projectRoot: workspacePaths.root, parentThreadId: threadId };
-          const children = await subagents!.list(owner);
-          if (children.some(child => child.id === input.id)) {
-            if (input.action === "kill") await subagents!.interrupt(owner, input.id);
-            return subagents!.get(owner, { ...input, view: input.view ?? "status" });
-          }
+          if (input.action === "list") return { tasks: await background.list(threadId) };
           if (input.action === "kill") await background.stop(input, threadId);
           return background.get(input, threadId);
+        });
+        composition.tools.setSubagentHandler(async (input, threadId) => {
+          const owner = { projectRoot: workspacePaths.root, parentThreadId: threadId };
+          if (input.action === "list") return { subagents: await subagents!.list(owner) };
+          if (input.action === "kill") return subagents!.interrupt(owner, input.id);
+          return subagents!.get(owner, { ...input, view: input.view ?? "status" });
         });
 
         const thread = new ThreadService(
@@ -287,8 +287,10 @@ export const prepareCubeRuntime = async (
             read: composition.agent.readInstructions,
             install: composition.agent.installInstructions,
             refresh: composition.agent.refreshInstructions,
-            reload: (includeDiscovered) =>
-              reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered),
+            reload: async (includeDiscovered) => {
+              if (includeDiscovered === true) await composition!.memoryRetrieval.reload();
+              await reloadCubeAgentInstructions(composition!.agent, home, workspace, includeDiscovered);
+            },
           },
           undefined,
           {
@@ -484,6 +486,7 @@ export const prepareCubeRuntime = async (
           },
         });
         composition.setMemoryNotice((message) => runtime.notify(message));
+        composition.memoryRetrieval.check();
         composition.durableMemory.check();
         return runtime;
       } catch (error) {

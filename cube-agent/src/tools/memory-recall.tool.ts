@@ -4,6 +4,8 @@ import type { MemoryStorage } from "@mastra/core/storage";
 import { z } from "zod";
 import type { EvidenceRef, MemoryStore } from "@cube/workspace";
 import { readSourceEvidence, redactMemoryText } from "../memory-evidence.js";
+import { searchMemory } from "../rag/search.js";
+import type { RetrievalSearch } from "../rag/retrieval.js";
 import { MEMORY_RECALL_PROMPT } from "../prompts/memory-recall.prompt.js";
 
 const querySchema = z.object({ query: z.string().trim().min(1).max(512) }).strict();
@@ -20,12 +22,12 @@ const cursorSchema = z.object({
 }).strict();
 const cap = 32 * 1024;
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
-const termsOf = (text: string) => [...new Set(text.toLowerCase().match(/[\p{L}\p{N}_./-]+/gu) ?? [])].slice(0, 24);
 
 export function createMemoryRecall(options: {
   store: MemoryStore;
   storage: () => Promise<MemoryStorage>;
   secrets: () => Promise<string[]>;
+  retrieval?: { search: (query: string) => Promise<RetrievalSearch> };
 }) {
   const key = randomBytes(32);
   const sign = (text: string) => createHmac("sha256", key).update(text).digest();
@@ -46,22 +48,19 @@ export function createMemoryRecall(options: {
 
   async function recall(input: z.infer<typeof querySchema> | z.infer<typeof readSchema>) {
     if ("query" in input) {
-      const terms = termsOf(input.query);
-      const entries = await options.store.sources();
-      const ranked = entries.map(entry => {
-        const title = entry.title.toLowerCase(), body = entry.body.toLowerCase();
-        const score = terms.reduce((sum, term) => sum + (title.includes(term) ? 3 : 0) + (body.includes(term) ? 1 : 0), 0);
-        return { entry, score };
-      }).filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.entry.source_id.localeCompare(b.entry.source_id)).slice(0, 5);
+      const search = options.retrieval ? await options.retrieval.search(input.query) : {
+        hits: searchMemory(await options.store.sources(), input.query), retrieval: "bm25" as const, indexing: false,
+      };
+      const ranked = search.hits.slice(0, 5);
       const secrets = await options.secrets();
-      const result = { mode: "query", lexical: true, results: ranked.map(({ entry, score }) => {
-        const lines = entry.body.split("\n");
-        const match = lines.findIndex(line => terms.some(term => line.toLowerCase().includes(term)));
-        const start = Math.max(0, match);
+      const result = { mode: "query", lexical: search.retrieval === "bm25", retrieval: search.retrieval,
+        indexing: search.indexing, ...("warning" in search && search.warning ? { warning: redactMemoryText(search.warning, secrets).slice(0, 500) } : {}),
+        results: ranked.map(({ entry, score, start_line, excerpt, evidence_refs }) => {
+        const text = redactMemoryText(excerpt, secrets).slice(0, 1200);
         return { source_id: entry.source_id, title: redactMemoryText(entry.title, secrets), status: entry.status,
-          score, start_line: start + 1, end_line: Math.min(lines.length, start + 12),
-          excerpt: redactMemoryText(lines.slice(start, start + 12).join("\n"), secrets).slice(0, 1200),
-          evidence_refs: entry.sections.flatMap(section => section.evidence_refs).slice(0, 4) };
+          score, start_line, end_line: start_line + text.split("\n").length - 1,
+          excerpt: text,
+          evidence_refs: evidence_refs.slice(0, 4) };
       }) };
       while (size(result) > cap) result.results.pop();
       return result;

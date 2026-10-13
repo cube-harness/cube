@@ -3,10 +3,12 @@ import { RequestContext } from "@mastra/core/request-context";
 import type { MastraStorage } from "@mastra/core/storage";
 import type { MastraToolInvocationOptions, ToolHooks } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
-import { webFetchTool } from "@mastra/core/tools";
 import { createMastraWorkspace } from "../workspace.js";
 import { cubeAskUserTool } from "../tools/ask-user.tool.js";
 import { formatAgentsContext } from "../prompts/system.prompt.js";
+import { CUBE_SYSTEM_PROMPT } from "../prompts/default.prompt.js";
+import { buildExecutionInstructions } from "../prompts/environment.prompt.js";
+import { createEnvironmentProcessor } from "../processors/environment.processor.js";
 import { formatMemorySnapshot } from "../processors/memory.processor.js";
 import { buildModelConfig } from "./default.agent.js";
 import { createSkillsProcessor } from "../processors/skills.processor.js";
@@ -89,6 +91,7 @@ export function createNativeSubagents(options: {
   skills: CubeSkills;
   mcp: Pick<CubeMcp, "readTools" | "readToolNames">;
   readPermissions: () => CubeConfig["permissions"];
+  commandOutput?: Parameters<typeof createCubeTools>[5];
 }) {
   const key = "cube.subagentInvocation";
   let definitions: readonly SubagentDefinition[] = BUILTIN_SUBAGENTS;
@@ -102,7 +105,7 @@ export function createNativeSubagents(options: {
           id: `cube-role-${definition.name}`,
           name: definition.name,
           model: options.config.model,
-          description: `${definition.description}. Runs in the background; completion is delivered to this thread. Supply relevant constraints and expected evidence.`,
+          description: `${definition.description}. Runs in the background; completion or failure is delivered automatically via subagent_result. Do not poll manage_subagent while waiting; inspect only when the user asks for progress or additional evidence is needed. Supply relevant constraints and expected evidence.`,
           instructions: definition.instructions,
         }),
       ]),
@@ -117,11 +120,9 @@ export function createNativeSubagents(options: {
   }
   const hooks: ToolHooks = {
     beforeToolCall: async ({ toolName, input, context }) => {
-      if (
-        !toolName.startsWith("agent-") ||
-        !definitions.some((role) => `agent-${role.name}` === toolName)
-      )
-        return;
+      const definition = definitions.find(role =>
+        toolName === role.name || toolName === `agent-${role.name}`);
+      if (!definition) return;
       const ctx = context as MastraToolInvocationOptions;
       const controller = ctx.requestContext?.get("controller") as { threadId?: string } | undefined;
       const threadId = controller?.threadId;
@@ -135,7 +136,7 @@ export function createNativeSubagents(options: {
         ...assignment
       } = input as NativeSubagentInput;
       const job = await dispatch({
-        role: toolName.slice(6),
+        role: definition.name,
         input: assignment,
         projectRoot: options.projectRoot,
         parentThreadId: threadId,
@@ -168,6 +169,7 @@ export function createNativeSubagents(options: {
       options.config.background_tasks,
       invocation.projectRoot,
       (name) => resolveCubeToolPermission(name, options.readPermissions()) === "ask",
+      options.commandOutput,
     );
     try {
       const workspace = await createMastraWorkspace(
@@ -191,6 +193,7 @@ export function createNativeSubagents(options: {
           };
         });
       const history: NativeSubagentExecution["history"] = {};
+      let streamError: unknown;
       const agent = new Agent({
         id: `cube-role-${definition.name}-${invocation.id}`,
         name: definition.name,
@@ -208,13 +211,14 @@ export function createNativeSubagents(options: {
           },
         }),
         workspace,
-        skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
+        skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).agentPaths,
         instructions: [
+          { role: "system", content: CUBE_SYSTEM_PROMPT },
           { role: "system", content: baseline.soul },
           { role: "system", content: definition.instructions },
           {
             role: "system",
-            content: `Working directory: ${invocation.executionRoot}. Commands use ${process.platform === "win32" ? "cmd.exe" : "/bin/sh"} and have no TTY. Provide a brief command reason. Commands run on the host, not an OS sandbox. Your task/history are private. Report actual checks and changed files; worktree changes require deliberate integration.`,
+            content: `${buildExecutionInstructions(invocation.executionRoot, options.readPermissions().workspace_only)}\nYour task/history are private. Report actual checks and changed files; worktree changes require deliberate integration.`,
           },
         ],
         tools: () =>
@@ -222,11 +226,11 @@ export function createNativeSubagents(options: {
             Object.entries({
               ...tools.forModel(invocation.modelId),
               ask_user: cubeAskUserTool,
-              fetch: webFetchTool,
               ...options.mcp.readTools(definition.mcpServers),
             }).filter(([name]) => subagentAllowsTool(definition, name)),
           ),
         inputProcessors: [
+          createEnvironmentProcessor(),
           {
             id: "cube-role-history",
             processInput: ({ messageList }) => {
@@ -275,6 +279,7 @@ export function createNativeSubagents(options: {
           onChunk: (chunk) => {
             history.runId = chunk.runId;
           },
+          onError: ({ error }) => { streamError = error; },
           requireToolApproval: ({ toolName }) =>
             resolveCubeToolPermission(
               toolName,
@@ -313,6 +318,7 @@ export function createNativeSubagents(options: {
         tools,
         history,
         async run(input, runOptions, suspend) {
+          streamError = undefined;
           let resumed = false;
           let resumeData: unknown;
           let runId: string | undefined;
@@ -370,6 +376,7 @@ export function createNativeSubagents(options: {
           } while (resumed && !runOptions.abortSignal?.aborted);
           if (runOptions.abortSignal?.aborted)
             throw runOptions.abortSignal.reason ?? new Error("Subagent cancelled");
+          if (streamError) throw streamError;
           if (!raw?.text?.trim()) throw new Error("Subagent ended without a final report");
           return {
             text: raw.text,
@@ -421,6 +428,7 @@ export function subagentAllowsTool(definition: SubagentDefinition, name: string)
   if (
     [
       "subagent",
+      "manage_subagent",
       "spawn_agent",
       "send_message",
       "list_agents",

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HomeManager as Home, WorkspaceManager } from "@cube/workspace";
+import { HomeManager as Home, WorkspaceManager, getBuiltinSkillsPath } from "@cube/workspace";
 import { MessageList, createSignal } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
 import { createCubeSkills, restrictCubeSkills } from "../src/skills.js";
@@ -12,6 +12,118 @@ import { resolveAgentSkills, createSkill } from "@mastra/core/skills";
 import { InMemoryStore } from "@mastra/core/storage";
 import { CubeContext } from "../src/context.js";
 import { createContextProcessor } from "../src/processors/context.processor.js";
+import { createCubeLogger, runWithCubeLogContext } from "../src/logger.js";
+
+test("shipped skills load natively outside the workspace with stable keys and retained creator license", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-builtin-assets-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const home = new Home({ cubeHome: join(root, "home"), userHome: root });
+  const assets = await getBuiltinSkillsPath();
+  const skills = await createCubeSkills(home, new WorkspaceManager(home, root), []);
+  const catalog = await skills.list();
+  assert.deepEqual(catalog.map(skill => skill.name), ["cube-background", "cube-delegation", "cube-memory", "skill-creator"]);
+  const snapshot = await skills.snapshot(new RequestContext());
+  for (const item of catalog) {
+    assert.equal(item.source, "builtin");
+    assert.equal(item.configKey, `builtin:${item.name}`);
+    assert.ok(item.enabled && item.userInvocable);
+    const loaded = await snapshot.enabled.get(item.name);
+    assert.equal(loaded?.name, item.name);
+    assert.ok(loaded!.instructions.trim().length > 0);
+    assert.equal((await snapshot.enabled.get(`${loaded!.path}/SKILL.md`))?.name, item.name);
+  }
+  const license = await readFile(join(assets, "skill-creator", "license.txt"), "utf8");
+  assert.match(license, /Apache License/);
+  const resource = await snapshot.enabled.getReference("skill-creator", "license.txt");
+  assert.ok(resource);
+  const resources = await readdir(join(assets, "skill-creator"), { recursive: true });
+  assert.ok(!resources.some(file => /\.py$|openai\.yaml$|\.png$/.test(file)));
+  skills.setDisabled(catalog.map(item => item.configKey));
+  assert.deepEqual(await (await skills.snapshot(new RequestContext())).enabled.list(), []);
+  assert.deepEqual((await snapshot.enabled.list()).map(item => item.name).sort(),
+    ["cube-background", "cube-delegation", "cube-memory", "skill-creator"], "in-flight snapshot remains unchanged");
+});
+
+test("user source precedence reveals builtin fallback without leaking shadowed paths to native tools or children", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-builtin-precedence-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const home = new Home({ cubeHome: join(root, "home"), userHome: root });
+  const project = join(root, "project");
+  const builtinPath = join(root, "installation", "skills");
+  for (const [dir, body] of [
+    [join(home.getSkillDir(), "review"), "GLOBAL uniquegrape"],
+    [join(project, ".agents", "skills", "review"), "PROJECT uniquebanana"],
+    [join(builtinPath, "review"), "BUILTIN uniquemelon"],
+  ]) {
+    await mkdir(dir!, { recursive: true });
+    await writeFile(join(dir!, "SKILL.md"), `---\nname: review\ndescription: Review code\n---\n${body}`);
+    await writeFile(join(dir!, "guide.md"), body!);
+  }
+  const skills = await createCubeSkills(home, new WorkspaceManager(home, project), [], { builtinPath });
+  const catalog = await skills.list();
+  const global = catalog.find(item => item.source === "global")!;
+  const local = catalog.find(item => item.source === "project")!;
+  const builtin = catalog.find(item => item.source === "builtin")!;
+  const first = await skills.snapshot(new RequestContext());
+  assert.match((await first.enabled.get("review"))!.instructions, /GLOBAL/);
+  assert.equal(await first.enabled.get(builtin.path), null);
+  skills.setDisabled([global.configKey]);
+  const second = await skills.snapshot(new RequestContext());
+  assert.match((await second.enabled.get("review"))!.instructions, /PROJECT/);
+  assert.equal(await second.enabled.get(global.path), null);
+  assert.equal(await second.enabled.get(builtin.path), null);
+  skills.setDisabled([global.configKey, local.configKey]);
+  const third = await skills.snapshot(new RequestContext());
+  assert.match((await third.enabled.get("review"))!.instructions, /BUILTIN/);
+  assert.ok(await third.enabled.getReference("review", "guide.md"));
+  const child = await restrictCubeSkills(skills, []).snapshot(new RequestContext());
+  assert.equal(await child.enabled.get("review"), null);
+  assert.equal(await child.enabled.get(builtin.path), null);
+  assert.equal(await child.enabled.getReference("review", "guide.md"), null);
+  assert.deepEqual(await child.enabled.search("uniquemelon"), []);
+  const allowed = await restrictCubeSkills(skills, ["review"]).snapshot(new RequestContext());
+  assert.match((await allowed.enabled.get("review"))!.instructions, /BUILTIN/);
+  skills.setDisabled(catalog.map(item => item.configKey));
+  assert.deepEqual(await (await skills.snapshot(new RequestContext())).enabled.list(), []);
+});
+
+test("native metadata validation omits invalid builtins and routes diagnostics away from terminal", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "cube-builtin-invalid-"));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+  const home = new Home({ cubeHome: join(root, "home"), userHome: root });
+  const builtinPath = join(root, "assets");
+  for (const [name, text] of [
+    ["valid", '---\nname: valid\ndescription: "Use when: validating"\ncompatibility: Cube\nmetadata:\n  author: Cube\nuser-invocable: false\n---\nValid body'],
+    ["malformed", '---\nname: malformed\ndescription: broken: YAML\n---\nBroken body'],
+    ["mismatch", '---\nname: different\ndescription: Wrong directory\n---\nWrong body'],
+  ]) {
+    await mkdir(join(builtinPath, name!), { recursive: true });
+    await writeFile(join(builtinPath, name!, "SKILL.md"), text!);
+  }
+  const rawErrors = t.mock.method(console, "error", () => {});
+  const rawWarnings = t.mock.method(console, "warn", () => {});
+  const logging = await createCubeLogger(home);
+  try {
+    await runWithCubeLogContext({ threadId: "invalid-skills" }, async () => {
+      const skills = await createCubeSkills(home, new WorkspaceManager(home, root), [], { builtinPath, logger: logging.logger });
+      const catalog = await skills.list();
+      assert.deepEqual(catalog.map(item => item.name), ["valid"]);
+      assert.equal(catalog[0]!.userInvocable, false);
+      assert.equal((await (await skills.snapshot(new RequestContext())).enabled.get("valid"))?.compatibility, "Cube");
+    });
+  } finally { await logging.close(); }
+  assert.equal(rawErrors.mock.callCount(), 0);
+  assert.equal(rawWarnings.mock.callCount(), 0);
+  const log = await readFile(join(home.getLogDir(), "threads", "invalid-skills.log"), "utf8");
+  assert.match(log, /WorkspaceSkills/);
+  assert.match(log, /Invalid skill metadata/);
+  const warning = t.mock.fn();
+  const absent = await createCubeSkills(home, new WorkspaceManager(home, root), [], {
+    builtinPath: join(root, "missing"), logger: { warn: warning },
+  });
+  assert.deepEqual(await absent.list(), []);
+  assert.equal(warning.mock.callCount(), 1);
+});
 
 test("mentions exclude code, escapes, unknowns and partial names, preserving order", () => {
   const names = new Set(["review", "build"]);
@@ -27,8 +139,8 @@ test("mentions exclude code, escapes, unknowns and partial names, preserving ord
 
 test("activation is atomic, keeps user input intact, deduplicates tool steps, and counts toward context", async () => {
   const enabled = resolveAgentSkills([createSkill({ name: "review", description: "Review", instructions: "Full instructions. ".repeat(10_000) })]);
-  const snapshot = { catalog: ["review", "missing"].map((name) => ({ name, path: name, description: name,
-    source: "project" as const, enabled: true, userInvocable: true })), projectPaths: [], globalPaths: [], enabled };
+  const snapshot = { catalog: ["review", "missing"].map((name) => ({ name, path: name, configKey: name, description: name,
+    source: "project" as const, enabled: true, userInvocable: true })), projectPaths: [], agentPaths: [], enabled };
   const skills = { snapshot: async () => snapshot, list: async () => snapshot.catalog, setDisabled() {} };
   const processor = createSkillsProcessor(skills);
   const list = new MessageList({ threadId: "thread", resourceId: "resource" });
@@ -77,8 +189,8 @@ test("activation is atomic, keeps user input intact, deduplicates tool steps, an
 
 test("partial skill delivery fails closed and retry uses persisted activation metadata", async () => {
   const enabled = resolveAgentSkills(["first", "second"].map(name => createSkill({ name, description: name, instructions: name })));
-  const catalog = ["first", "second"].map(name => ({ name, path: name, description: name, source: "project" as const, enabled: true, userInvocable: true }));
-  const processor = createSkillsProcessor({ snapshot: async () => ({ catalog, enabled, projectPaths: [], globalPaths: [] }), list: async () => catalog, setDisabled() {} });
+  const catalog = ["first", "second"].map(name => ({ name, path: name, configKey: name, description: name, source: "project" as const, enabled: true, userInvocable: true }));
+  const processor = createSkillsProcessor({ snapshot: async () => ({ catalog, enabled, projectPaths: [], agentPaths: [] }), list: async () => catalog, setDisabled() {} });
   const list = new MessageList();
   list.add({ id: "trigger", role: "user", content: "$first $second" }, "input");
   let attempts = 0;
@@ -109,7 +221,7 @@ test("catalog filters same-name sources and aliases; request snapshots and nativ
     }
     await mkdir(join(project, ".cube"), { recursive: true });
     await symlink(join(project, ".agents", "skills"), join(project, ".cube", "skills"), process.platform === "win32" ? "junction" : "dir");
-    const skills = await createCubeSkills(home, new WorkspaceManager(home, project), []);
+    const skills = await createCubeSkills(home, new WorkspaceManager(home, project), [], { builtinPath: join(root, "empty-builtins") });
     const choices = await skills.list();
     assert.equal(choices.length, 2);
     const global = choices.find((choice) => choice.source === "global")!;
@@ -150,7 +262,7 @@ test("community global skills share native loading, activation and disable filte
       await mkdir(join(dir!, name!), { recursive: true });
       await writeFile(join(dir!, name!, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill\n---\nInstructions for ${name}`);
     }
-    const skills = await createCubeSkills(home, new WorkspaceManager(home, project), []);
+    const skills = await createCubeSkills(home, new WorkspaceManager(home, project), [], { builtinPath: join(root, "empty-builtins") });
     assert.deepEqual((await skills.list()).map(({ name, source }) => [name, source]), [
       ["community-review", "global"], ["cube-only", "global"], ["project-only", "project"],
     ]);
@@ -168,7 +280,7 @@ test("community global skills share native loading, activation and disable filte
     assert.deepEqual((await restrictCubeSkills(skills, []).snapshot(new RequestContext())).catalog, []);
     assert.equal(restrictCubeSkills(skills), skills, "omitted field preserves normal skill resolution");
     const community = snapshot.catalog.find(({ name }) => name === "community-review")!;
-    assert.ok(snapshot.globalPaths.includes(community.path));
+    assert.ok(snapshot.agentPaths.includes(community.path));
     const list = new MessageList();
     list.add({ role: "user", content: "Use $community-review" }, "input");
     await createSkillsProcessor(skills).processInput!({ messageList: list, requestContext: context, state: {},

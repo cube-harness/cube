@@ -16,13 +16,30 @@ const tool = createTool({ id: "lookup", description: "Lookup", inputSchema: z.ob
 const snapshot = (servers: Record<string, unknown>) => parseMcpConfig({ mcpServers: servers });
 const config = { good: { command: "node" }, broken: { command: "missing-command" }, empty: { command: "node" } };
 
+test("unprefixed MCP names cannot silently overwrite a tool from another server", async t => {
+  const root = await mkdtemp(join(tmpdir(), "cube-mcp-collision-"));
+  const manager = new CubeMcp({ auth: new AuthStore(CubeHome({ cubeHome: root })), workspaceRoot: root });
+  t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
+  let discovery = 0;
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => ({
+    toolsets: { [discovery++ === 0 ? "alpha" : "beta"]: { search: tool } }, errors: {}, errorDetails: {},
+  }));
+  t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
+  await manager.reload(snapshot({ alpha: { command: "node" }, beta: { command: "node" } }), async () => undefined);
+  assert.deepEqual(manager.readToolNames(), []);
+  for (const server of manager.get().servers) {
+    assert.equal(server.status, "error");
+    assert.match(server.error!, /MCP tool name collision: search/);
+  }
+});
+
 test("server allowlists filter published MCP tools by ownership, not tool-name prefix", async t => {
   const root = await mkdtemp(join(tmpdir(), "cube-mcp-scope-"));
   const manager = new CubeMcp({ auth: new AuthStore(CubeHome({ cubeHome: root })), workspaceRoot: root });
   t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
   let discoveries = 0;
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({
-    tools: discoveries++ === 0 ? { beta_lookup: tool } : { alpha_lookup: tool }, errors: {}, errorDetails: {},
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => ({
+    toolsets: discoveries++ === 0 ? { alpha: { beta_lookup: tool } } : { beta: { alpha_lookup: tool } }, errors: {}, errorDetails: {},
   }));
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   await manager.reload(snapshot({ alpha: { command: "node" }, beta: { command: "node" } }), async () => undefined);
@@ -40,11 +57,11 @@ test("discovery isolates failures, config reload reuses connections, and policie
   const connections = new WeakMap<MCPClient, string>();
   let discovers = 0, reconnects = 0, disconnects = 0;
   const names = ["good", "broken", "empty"];
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async function(this: MCPClient) {
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async function(this: MCPClient) {
     let name = connections.get(this);
     if (!name) { name = names[discovers]!; connections.set(this, name); }
     discovers++;
-    return { tools: name === "good" ? { good_lookup: tool } : {},
+    return { toolsets: { [name]: name === "good" ? { good_lookup: tool } : {} },
       errors: name === "broken" ? { broken: "Connection failed" } : {}, errorDetails: {} };
   });
   t.mock.method(MCPClient.prototype, "getServerAuthState", () => "connected");
@@ -79,7 +96,7 @@ test("late discovery after disable cannot install old tools, and permission fail
   const gate = new Promise<void>(resolve => { release = resolve; });
   let started!: () => void;
   const pending = new Promise<void>(resolve => { started = resolve; });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => { started(); await gate; return { tools: { good_lookup: tool }, errors: {}, errorDetails: {} }; });
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => { started(); await gate; return { toolsets: { good: { good_lookup: tool } }, errors: {}, errorDetails: {} }; });
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const discovery = manager.reload(snapshot({ good: { command: "node" } }), async () => undefined);
   await pending;
@@ -101,7 +118,7 @@ test("OAuth setup failure and cancellation before URL settle without late creden
   await writeFile(home.getAuthPath(), JSON.stringify({ api_keys: {}, oauth: {}, mcp: {} }));
   const manager = new CubeMcp({ auth, workspaceRoot: root });
   t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: {}, errors: { docs: "Authorization required" }, errorDetails: {} }));
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => ({ toolsets: {}, errors: { docs: "Authorization required" }, errorDetails: {} }));
   t.mock.method(MCPClient.prototype, "getServerAuthState", () => "needs-auth");
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const authenticate = t.mock.method(MCPClient.prototype, "authenticate", async () => { throw new Error("Registration rejected: client-secret"); });
@@ -133,7 +150,7 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
   await createBootstrap(home).run();
   let executions = 0, gates = 0, issueTool = false, decision: "approve" | "decline" = "decline", call = 0;
   const executable = createTool({ id: "lookup", description: "Lookup", inputSchema: z.object({}), execute: async () => { executions++; return "READ_RESULT"; } });
-  t.mock.method(MCPClient.prototype, "listToolsWithErrors", async () => ({ tools: { docs_lookup: executable }, errors: {}, errorDetails: {} }));
+  t.mock.method(MCPClient.prototype, "listToolsetsWithErrors", async () => ({ toolsets: { docs: { lookup: executable } }, errors: {}, errorDetails: {} }));
   t.mock.method(MCPClient.prototype, "disconnect", async () => undefined);
   const config = RunnableConfigSchema.parse({ gateway: "api_key/google", model: "google/test", memory: { durable: { enabled: false } } });
   const composition = await createCubeMastra(home, CubeWorkspace(home, root), config);
@@ -143,12 +160,12 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
     await composition.shutdown(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   await composition.mcp.reload(snapshot({ docs: { command: "node" } }), names => configureCubePermissions(session, { require_approval_for: [] }, names).then(() => undefined));
-  assert.ok((await composition.agent.listTools()).docs_lookup);
+  assert.ok((await composition.agent.listTools()).lookup);
   composition.agent.model = new MockLanguageModelV3({ doStream: async () => {
     const sendTool = issueTool; issueTool = false;
     return { stream: new ReadableStream({ start(stream) {
       stream.enqueue({ type: "stream-start", warnings: [] });
-      if (sendTool) stream.enqueue({ type: "tool-call", toolCallId: `mcp-${call++}`, toolName: "docs_lookup", input: "{}" });
+      if (sendTool) stream.enqueue({ type: "tool-call", toolCallId: `mcp-${call++}`, toolName: "lookup", input: "{}" });
       stream.enqueue({ type: "finish", finishReason: { unified: sendTool ? "tool-calls" : "stop", raw: sendTool ? "tool_calls" : "stop" },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
       stream.close();
@@ -161,7 +178,7 @@ test("agent-owned MCP tools obey real Session approval, decline, Allow and Deny"
   for (const policy of ["decline", "approve", "allow", "deny"] as const) {
     decision = policy === "approve" ? "approve" : "decline";
     await configureCubePermissions(session, { require_approval_for: [],
-      allow_for: policy === "allow" ? ["docs_lookup"] : [], deny_for: policy === "deny" ? ["docs_lookup"] : [] }, ["docs_lookup"]);
+      allow_for: policy === "allow" ? ["lookup"] : [], deny_for: policy === "deny" ? ["lookup"] : [] }, ["lookup"]);
     issueTool = true;
     await session.followUp({ content: `Run MCP (${policy})` });
     assert.equal(executions, policy === "decline" ? 0 : policy === "approve" ? 1 : 2);

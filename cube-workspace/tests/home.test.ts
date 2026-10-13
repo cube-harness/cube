@@ -65,15 +65,11 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
       provider: "sqlite",
       mode: "local",
     });
-    assert.deepEqual(config.memory.vector, {
-      enabled: false,
-      provider: "sqlite",
-      mode: "local",
-    });
-    assert.deepEqual(config.memory.embedder, {
-      enabled: false,
-      model: null,
-    });
+    assert.equal(config.memory.durable.retrieval.enabled, false);
+    assert.equal(config.memory.durable.retrieval.model, null);
+    assert.equal("vector" in config.memory, false);
+    assert.equal("embedder" in config.memory, false);
+    assert.equal("semantic_recall" in config.memory, false);
     assert.equal("read_only" in config.memory, false);
     assert.equal("last_messages" in config.memory, false);
     assert.equal("filter_incomplete_tool_calls" in config.memory, false);
@@ -140,6 +136,10 @@ test("SoulStore validates character limits on read, write, and direct validation
     await createBootstrap(home).run();
     const soulStore = SoulStore(home);
     const maxChars = home.getSoulMaxCharacters();
+    await assert.rejects(soulStore.write("X".repeat(2001)), /exceeds max length/);
+    const overridden = SoulStore(home, 3000);
+    await overridden.write("X".repeat(2500));
+    assert.equal((await overridden.read()).length, 2500);
 
     // Valid write & read
     const validContent = "A".repeat(100);

@@ -184,7 +184,7 @@ export class SubagentService {
     return { id, requested: true, status: record.status };
   }
   async respond(target: SubagentTarget, data: unknown): Promise<void> { return this.options.background.resumeDelegation(target, data); }
-  preview(target: SubagentTarget) { this.options.background.assertDelegationGate(target); const execution = this.resources.get(target.jobId); if (!execution) throw unknown(); return execution.tools; }
+  preview(target: SubagentTarget): NativeSubagentExecution["tools"] { this.options.background.assertDelegationGate(target); const execution = this.resources.get(target.jobId); if (!execution) throw unknown(); return execution.tools; }
   async refreshPermissions() { for (const execution of this.resources.values()) execution.tools.discardPreview(); }
   private clean(text: string) { return this.options.redact(stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")); }
 

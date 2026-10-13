@@ -9,6 +9,8 @@ import {
   AuthStore,
   ModelManager,
   createMemoryStore,
+  createMemoryIndexStore,
+  ConfigStore,
   INHERIT_MODEL,
   type GatewayId,
   type CubeConfig,
@@ -20,6 +22,8 @@ import { createSummarizerAgent, summarizeConversation } from "./agents/summarize
 import { createStreamSignals, type ChildCompletion } from "./stream-signals.js";
 import { createDurableMemory, type DurableMemory } from "./durable-memory.js";
 import { createMemoryRecall } from "./tools/memory-recall.tool.js";
+import { createMemoryRetrieval, type MemoryRetrieval } from "./rag/retrieval.js";
+import { resolveMemoryEmbedding } from "./rag/embedding.js";
 import { redactMemoryText } from "./memory-evidence.js";
 import { formatMemorySnapshot } from "./processors/memory.processor.js";
 import { createCubeController } from "./agents/controller.js";
@@ -43,6 +47,7 @@ export interface CubeMastraComposition {
   context: CubeContext;
   skills: Awaited<ReturnType<typeof createCubeAgent>>["cubeSkills"];
   durableMemory: DurableMemory;
+  memoryRetrieval: MemoryRetrieval;
   setMemoryNotice: (handler: (message: string) => void) => void;
   drain: (threadId?: string) => Promise<void>;
   continueProcess: (record: ProcessRecord, wake: boolean) => Promise<void>;
@@ -63,8 +68,12 @@ export const createCubeMastra = async (
     root,
     () => config.permissions.workspace_only,
     config.background_tasks,
+    root,
+    undefined,
+    { cacheDir: home.getToolOutputDir(), policy: config.truncation_policy.execute_command },
   );
   const mcp = new CubeMcp({ auth: new AuthStore(home), workspaceRoot: root });
+  let memoryRetrieval: MemoryRetrieval | undefined;
   try {
     const auth = new AuthStore(home);
     const gateways =
@@ -161,8 +170,28 @@ export const createCubeMastra = async (
         );
       return { model, limits: found.limits };
     };
+    let retrievalConfig = config.memory.durable.retrieval;
+    let retrievalLocalOptions = config.gateway_options;
+    let initialRetrievalLoad = true;
+    memoryRetrieval = createMemoryRetrieval({
+      store: memoryStore, indexStore: createMemoryIndexStore(home, memoryStore.projectId),
+      cacheDir: home.getMemoryRetrievalDir(), runtimeId, secrets,
+      registerVector: vector => mastra.addVector(vector, "cubeMemoryRetrieval"),
+      resolveEmbedding: async () => {
+        if (!initialRetrievalLoad) {
+          const updated = await ConfigStore(home).read();
+          // /reload applies retrieval/endpoint edits only, not unrelated chat settings.
+          retrievalConfig = updated.memory.durable.retrieval;
+          retrievalLocalOptions = updated.gateway_options;
+        }
+        initialRetrievalLoad = false;
+        if (!config.memory.durable.enabled || !retrievalConfig.enabled) return undefined;
+        return resolveMemoryEmbedding({ config: retrievalConfig, auth, localOptions: retrievalLocalOptions });
+      },
+      notice: message => { logging.logger.warn("Memory retrieval unavailable", { message }); notice(message); },
+    });
     const recall = config.memory.durable.enabled
-      ? createMemoryRecall({ store: memoryStore, storage, secrets })
+      ? createMemoryRecall({ store: memoryStore, storage, secrets, retrieval: memoryRetrieval })
       : undefined;
     const createContext = (
       getAgent: () => typeof agent,
@@ -229,6 +258,7 @@ export const createCubeMastra = async (
       runtimeId,
       logger: logging.logger,
       secrets,
+      onPublished: () => memoryRetrieval!.check(),
       resolveWriter: () => resolveAuxiliaryModel(config.memory.durable.model),
       notice: (event) =>
         notice(
@@ -293,7 +323,8 @@ export const createCubeMastra = async (
     });
 
     nativeSubagents = createNativeSubagents({ home, config, projectRoot: root, storage: mastra.getStorage()!, parent: agent,
-      skills: agent.cubeSkills, mcp, readPermissions: () => config.permissions });
+      skills: agent.cubeSkills, mcp, readPermissions: () => config.permissions,
+      commandOutput: { store: tools.outputStore, policy: config.truncation_policy.execute_command } });
     const shutdownMastra = mastra.shutdown.bind(mastra);
     let shutdownPromise: Promise<void> | undefined;
 
@@ -312,6 +343,7 @@ export const createCubeMastra = async (
       context,
       skills: agent.cubeSkills,
       durableMemory,
+      memoryRetrieval,
       setMemoryNotice: (handler) => {
         notify = handler;
         for (const message of pendingNotices.splice(0)) handler(message);
@@ -321,6 +353,9 @@ export const createCubeMastra = async (
         shutdownPromise ??= (async () => {
           durableMemory.cancel();
           await durableMemory.drain();
+          memoryRetrieval!.cancel();
+          await memoryRetrieval!.drain();
+          await memoryRetrieval!.close().catch(error => notice(`Memory retrieval: ${redactMemoryText(error instanceof Error ? error.message : "Cache close failed").slice(0, 500)}`));
           context.cancel();
           await context.drain();
           try {
@@ -344,6 +379,7 @@ export const createCubeMastra = async (
       },
     };
   } catch (error) {
+    await memoryRetrieval?.close().catch(() => undefined);
     await mcp.dispose().catch(() => undefined);
     await tools.dispose().catch(() => undefined);
     await logging.close();

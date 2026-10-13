@@ -47,7 +47,7 @@ function fixture() {
       result: { kind: "command", command: "server", reason: "reason", cwd: "workspace", process_id: id, status: "running", output: "output", exit_code: null, truncated: false }, ...overrides };
     processes.set(id, record); emit(record); return record;
   };
-  return { service, tasks, processes, notices, continued, order, listeners, task, process, emit,
+  return { service, tasks, processes, notices, continued, order, listeners, task, process, emit, registry,
     select: (thread: string | null) => { selected = thread; },
   };
 }
@@ -57,6 +57,26 @@ const delegation = (call: string) => ({ parentThreadId: "owner", projectRoot: "w
   modelId: "google/test", instructions: { soul: "Cube", sources: [], explored: [] }, task: "work", cwd: "workspace",
   isolation: "none" as const, checkoutAvailable: true });
 const finished = () => ({ text: "done", toolActivity: [], status: "completed" as const, startedAt: Date.now(), completedAt: Date.now() });
+
+test("foreground continuation is thread-scoped, redacted and not listed as background", async () => {
+  const f = fixture();
+  try {
+    f.process("foreground", { detached: false, result: { kind: "command", command: "read", reason: "reason", cwd: "workspace",
+      process_id: "foreground", status: "completed", output: "last lines", exit_code: 0, truncated: true } });
+    f.registry.readOutput = async (id, cursor, limit) => {
+      assert.equal(id, "foreground"); assert.equal(cursor, 0); assert.equal(limit, 20);
+      return { output: "first fixture-secret lines", truncated: true, log_available: true, output_complete: true, next_cursor: 200 };
+    };
+    const page = await f.service.get({ id: "foreground", cursor: 0, limit: 20 }, "owner");
+    assert.equal(page.output, "first [Redacted] lines"); assert.equal(page.next_cursor, 200);
+    assert.equal(page.log_available, true); assert.deepEqual(await f.service.list(), []);
+    await assert.rejects(f.service.get({ id: "foreground", cursor: 0 }, "another"), /Unknown/);
+    await assert.rejects(f.service.stop({ id: "foreground" }), /Unknown/);
+    f.task("old", { result: { output: "saved", truncated: true } });
+    const old = await f.service.get({ id: "old", cursor: 0 });
+    assert.equal(old.output, "saved"); assert.equal(old.log_available, false); assert.ok(old.output_warning);
+  } finally { await f.service.shutdown(); }
+});
 
 test("shutdown aborts every child and drains processes even after delivery failure", async () => {
   const f = fixture();

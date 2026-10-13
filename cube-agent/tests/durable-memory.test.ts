@@ -18,7 +18,7 @@ test("worker extracts then consolidates once, upserts provenance and never consu
     await f.thread("active");
     await f.store.registerThread("active", "foreground");
     const notices: unknown[] = [];
-    let calls = 0;
+    let calls = 0, publications = 0;
     const model = new MockLanguageModelV3({ doGenerate: async options => {
       assert.ok(!options.tools?.length);
       calls++;
@@ -28,11 +28,12 @@ test("worker extracts then consolidates once, upserts provenance and never consu
     worker = createDurableMemory({ store: f.store, storage: async () => f.storage, projectRoot: f.root,
       config: { enabled: true, min_idle_hours: 6, model: "inherit" }, runtimeId: "worker",
       secrets: async () => [], resolveWriter: async () => ({ model, limits: { context: 256000, output: 32000 } }),
-      notice: message => notices.push(message) });
+      notice: message => notices.push(message), onPublished: () => { publications++; } });
     worker.check();
     await worker.drain();
     assert.deepEqual(notices, []);
     assert.equal(calls, 2);
+    assert.equal(publications, 2, "notify retrieval after successful extraction and consolidation");
     const state = await f.store.read();
     assert.deepEqual(state.entries.map(entry => entry.source_type).sort(), ["handbook", "index", "raw", "rollout"]);
     const rollout = state.entries.find(entry => entry.source_type === "rollout")!;

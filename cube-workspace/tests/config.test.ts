@@ -8,10 +8,15 @@ import { Bootstrap } from "../src/bootstrap.js";
 import { HomeManager } from "../src/home-manager.js";
 import { ConfigStore, PermissionStore } from "../src/store/store.js";
 import { AuthStore } from "../src/store/auth.store.js";
+import { MEMORY_RETRIEVAL_DEFAULTS } from "../src/constants.js";
 import { ConfigSchema, RunnableConfigSchema, GATEWAY_IDS, GatewayIdSchema } from "../src/schemas/config.schema.js";
 
 test("missing settings use Cube defaults without inventing a model or accepting invalid overrides", () => {
   const defaults = ConfigSchema.parse({});
+  assert.deepEqual(defaults.truncation_policy.execute_command, { max_bytes: 262144, max_lines: 200 });
+  assert.deepEqual(ConfigSchema.parse({ truncation_policy: { execute_command: { max_bytes: 512 } } }).truncation_policy.execute_command,
+    { max_bytes: 512, max_lines: 200 });
+  assert.equal(ConfigSchema.safeParse({ truncation_policy: { execute_command: { max_bytes: 0 } } }).success, false);
   assert.deepEqual(defaults.background_tasks, { enabled: true, concurrency: 2, timeout_ms: 300000 });
   assert.deepEqual(ConfigSchema.parse({ background_tasks: { enabled: false } }).background_tasks,
     { enabled: false, concurrency: 2, timeout_ms: 300000 });
@@ -29,8 +34,7 @@ test("missing settings use Cube defaults without inventing a model or accepting 
   assert.deepEqual(runnable.permissions.require_approval_for, ["execute_command", "edit_file", "write_file", "apply_patch"]);
   assert.equal(defaults.memory.compaction.reserve_tokens, 16384);
   const partial = ConfigSchema.parse({
-    memory: { semantic_recall: { message_range: { before: 0 } }, durable: { enabled: false, min_idle_hours: 0 } } });
-  assert.deepEqual(partial.memory.semantic_recall.message_range, { before: 0, after: 1 });
+    memory: { durable: { enabled: false, min_idle_hours: 0 } } });
   assert.equal(partial.memory.durable.enabled, false);
   assert.equal(partial.memory.durable.min_idle_hours, 0);
   for (const input of [{ permissions: { workspace_only: false } }, { permissions: null }, { permissions: { workspace_only: "false" } },
@@ -83,13 +87,28 @@ test("auxiliary defaults preserve false/zero, reject invalid values and do not r
     const raw = YAML.parse(bytes);
     const config = ConfigSchema.parse({ ...raw, memory: { ...raw.memory, durable: undefined,
       compaction: { ...raw.memory.compaction, model: undefined } } });
-    assert.deepEqual(config.memory.durable, { enabled: true, model: "inherit", min_idle_hours: 6 });
+    assert.deepEqual(config.memory.durable, { enabled: true, model: "inherit", min_idle_hours: 6, retrieval: MEMORY_RETRIEVAL_DEFAULTS });
     assert.equal(config.memory.compaction.model, "inherit");
     const partial = { ...raw, memory: { ...raw.memory, durable: { enabled: false, min_idle_hours: 0 } } };
-    assert.deepEqual(ConfigSchema.parse(partial).memory.durable, { enabled: false, model: "inherit", min_idle_hours: 0 });
+    assert.deepEqual(ConfigSchema.parse(partial).memory.durable, { enabled: false, model: "inherit", min_idle_hours: 0, retrieval: MEMORY_RETRIEVAL_DEFAULTS });
     for (const durable of [null, { model: null }, { min_idle_hours: -1 }, { enabled: "false" }])
       assert.equal(ConfigSchema.safeParse({ ...raw, memory: { ...raw.memory, durable } }).success, false);
     await ConfigStore(home).read();
     assert.equal(await readFile(home.getConfigPath(), "utf8"), bytes);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("retrieval uses nested defaults and rejects unsafe options and obsolete memory config", () => {
+  const parse = (retrieval: unknown) => ConfigSchema.parse({ memory: { durable: { retrieval } } }).memory.durable.retrieval;
+  assert.deepEqual(parse(undefined), MEMORY_RETRIEVAL_DEFAULTS);
+  assert.deepEqual(parse({ chunk: { max_chars: 512 } }).chunk, { max_chars: 512, overlap_chars: 128 });
+  assert.equal(parse({ enabled: true, model: "openrouter/provider/nested-model" }).model, "openrouter/provider/nested-model");
+  for (const retrieval of [{ enabled: true }, { model: "inherit" }, { model: "oauth/openai" }, { model: "unknown/model" },
+    { dimensions: 0 }, { dimensions: 65537 }, { chunk: { max_chars: 128, overlap_chars: 128 } },
+    { provider_options: { document: { openai: { apiKey: "secret" } } } },
+    { provider_options: { document: { google: { content: [{ parts: [{ text: "foreign override" }] }] } } } },
+    { provider_options: { query: { huge: "x".repeat(16384) } } }])
+    assert.throws(() => parse(retrieval));
+  for (const key of ["vector", "embedder", "semantic_recall"])
+    assert.equal(ConfigSchema.safeParse({ memory: { [key]: {} } }).success, false);
 });

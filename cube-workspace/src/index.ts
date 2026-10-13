@@ -17,11 +17,12 @@ export {
   HistoryStore,
   AgentsStore,
 } from "./store/store.js";
-export { Bootstrap, createBootstrap } from "./bootstrap.js";
+export { Bootstrap, createBootstrap, getBuiltinSkillsPath } from "./bootstrap.js";
 export { AuthStore } from "./store/auth.store.js";
 export { atomicWriteFile, withFileLock } from "./store/atomic-write.js";
 export type { FileLockOptions } from "./store/atomic-write.js";
 export * from "./store/memory.store.js";
+export * from "./store/memory-index.store.js";
 
 // Export Model Manager
 export { ModelManager, type CatalogContext, type ModelManagerOptions } from "./model-manager.js";
