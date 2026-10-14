@@ -44,22 +44,18 @@ soul:
   max_characters: 2000
 
 memory:
-  # Cube currently supports only local SQLite storage. Cube owns the database
-  # ID, URL and <CubeHome>/memories/memory.sqlite path.
-  storage:
-    provider: sqlite
-    mode: local
-
   # When disabled, Cube derives the title from the first user prompt without
   # an LLM call. model accepts inherit or a concrete provider/model ID.
   generate_title:
     enabled: false
     model: inherit
+    # reasoning_effort: low
     instructions: Generate a concise title under 80 characters.
 
   compaction:
     # inherit uses the active chat model; a model ID overrides only summarization.
     model: inherit
+    # reasoning_effort: low
     # /compact requires this fraction of the model context plus a safe cut.
     manual_min_ratio: 0.30
     # Fraction of conversation capacity retained after reserving instructions
@@ -72,6 +68,7 @@ memory:
     # Background extraction/consolidation consumes normal provider usage.
     enabled: true
     model: inherit
+    # reasoning_effort: low
     min_idle_hours: 6
     # Hybrid search over this project's committed Markdown memory, not raw history.
     # API embeddings consume provider usage; local models use CPU/RAM/GPU.

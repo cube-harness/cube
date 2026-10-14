@@ -71,10 +71,12 @@ test("registered summarizer captures inherited model per call and explicit overr
     const home = new HomeManager({ cubeHome: path.join(root, "home") });
     await createBootstrap(home).run();
     const parsed = await ConfigStore(home).read();
-    const config = RunnableConfigSchema.parse({ ...parsed, gateway: "api_key/google", model: "google/main",
-      memory: { ...parsed.memory, durable: { ...parsed.memory.durable, model: "google/memory-override" } } });
+    const config = RunnableConfigSchema.parse({ ...parsed, gateway: "api_key/google", model: "google/gemini-3-main",
+      memory: { ...parsed.memory,
+        compaction: { ...parsed.memory.compaction, reasoning_effort: "low" },
+        durable: { ...parsed.memory.durable, model: "google/memory-override" } } });
     t.mock.method(ModelManager.prototype, "getCatalog", async () => ({ updatedAt: new Date().toISOString(), providers: {
-      google: { name: "Google", models: ["main", "override", "next"].map(name => ({ modelId: `google/${name}`, name, limit: { context: 256000, output: 32000 } })) },
+      google: { name: "Google", models: ["gemini-3-main", "gemini-3-override", "gemini-3-next"].map(name => ({ modelId: `google/${name}`, name, limit: { context: 256000, output: 32000 } })) },
     } }));
     composition = await createCubeMastra(home, new WorkspaceManager(home, root), config);
     assert.equal(config.memory.compaction.model, "inherit");
@@ -82,26 +84,29 @@ test("registered summarizer captures inherited model per call and explicit overr
     let entered!: () => void, release!: () => void;
     const ready = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
-    composition.agent.model = new MockLanguageModelV3({ doGenerate: async () => { entered(); await gate; return generated("first-model"); } });
+    composition.agent.model = new MockLanguageModelV3({ doGenerate: async options => {
+      assert.deepEqual(options.providerOptions, { google: { thinkingConfig: { thinkingLevel: "low", includeThoughts: true } } });
+      entered(); await gate; return generated("first-model");
+    } });
     const summarizer = composition.mastra.getAgentById("cube-compactor");
     const running = summarizer.generate("data", { maxSteps: 1 });
     await ready;
     composition.agent.model = new MockLanguageModelV3({ doGenerate: async () => generated("next-model") });
-    composition.agent.setToolModel("cube-api/google/next");
+    composition.agent.setToolModel("cube-api/google/gemini-3-next");
     release();
     assert.equal((await running).text, "first-model");
     assert.equal((await summarizer.generate("data", { maxSteps: 1 })).text, "next-model");
     await composition.shutdown();
-    config.memory.compaction.model = "google/override";
+    config.memory.compaction.model = "google/gemini-3-override";
     composition = await createCubeMastra(home, new WorkspaceManager(home, root), config);
     const resolutions: unknown[] = [];
     t.mock.method(composition.agent, "getModel", async options => { resolutions.push(options.modelConfig); return new MockLanguageModelV3({ doGenerate: async () => generated("override") }); });
     const fixed = composition.mastra.getAgentById("cube-compactor");
     assert.equal((await fixed.generate("data", { maxSteps: 1 })).text, "override");
-    composition.agent.setToolModel("cube-api/google/next");
+    composition.agent.setToolModel("cube-api/google/gemini-3-next");
     assert.equal((await fixed.generate("data", { maxSteps: 1 })).text, "override");
     assert.ok(resolutions.length >= 2);
-    assert.ok(resolutions.every(value => JSON.stringify(value).includes("cube-api/google/override")));
+    assert.ok(resolutions.every(value => JSON.stringify(value).includes("cube-api/google/gemini-3-override")));
   } finally {
     await composition?.shutdown();
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

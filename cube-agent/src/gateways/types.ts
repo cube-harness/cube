@@ -60,6 +60,11 @@ export const gatewayDescriptors = {
   },
 } as const satisfies Record<GatewayId, GatewayDescriptor>;
 
+export const getModelGateway = (modelId: string): GatewayId | undefined =>
+  Object.entries(gatewayDescriptors).find(([, descriptor]) =>
+    modelId.startsWith(`${descriptor.internalId}/${descriptor.providerId}/`),
+  )?.[0] as GatewayId | undefined;
+
 export const toMastraRouterId = (gatewayId: GatewayId, canonicalModelId: string): string => {
   const descriptor = gatewayDescriptors[gatewayId];
   if (!canonicalModelId.startsWith(`${descriptor.providerId}/`)) {

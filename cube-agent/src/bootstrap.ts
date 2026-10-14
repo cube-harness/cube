@@ -17,7 +17,8 @@ import {
   type HomeManager,
   type WorkspaceManager,
 } from "@cube/workspace";
-import { buildModelConfig, createCubeAgent } from "./agents/default.agent.js";
+import { createCubeAgent } from "./agents/default.agent.js";
+import { resolveMemoryModel } from "./memory.js";
 import { createSummarizerAgent, summarizeConversation } from "./agents/summarizer.agent.js";
 import { createStreamSignals, type ChildCompletion } from "./stream-signals.js";
 import { createDurableMemory, type DurableMemory } from "./durable-memory.js";
@@ -30,7 +31,7 @@ import { createCubeController } from "./agents/controller.js";
 import { createCubeLogger } from "./logger.js";
 import { CubeMcp } from "./mcp/client.js";
 import { createCubeGateways, type CubeGatewayComposition } from "./gateways/factory.js";
-import { toMastraRouterId, getCanonicalModelId, gatewayDescriptors } from "./gateways/types.js";
+import { toMastraRouterId, getCanonicalModelId, getModelGateway } from "./gateways/types.js";
 import { createCubeTools, type CubeTools } from "./tools/cube-tools.js";
 import { CubeContext } from "./context.js";
 import { createNativeSubagents } from "./agents/subagent.agent.js";
@@ -132,12 +133,8 @@ export const createCubeMastra = async (
         ]),
       ];
     };
-    const modelGateway = (modelId: string) =>
-      Object.entries(gatewayDescriptors).find(([, descriptor]) =>
-        modelId.startsWith(`${descriptor.internalId}/${descriptor.providerId}/`),
-      )?.[0] as GatewayId | undefined;
     const readModel = async (modelId: string) => {
-      const gateway = modelGateway(modelId);
+      const gateway = getModelGateway(modelId);
       const models = gateway ? await catalog.getCatalog(gateway) : undefined;
       const model = Object.values(models?.providers ?? {})
         .flatMap((provider) => provider.models)
@@ -145,24 +142,19 @@ export const createCubeMastra = async (
       return { limits: model?.limit ?? {}, model, gateway };
     };
     const resolveAuxiliaryModel = async (
-      selection: string,
+      selection: Pick<CubeConfig["memory"]["compaction"], "model" | "reasoning_effort">,
       requestContext?: RequestContext,
       modelAgent = agent,
     ) => {
       const active = modelAgent.getActiveModelId();
       const modelId =
-        selection === INHERIT_MODEL
+        selection.model === INHERIT_MODEL
           ? active
-          : toMastraRouterId(modelGateway(active) ?? config.gateway, selection);
+          : toMastraRouterId(getModelGateway(active) ?? config.gateway, selection.model);
       // Capture the model before catalog I/O: /model may change during a background job.
       const [found, model] = await Promise.all([
         readModel(modelId),
-        modelAgent.getModel({
-          requestContext,
-          ...(selection === INHERIT_MODEL
-            ? {}
-            : { modelConfig: [buildModelConfig(modelId) as any] }),
-        }),
+        resolveMemoryModel(modelAgent, modelId, selection, requestContext),
       ]);
       if (!found.model)
         throw new Error(
@@ -203,7 +195,7 @@ export const createCubeMastra = async (
         protectedTools: new Set(["skill", "skill_read"]),
         summarize: async (input) => {
           const resolved = await resolveAuxiliaryModel(
-            config.memory.compaction.model,
+            config.memory.compaction,
             input.requestContext,
             getAgent(),
           );
@@ -247,7 +239,7 @@ export const createCubeMastra = async (
     );
     const summarizer = createSummarizerAgent(
       async ({ requestContext }) =>
-        (await resolveAuxiliaryModel(config.memory.compaction.model, requestContext)).model,
+        (await resolveAuxiliaryModel(config.memory.compaction, requestContext)).model,
       logging.logger,
     );
     const durableMemory = createDurableMemory({
@@ -259,7 +251,7 @@ export const createCubeMastra = async (
       logger: logging.logger,
       secrets,
       onPublished: () => memoryRetrieval!.check(),
-      resolveWriter: () => resolveAuxiliaryModel(config.memory.durable.model),
+      resolveWriter: () => resolveAuxiliaryModel(config.memory.durable),
       notice: (event) =>
         notice(
           `Memory ${event.stage}${event.threadId ? ` (${event.threadId})` : ""}: ${event.message}`,
