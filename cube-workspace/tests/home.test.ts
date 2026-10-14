@@ -61,10 +61,7 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
     assert.equal(config.model, undefined);
     assert.equal(config.gateway_options["local/ollama"]?.base_url, "http://127.0.0.1:11434");
     assert.equal(config.gateway_options["local/lmstudio"]?.base_url, "http://127.0.0.1:1234/v1");
-    assert.deepEqual(config.memory.storage, {
-      provider: "sqlite",
-      mode: "local",
-    });
+    assert.equal("storage" in config.memory, false);
     assert.equal(config.memory.durable.retrieval.enabled, false);
     assert.equal(config.memory.durable.retrieval.model, null);
     assert.equal("vector" in config.memory, false);

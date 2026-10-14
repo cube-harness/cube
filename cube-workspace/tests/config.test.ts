@@ -33,6 +33,13 @@ test("missing settings use Cube defaults without inventing a model or accepting 
   assert.equal(runnable.permissions.workspace_only, true);
   assert.deepEqual(runnable.permissions.require_approval_for, ["execute_command", "edit_file", "write_file", "apply_patch"]);
   assert.equal(defaults.memory.compaction.reserve_tokens, 16384);
+  assert.equal("storage" in defaults.memory, false);
+  assert.equal(ConfigSchema.safeParse({ memory: { storage: { provider: "sqlite", mode: "local" } } }).success, false);
+  for (const task of ["generate_title", "compaction", "durable"] as const) {
+    assert.equal(defaults.memory[task].reasoning_effort, undefined);
+    assert.equal(ConfigSchema.parse({ memory: { [task]: { reasoning_effort: "low" } } }).memory[task].reasoning_effort, "low");
+    assert.equal(ConfigSchema.safeParse({ memory: { [task]: { reasoning_effort: "invalid" } } }).success, false);
+  }
   const partial = ConfigSchema.parse({
     memory: { durable: { enabled: false, min_idle_hours: 0 } } });
   assert.equal(partial.memory.durable.enabled, false);

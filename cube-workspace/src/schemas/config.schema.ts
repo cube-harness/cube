@@ -33,17 +33,15 @@ export type LocalGatewayId = Extract<GatewayId, `local/${string}`>;
 const positiveInteger = z.number().int().positive();
 const modelReference = z.string().min(1);
 
-const storage = z
-  .object({
-    provider: z.literal("sqlite").default("sqlite"),
-    mode: z.literal("local").default("local"),
-  })
-  .strict();
+export const ReasoningEffortSchema = z.enum([
+  "none", "minimal", "low", "medium", "high", "xhigh", "max", "default",
+]);
 
 const generateTitle = z
   .object({
     enabled: z.boolean().default(false),
     model: modelReference.default(INHERIT_MODEL),
+    reasoning_effort: ReasoningEffortSchema.optional(),
     instructions: z.string().min(1).default("Generate a concise title under 80 characters."),
   })
   .strict();
@@ -84,6 +82,7 @@ export type MemoryRetrievalConfig = z.infer<typeof MemoryRetrievalSchema>;
 const compaction = z
   .object({
     model: modelReference.default(INHERIT_MODEL),
+    reasoning_effort: ReasoningEffortSchema.optional(),
     manual_min_ratio: z.number().gt(0).lt(1).default(0.30),
     keep_recent_ratio: z.number().gt(0).lt(1).default(0.20),
     reserve_tokens: positiveInteger.default(16384),
@@ -92,28 +91,17 @@ const compaction = z
 
 const memory = z
   .object({
-    storage: storage.default(storage.parse({})),
     generate_title: generateTitle.default(generateTitle.parse({})),
     compaction: compaction.default(compaction.parse({})),
     durable: z.object({
       enabled: z.boolean().default(DURABLE_MEMORY_DEFAULTS.enabled),
       model: modelReference.default(DURABLE_MEMORY_DEFAULTS.model),
+      reasoning_effort: ReasoningEffortSchema.optional(),
       min_idle_hours: z.number().finite().min(0).max(720).default(DURABLE_MEMORY_DEFAULTS.min_idle_hours),
       retrieval: MemoryRetrievalSchema.default(MemoryRetrievalSchema.parse({})),
     }).strict().default(DURABLE_MEMORY_DEFAULTS),
   })
   .strict();
-
-export const ReasoningEffortSchema = z.enum([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "default",
-]);
 
 export const ModelConfigSchema = z
   .object({

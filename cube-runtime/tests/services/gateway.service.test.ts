@@ -47,7 +47,6 @@ const baseConfig = (): CubeConfigDocument => ({
   telemetry: false,
   soul: { max_characters: 10_000 },
   memory: {
-    storage: { provider: "sqlite", mode: "local" },
     generate_title: { enabled: false, model: "google/gemini-test", instructions: "title" },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
