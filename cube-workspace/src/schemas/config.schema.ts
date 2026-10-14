@@ -7,7 +7,6 @@ import {
   HOME_LIMITS,
   DURABLE_MEMORY_DEFAULTS,
   MEMORY_RETRIEVAL_DEFAULTS,
-  MEMORY_RETRIEVAL_LIMITS,
   INHERIT_MODEL,
   DEFAULT_BACKGROUND_TASKS,
   DEFAULT_SUBAGENTS,
@@ -47,7 +46,6 @@ const generateTitle = z
   .strict();
 
 const retrievalDefaults = MEMORY_RETRIEVAL_DEFAULTS;
-const retrievalLimits = MEMORY_RETRIEVAL_LIMITS;
 export const MemoryRetrievalSchema = z.object({
   enabled: z.boolean().default(retrievalDefaults.enabled),
   model: z.string().trim().min(1).refine(value => {
@@ -57,25 +55,8 @@ export const MemoryRetrievalSchema = z.object({
       (ApiKeyProviderSchema.safeParse(provider).success || ["ollama", "lmstudio"].includes(provider));
   }, "Use a concrete API-key or local provider/model for retrieval (not OAuth or inherit).")
     .nullable().default(retrievalDefaults.model),
-  revision: z.string().trim().min(1).max(retrievalLimits.revision_chars).nullable().default(null),
-  dimensions: z.number().int().positive().max(retrievalLimits.max_dimensions).nullable().default(null),
-  document_prefix: z.string().max(retrievalLimits.prefix_chars).default(retrievalDefaults.document_prefix),
-  query_prefix: z.string().max(retrievalLimits.prefix_chars).default(retrievalDefaults.query_prefix),
-  provider_options: z.object({
-    document: z.record(z.string(), z.json()).default({}),
-    query: z.record(z.string(), z.json()).default({}),
-  }).strict().default(retrievalDefaults.provider_options),
-  chunk: z.object({
-    max_chars: z.number().int().min(retrievalLimits.min_chunk_chars).max(retrievalLimits.max_chunk_chars).default(retrievalDefaults.chunk.max_chars),
-    overlap_chars: z.number().int().nonnegative().default(retrievalDefaults.chunk.overlap_chars),
-  }).strict().default(retrievalDefaults.chunk),
 }).strict().superRefine((value, ctx) => {
   if (value.enabled && !value.model) ctx.addIssue({ code: "custom", path: ["model"], message: "retrieval.model is required when enabled." });
-  if (value.chunk.overlap_chars >= value.chunk.max_chars) ctx.addIssue({ code: "custom", path: ["chunk", "overlap_chars"], message: "Overlap must be smaller than max_chars." });
-  const invalidOptions = (item: unknown): boolean => !!item && typeof item === "object" &&
-    Object.entries(item).some(([key, child]) => /^(headers?|authorization|api_?key|access_?token|refresh_?token|password|secret|base_?url|url|content|input|values|messages|data|base64|parts)$/i.test(key) || invalidOptions(child));
-  if (Buffer.byteLength(JSON.stringify(value.provider_options)) > retrievalLimits.options_bytes || invalidOptions(value.provider_options))
-    ctx.addIssue({ code: "custom", path: ["provider_options"], message: "Embedding options must be bounded JSON without credentials, headers, endpoint or input-payload overrides." });
 });
 export type MemoryRetrievalConfig = z.infer<typeof MemoryRetrievalSchema>;
 

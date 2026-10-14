@@ -1,6 +1,6 @@
 {
   "name": "cube-monorepo",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "private": true,
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
   "type": "module",

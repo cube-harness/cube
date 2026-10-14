@@ -9,8 +9,7 @@ import { createMemoryRetrieval } from "../src/rag/retrieval.js";
 
 const root = await mkdtemp(path.join(tmpdir(), "cube-retrieval-live-"));
 const home = new HomeManager({ cubeHome: root }), store = createMemoryStore(home, root);
-const config = MemoryRetrievalSchema.parse({ enabled: true, model: "ollama/nomic-embed-text:latest",
-  document_prefix: "search_document: ", query_prefix: "search_query: " });
+const config = MemoryRetrievalSchema.parse({ enabled: true, model: "ollama/nomic-embed-text:latest" });
 let documentCalls = 0, queryCalls = 0;
 const notices: string[] = [];
 const makeClient = () => createMemoryRetrieval({ store, indexStore: createMemoryIndexStore(home, store.projectId),

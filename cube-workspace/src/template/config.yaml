@@ -75,17 +75,5 @@ memory:
     retrieval:
       enabled: false
       model: null
-      # Change revision to rebuild when a model alias changes its weights.
-      revision: null
-      dimensions: null
-      document_prefix: ""
-      query_prefix: ""
-      provider_options:
-        document: {}
-        query: {}
-      chunk:
-        max_chars: 1024
-        overlap_chars: 128
+      # Cube manages task prefixes, section splitting and provider-default dimensions.
       # Local Nomic example: model: ollama/nomic-embed-text:latest
-      # document_prefix: "search_document: "
-      # query_prefix: "search_query: "
