@@ -20,20 +20,9 @@ export const DEFAULT_SUBAGENTS = {
 export const MEMORY_RETRIEVAL_DEFAULTS = {
   enabled: false,
   model: null,
-  revision: null,
-  dimensions: null,
-  document_prefix: "",
-  query_prefix: "",
-  provider_options: { document: {}, query: {} },
-  chunk: { max_chars: 1024, overlap_chars: 128 },
 };
 export const MEMORY_RETRIEVAL_LIMITS = {
-  options_bytes: 16 * 1024,
-  prefix_chars: 512,
-  revision_chars: 256,
   max_dimensions: 65536,
-  min_chunk_chars: 128,
-  max_chunk_chars: 16384,
   manifest_bytes: 16 * 1024 * 1024,
 } as const;
 export const DURABLE_MEMORY_DEFAULTS = {

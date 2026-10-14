@@ -46,7 +46,7 @@ async function fixture() {
   const client = (embed: MemoryEmbedding["embed"], profile = "profile") => {
     const value = createMemoryRetrieval({ store, indexStore, cacheDir: home.getMemoryRetrievalDir(), runtimeId: randomUUID(),
       secrets: async () => [...secretValues], notice: text => notices.push(text), resolveEmbedding: async () => ({ batchSize: 1, embed,
-        profile: { id: memoryHash(profile), config: MemoryRetrievalSchema.parse({ enabled: true, model: "ollama/test" }), endpoint: "http://local" } }) });
+        profile: { id: memoryHash(profile), documentPrefix: "", maxInputBytes: 2048 } }) });
     clients.push(value); return value;
   };
   return { root, home, store, indexStore, notices, secretValues, entry, publish, client,

@@ -105,16 +105,13 @@ test("auxiliary defaults preserve false/zero, reject invalid values and do not r
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
-test("retrieval uses nested defaults and rejects unsafe options and obsolete memory config", () => {
+test("retrieval exposes only enabled/model and rejects obsolete tuning and memory config", () => {
   const parse = (retrieval: unknown) => ConfigSchema.parse({ memory: { durable: { retrieval } } }).memory.durable.retrieval;
-  assert.deepEqual(parse(undefined), MEMORY_RETRIEVAL_DEFAULTS);
-  assert.deepEqual(parse({ chunk: { max_chars: 512 } }).chunk, { max_chars: 512, overlap_chars: 128 });
+  assert.deepEqual(parse(undefined), { enabled: false, model: null });
   assert.equal(parse({ enabled: true, model: "openrouter/provider/nested-model" }).model, "openrouter/provider/nested-model");
   for (const retrieval of [{ enabled: true }, { model: "inherit" }, { model: "oauth/openai" }, { model: "unknown/model" },
-    { dimensions: 0 }, { dimensions: 65537 }, { chunk: { max_chars: 128, overlap_chars: 128 } },
-    { provider_options: { document: { openai: { apiKey: "secret" } } } },
-    { provider_options: { document: { google: { content: [{ parts: [{ text: "foreign override" }] }] } } } },
-    { provider_options: { query: { huge: "x".repeat(16384) } } }])
+    { revision: "v1" }, { dimensions: 768 }, { document_prefix: "" }, { query_prefix: "" },
+    { provider_options: { document: {}, query: {} } }, { chunk: { max_chars: 1024, overlap_chars: 128 } }])
     assert.throws(() => parse(retrieval));
   for (const key of ["vector", "embedder", "semantic_recall"])
     assert.equal(ConfigSchema.safeParse({ memory: { [key]: {} } }).success, false);
