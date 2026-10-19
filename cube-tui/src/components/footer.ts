@@ -13,6 +13,8 @@ export class Footer implements Component {
   private threadTitle?: string;
   private threadId: string = "thread_default";
   private status: string = "Idle";
+  private backgroundCount = 0;
+  private subagentCount = 0;
   private statusLine: string[] = ["model", "workspace", "agentMd", "threadId"];
 
   constructor(info?: InfoBoxContent, statusLine?: string[]) {
@@ -42,6 +44,11 @@ export class Footer implements Component {
     return this.status;
   }
 
+  setActivityCounts(background: number, subagents: number): void {
+    this.backgroundCount = background;
+    this.subagentCount = subagents;
+  }
+
   setInfo(info: InfoBoxContent) {
     if (info.model !== undefined) this.model = info.model;
     if (info.workspace !== undefined) this.workspace = info.workspace;
@@ -51,7 +58,7 @@ export class Footer implements Component {
   }
 
   render(width: number): string[] {
-    const boxWidth = Math.max(width, 20);
+    const boxWidth = Math.max(width, 0);
     const divider = appTheme.ui.muted(" • ");
 
     const parts: string[] = [];
@@ -64,10 +71,15 @@ export class Footer implements Component {
       else if (key === "status" && this.status) parts.push(appTheme.ui.primary(this.status));
     }
 
-    const fullLine = parts.join(divider);
-    const truncated = truncateToWidth(fullLine, boxWidth);
-    const visible = visibleWidth(truncated);
-    const padding = " ".repeat(Math.max(0, boxWidth - visible));
-    return [padding + truncated];
+    const activities: string[] = [];
+    if (this.backgroundCount > 0) activities.push(`(${this.backgroundCount}) background running`);
+    if (this.subagentCount > 0) activities.push(`(${this.subagentCount}) subagent running`);
+    const left = truncateToWidth(appTheme.ui.muted(activities.join(" · ")), boxWidth);
+    const right = truncateToWidth(
+      parts.join(divider),
+      Math.max(0, boxWidth - visibleWidth(left) - (left ? 1 : 0)),
+    );
+    const padding = " ".repeat(Math.max(0, boxWidth - visibleWidth(left) - visibleWidth(right)));
+    return [left + padding + right];
   }
 }

@@ -3,6 +3,8 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { LibSQLStore } from "@mastra/libsql";
 import { MessageList, type MastraDBMessage } from "@mastra/core/agent";
 import { RequestContext } from "@mastra/core/request-context";
@@ -61,8 +63,24 @@ test("prune preserves the two-user gate, crossing result and strict minimum", ()
     { prunedToolCallIds: [] }, new Set(), Number), []);
 });
 
-test("checkpoint survives restart/fork; summary failure never replaces raw history", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cube-context-"));
+test("checkpoint survives restart/fork; summary failure never replaces raw history", { timeout: 30_000 }, async t => {
+  const root = process.env.CUBE_CONTEXT_TEST_ROOT ?? await mkdtemp(path.join(os.tmpdir(), "cube-context-"));
+  // LibSQL transaction handles on Windows are released at process exit.
+  if (process.platform === "win32" && !process.env.CUBE_CONTEXT_TEST_ROOT) {
+    try {
+      const env = { ...process.env, CUBE_CONTEXT_TEST_ROOT: root };
+      delete env.NODE_TEST_CONTEXT;
+      const result = await promisify(execFile)(process.execPath,
+        ["--import", "tsx", "--test", "--test-name-pattern=checkpoint survives", import.meta.filename],
+        { env, windowsHide: true, timeout: 25_000 });
+      t.diagnostic(result.stdout);
+      assert.match(result.stdout, /fail 0/);
+      assert.equal(result.stderr, "");
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+    return;
+  }
   const storage = new LibSQLStore({ id: "context-test", url: `file:${path.join(root, "test.sqlite")}` });
   try {
     await storage.init();
@@ -181,6 +199,7 @@ test("checkpoint survives restart/fork; summary failure never replaces raw histo
     assert.equal(calls, 2);
   } finally {
     await storage.close();
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    if (!process.env.CUBE_CONTEXT_TEST_ROOT)
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

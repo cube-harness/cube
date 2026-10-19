@@ -16,10 +16,20 @@ import type {
   ThreadSummary,
   UsageMetrics,
   SkillChoice,
+  PermissionState,
+  BackgroundService,
+  McpService,
+  SubagentService,
 } from "@cube/runtime";
 import { toRuntimeNotice } from "@cube/runtime";
 import { SkillPicker } from "../components/skill-picker.js";
+import { PermissionPicker } from "../components/permission-picker.js";
+import { TaskPicker } from "../components/task-picker.js";
+import { SubagentPicker } from "../components/subagent-picker.js";
+import { McpPicker } from "../components/mcp-picker.js";
 import { ApprovalPicker, type ToolApprovalDecision } from "../components/approval-picker.js";
+import { SubagentApprovalPicker, type SubagentApprovalRequest } from "../components/subagent-approval-picker.js";
+import { formatBinding } from "../keybindings.js";
 import {
   ToolSuspensionPicker,
   type ToolSuspensionRequest,
@@ -40,6 +50,7 @@ import { TitlePickerComponent } from "../components/title-picker.js";
 import { renderUsageBoxToString } from "../components/usage-box.js";
 import { WorkingIndicator } from "../components/working-indicator.js";
 import { PetPanel } from "../components/pet.js";
+import { appTheme } from "../themes/app.theme.js";
 
 export type ChatScreenOptions = {
   tui: TUI;
@@ -89,6 +100,23 @@ export class ChatScreen {
   readonly footer: Footer;
 
   private mounted = false;
+  private closeTasks?: () => void;
+  private closeMcp?: () => void;
+  private closeSubagents?: () => void;
+  private activeApprovalOverlay?: { key: string; dismiss(): void };
+  private readonly subagentApprovals = new Map<string, SubagentApprovalRequest>();
+  private subagentApprovalPicker?: SubagentApprovalPicker;
+  private closeSubagentReview?: () => void;
+  private subagentReviewClosed?: Promise<void>;
+  private readonly subagentApprovalHint: Component = {
+    invalidate: () => {},
+    render: width => {
+      const count = new Set([...this.subagentApprovals.keys()].map(id => id.split(":")[0])).size;
+      return count ? [truncateToWidth(appTheme.ui.primary(
+        `${count} ${count === 1 ? "subagent needs" : "subagents need"} approval · ${formatBinding("cube.subagent.approvals")} to review`,
+      ), width, "")] : [];
+    },
+  };
   private dock?: VStack;
   private inputPanel?: PetPanel;
   private transcript?: ScrollView;
@@ -127,6 +155,7 @@ export class ChatScreen {
     this.options.tui.addChild(this.infoBox);
     this.options.tui.addChild(this.messageList);
     this.options.tui.addChild(this.workingIndicator);
+    this.options.tui.addChild(this.subagentApprovalHint);
     this.options.tui.addChild(this.promptEditor);
     this.options.tui.addChild(this.footer);
     if (isViewportTUI(this.options.tui)) {
@@ -136,9 +165,21 @@ export class ChatScreen {
         () => this.inputPanel?.children.includes(this.promptEditor) ? this.promptEditor.getCardStartRow() : 0,
       );
       this.inputPanel.addChild(this.promptEditor);
-      this.dock = new VStack([this.inputPanel, { component: this.footer, shrink: 0 }]);
+      this.dock = new VStack([
+        { component: this.subagentApprovalHint, shrink: 0, visible: () => this.subagentApprovals.size > 0 },
+        this.inputPanel, { component: this.footer, shrink: 0 },
+      ]);
       void this.inputPanel.start();
       this.transcript = new ScrollView(this.messageList, { follow: "end", primary: true });
+      const backToBottom: Component = {
+        invalidate: () => {},
+        render: (width) => {
+          const text = truncateToWidth(" ⭣ Back to bottom · Esc ", width, "");
+          const space = Math.max(0, width - visibleWidth(text));
+          const left = Math.floor(space / 2);
+          return [" ".repeat(left) + appTheme.ui.primary.bgHex(appTheme.surface.background)(text)];
+        },
+      };
       const welcome: Component = {
         invalidate: () => { this.banner.invalidate(); this.infoBox.invalidate(); },
         render: (width) => [this.banner, this.infoBox].flatMap((component) => {
@@ -154,6 +195,7 @@ export class ChatScreen {
           basis: 0, grow: 1, visible: empty },
         { component: this.transcript, basis: 0, grow: 1, visible: () => !empty() },
         { component: this.workingIndicator, shrink: 0 },
+        { component: backToBottom, shrink: 0, visible: () => this.canReturnToBottom() },
         { component: this.dock, minSize: 2 },
       ]));
     }
@@ -165,6 +207,11 @@ export class ChatScreen {
   }
 
   unmount(): void {
+    this.closeTasks?.();
+    this.closeMcp?.();
+    this.closeSubagents?.();
+    this.closeSubagentReview?.();
+    this.subagentApprovals.clear();
     this.promptEditor.focused = false;
     this.inputPanel?.stop();
     this.workingIndicator.stop();
@@ -177,6 +224,7 @@ export class ChatScreen {
     this.options.tui.removeChild(this.footer);
     this.options.tui.removeChild(this.promptEditor);
     this.options.tui.removeChild(this.workingIndicator);
+    this.options.tui.removeChild(this.subagentApprovalHint);
     this.options.tui.removeChild(this.messageList);
     this.options.tui.removeChild(this.infoBox);
     this.options.tui.removeChild(this.banner);
@@ -184,6 +232,23 @@ export class ChatScreen {
 
   requestRender(): void {
     this.options.tui.requestRender();
+  }
+
+  setActivityCounts(background: number, subagents: number): void {
+    this.footer.setActivityCounts(background, subagents);
+    this.requestRender();
+  }
+
+  private canReturnToBottom(): boolean {
+    return this.promptEditor.focused && !this.promptEditor.isShowingAutocomplete()
+      && this.transcript !== undefined && !this.transcript.isFollowingEnd;
+  }
+
+  scrollToBottom(): boolean {
+    if (!this.canReturnToBottom()) return false;
+    this.transcript!.scrollToEnd();
+    this.requestRender();
+    return true;
   }
 
   startTerminal(): void {
@@ -263,6 +328,7 @@ export class ChatScreen {
   }
 
   setInfo(info: InfoBoxContent): void {
+    if (info.threadId !== undefined && info.threadId !== this.infoBox.getThreadId()) this.closeSubagents?.();
     this.infoBox.setInfo(info);
     this.footer.setInfo(info);
   }
@@ -347,6 +413,45 @@ export class ChatScreen {
     }));
   }
 
+  pickPermissions(state: PermissionState, onApply: (state: PermissionState) => Promise<void>): Promise<void> {
+    return this.showOverlay<void>((finish) => new PermissionPicker(state, {
+      onApply, onCancel: () => finish(), onChange: () => this.requestRender(),
+      onError: (error) => this.showNotice(toRuntimeNotice(error)),
+    }));
+  }
+
+  pickTasks(background: BackgroundService): Promise<void> {
+    let picker: TaskPicker;
+    return this.showOverlay<void>(finish => (picker = new TaskPicker(background, {
+      onClose: () => finish(), onChange: () => this.requestRender(),
+      onError: error => this.showNotice(toRuntimeNotice(error)),
+      logHeight: () => Math.max(3, this.options.tui.terminal.rows - 20),
+    })), finish => { this.closeTasks = () => finish(); }, () => {
+      picker.dispose(); this.closeTasks = undefined;
+    });
+  }
+
+  pickMcp(service: McpService): Promise<void> {
+    let picker: McpPicker;
+    return this.showOverlay<void>(finish => (picker = new McpPicker(service, {
+      tui: this.options.tui, onClose: () => finish(), onChange: () => this.requestRender(),
+    })), finish => { this.closeMcp = () => finish(); }, () => {
+      picker.dispose(); this.closeMcp = undefined;
+    });
+  }
+
+  pickSubagents(service: SubagentService, parentThreadId: string): Promise<void> {
+    let picker: SubagentPicker;
+    return this.showOverlay<void>(finish => (picker = new SubagentPicker(service,
+      { projectRoot: this.infoBox.getWorkspace(), parentThreadId }, {
+        onClose: () => finish(), onChange: () => this.requestRender(),
+        onError: error => this.showNotice(toRuntimeNotice(error)),
+        height: () => Math.max(3, this.options.tui.terminal.rows - 18),
+      })), finish => { this.closeSubagents = () => finish(); }, () => {
+        picker.dispose(); this.closeSubagents = undefined;
+      });
+  }
+
   pickTheme(current: string): Promise<string | null> {
     return this.showOverlay<string | null>(
       (finish) =>
@@ -395,18 +500,66 @@ export class ChatScreen {
     );
   }
 
-  requestApproval(input: { toolName: string; args: unknown }): Promise<ToolApprovalDecision> {
+  addSubagentApproval(request: SubagentApprovalRequest): void {
+    this.subagentApprovals.set(request.id, request);
+    this.subagentApprovalPicker?.setRequests([...this.subagentApprovals.values()]);
+    this.requestRender();
+  }
+
+  removeSubagentApproval(id: string): void {
+    if (!this.subagentApprovals.delete(id)) return;
+    if (!this.subagentApprovals.size) this.closeSubagentReview?.();
+    else this.subagentApprovalPicker?.setRequests([...this.subagentApprovals.values()]);
+    this.requestRender();
+  }
+
+  reviewSubagentApprovals(): boolean {
+    if (this.closeSubagentReview) {
+      this.closeSubagentReview();
+      return true;
+    }
+    if (!this.subagentApprovals.size || !this.promptEditor.focused
+      || this.promptEditor.isShowingAutocomplete() || this.activeApprovalOverlay || this.activeSuspensionOverlay) return false;
+    this.subagentReviewClosed = this.showOverlay<void>(
+      finish => (this.subagentApprovalPicker = new SubagentApprovalPicker(
+        [...this.subagentApprovals.values()], () => finish(),
+      )),
+      finish => { this.closeSubagentReview = () => finish(); },
+      () => {
+        this.subagentApprovalPicker = undefined;
+        this.closeSubagentReview = undefined;
+        this.subagentReviewClosed = undefined;
+      },
+    );
+    return true;
+  }
+
+  async requestApproval(input: { toolName: string; args: unknown; label?: string; directory?: string; interactionId?: string }): Promise<ToolApprovalDecision> {
+    // Keep a review already in focus until the user closes it; cancellation still wins.
+    if (this.subagentReviewClosed) {
+      let cancelled = false;
+      this.activeApprovalOverlay = { key: input.interactionId ?? input.toolName, dismiss: () => { cancelled = true; } };
+      await this.subagentReviewClosed;
+      this.activeApprovalOverlay = undefined;
+      if (cancelled) return "decline";
+    }
+    this.closeSubagents?.();
     return this.showOverlay<ToolApprovalDecision>(
       (finish) =>
         new ApprovalPicker({
           toolName: input.toolName,
           args: input.args,
+          label: input.label,
+          directory: input.directory ?? this.infoBox.getWorkspace(),
           onDecision: finish,
         }),
+      finish => { this.activeApprovalOverlay = { key: input.interactionId ?? input.toolName, dismiss: () => finish("decline") }; },
+      () => { this.activeApprovalOverlay = undefined; },
     );
   }
 
   requestToolSuspension(request: ToolSuspensionRequest): Promise<ToolSuspensionResolution> {
+    this.closeSubagents?.();
     return this.showOverlay<ToolSuspensionResolution>(
       (finish) => new ToolSuspensionPicker({ request, onResolve: finish }),
       (finish) => {
@@ -428,11 +581,19 @@ export class ChatScreen {
     this.activeSuspensionOverlay.dismiss();
   }
 
+  cancelApproval(key: string): void {
+    if (this.activeApprovalOverlay?.key === key) this.activeApprovalOverlay.dismiss();
+  }
+
   private showOverlay<T>(
     create: (finish: (value: T) => void) => Component,
     onOpen?: (finish: (value: T) => void) => void,
     onClose?: () => void,
   ): Promise<T> {
+    this.closeTasks?.();
+    this.closeMcp?.();
+    this.closeSubagents?.();
+    this.closeSubagentReview?.();
     return new Promise<T>((resolve) => {
       const host = this.inputPanel ?? this.dock ?? this.options.tui;
       let closed = false;

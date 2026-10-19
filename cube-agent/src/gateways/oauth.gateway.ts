@@ -88,45 +88,33 @@ export class OAuthGateway implements MastraModelGatewayInterface {
   }
 
   async resolveAuth(request: GatewayAuthRequest): Promise<GatewayAuthResult> {
+    let accessToken: string;
+    let headers: Record<string, string>;
     if (request.providerId === "google") {
       if (!this.credentials.google)
         throw new Error("Google OAuth is not configured. Run /gateway to sign in.");
-      const credential = await this.credentials.google.getValidCredential();
-      return {
-        bearerToken: credential.access_token,
-        apiKey: credential.access_token,
-        headers: { ...ANTIGRAVITY_HEADERS },
-        source: "gateway",
-      };
-    }
-    if (request.providerId === "anthropic") {
+      accessToken = (await this.credentials.google.getValidCredential()).access_token;
+      headers = { ...ANTIGRAVITY_HEADERS };
+    } else if (request.providerId === "anthropic") {
       if (!this.credentials.anthropic)
         throw new Error("Anthropic OAuth is not configured. Run /gateway to sign in.");
-      const credential = await this.credentials.anthropic.getValidCredential();
-      return {
-        bearerToken: credential.access_token,
-        apiKey: credential.access_token,
-        headers: { ...ANTHROPIC_OAUTH_HEADERS },
-        source: "gateway",
-      };
-    }
-    if (request.providerId === "xai") {
+      accessToken = (await this.credentials.anthropic.getValidCredential()).access_token;
+      headers = { ...ANTHROPIC_OAUTH_HEADERS };
+    } else if (request.providerId === "xai") {
       if (!this.credentials.xai)
         throw new Error("Grok Build is not configured. Run /gateway to sign in.");
-      const credential = await this.credentials.xai.getValidCredential();
-      return {
-        bearerToken: credential.access_token,
-        apiKey: credential.access_token,
-        headers: { ...GROK_BUILD_HEADERS },
-        source: "gateway",
-      };
+      accessToken = (await this.credentials.xai.getValidCredential()).access_token;
+      headers = { ...GROK_BUILD_HEADERS };
+    } else {
+      if (request.providerId !== "openai") throw new Error("Unsupported OAuth provider.");
+      const credential = await this.credentials.openai.getValidCredential();
+      accessToken = credential.access_token;
+      headers = { "ChatGPT-Account-Id": credential.account_id };
     }
-    if (request.providerId !== "openai") throw new Error("Unsupported OAuth provider.");
-    const credential = await this.credentials.openai.getValidCredential();
     return {
-      bearerToken: credential.access_token,
-      apiKey: credential.access_token,
-      headers: { "ChatGPT-Account-Id": credential.account_id },
+      bearerToken: accessToken,
+      apiKey: accessToken,
+      headers,
       source: "gateway",
     };
   }

@@ -43,7 +43,8 @@ test("Bootstrap seeds all template files into new home", async () => {
     assert.ok(existsSync(home.getSoulPath()));
     assert.ok(existsSync(home.getAuthPath()));
     assert.ok(existsSync(home.getMcpPath()));
-    assert.ok(existsSync(home.getWorkspacePath()));
+    assert.ok(existsSync(home.getPermissionPath()));
+    assert.equal(existsSync(path.join(home.getRoot(), "workspace.json")), false);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -60,19 +61,12 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
     assert.equal(config.model, undefined);
     assert.equal(config.gateway_options["local/ollama"]?.base_url, "http://127.0.0.1:11434");
     assert.equal(config.gateway_options["local/lmstudio"]?.base_url, "http://127.0.0.1:1234/v1");
-    assert.deepEqual(config.memory.storage, {
-      provider: "sqlite",
-      mode: "local",
-    });
-    assert.deepEqual(config.memory.vector, {
-      enabled: false,
-      provider: "sqlite",
-      mode: "local",
-    });
-    assert.deepEqual(config.memory.embedder, {
-      enabled: false,
-      model: null,
-    });
+    assert.equal("storage" in config.memory, false);
+    assert.equal(config.memory.durable.retrieval.enabled, false);
+    assert.equal(config.memory.durable.retrieval.model, null);
+    assert.equal("vector" in config.memory, false);
+    assert.equal("embedder" in config.memory, false);
+    assert.equal("semantic_recall" in config.memory, false);
     assert.equal("read_only" in config.memory, false);
     assert.equal("last_messages" in config.memory, false);
     assert.equal("filter_incomplete_tool_calls" in config.memory, false);
@@ -82,7 +76,7 @@ test("ConfigStore and SoulStore can read seeded config", async () => {
       instructions: "Generate a concise title under 80 characters.",
     });
     assert.deepEqual(config.memory.compaction, {
-      manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
+      model: "inherit", manual_min_ratio: 0.3, keep_recent_ratio: 0.20, reserve_tokens: 16384,
     });
     assert.equal("working_memory" in config.memory, false);
 
@@ -139,6 +133,10 @@ test("SoulStore validates character limits on read, write, and direct validation
     await createBootstrap(home).run();
     const soulStore = SoulStore(home);
     const maxChars = home.getSoulMaxCharacters();
+    await assert.rejects(soulStore.write("X".repeat(2001)), /exceeds max length/);
+    const overridden = SoulStore(home, 3000);
+    await overridden.write("X".repeat(2500));
+    assert.equal((await overridden.read()).length, 2500);
 
     // Valid write & read
     const validContent = "A".repeat(100);

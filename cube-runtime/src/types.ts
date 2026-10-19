@@ -1,4 +1,6 @@
 import type { AgentControllerDisplayState, AgentControllerEvent, Session } from "@cube/agent";
+import type { SubagentTarget } from "./services/subagent.service.js";
+import type { SubagentInteraction } from "./services/subagent.service.js";
 import type {
   ApiKeyGatewayId,
   GatewayId,
@@ -7,13 +9,28 @@ import type {
   ReasoningEffort,
 } from "@cube/workspace";
 
-export type RuntimeEvent = AgentControllerEvent;
+export type RuntimeEvent = AgentControllerEvent | SubagentInteraction;
 export type RuntimeDisplayState = Readonly<AgentControllerDisplayState> & { compacting?: boolean };
 export type RuntimeMessage = Awaited<ReturnType<Session["thread"]["listMessages"]>>[number];
 
 export type RuntimeNotice = {
   level: "info" | "error";
   message: string;
+};
+
+export type BackgroundJobRef = { id: string; cursor?: number; limit?: number };
+export type BackgroundJobSummary = BackgroundJobRef & {
+  title: string; status: string; threadId?: string;
+  createdAt: number; completedAt?: number; canStop: boolean;
+};
+export type BackgroundJobDetail = BackgroundJobSummary & {
+  toolName?: string; command?: string; reason?: string; cwd?: string;
+  runId?: string; toolCallId?: string; exitCode?: number | null;
+  output: string; truncated: boolean;
+  ownerDeleted: boolean;
+  log_available?: boolean; output_complete?: boolean; next_cursor?: number;
+  output_warning?: string;
+  read_more?: { tool: "manage_task"; action: "get"; id: string; cursor: number };
 };
 
 export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
@@ -56,6 +73,7 @@ export const toRuntimeNotice = (error: unknown): RuntimeNotice => {
 };
 
 export type ToolApprovalResponse = {
+  target?: SubagentTarget;
   toolCallId: string;
   toolName: string;
   decision: "approve" | "decline" | "approve_prefix";
@@ -63,6 +81,7 @@ export type ToolApprovalResponse = {
 };
 
 export type ToolSuspensionResponse = {
+  target?: SubagentTarget;
   toolCallId: string;
   resumeData: unknown;
 };
@@ -193,7 +212,17 @@ export type SlashCommandSuggestion = {
   description: string;
 };
 
+export type PermissionPolicy = "ask" | "allow" | "deny";
+export type PermissionState = {
+  workspaceOnly: boolean;
+  tools: Record<string, PermissionPolicy>;
+};
+
 export type PromptResult =
+  | { kind: "mcp" }
+  | { kind: "tasks" }
+  | { kind: "subagents" }
+  | { kind: "permissions"; permissions: PermissionState }
   | { kind: "skills"; skills: import("@cube/agent").SkillChoice[] }
   | { kind: "ignored" }
   | { kind: "submitted" }
@@ -210,7 +239,6 @@ export type PromptResult =
   | { kind: "preferences"; request: PreferenceRequest }
   | { kind: "preference"; preference: PreferenceState }
   | { kind: "usage"; metrics: UsageMetrics; notice?: RuntimeNotice }
-  | { kind: "command-catalog"; commands: SlashCommandSuggestion[] }
   | { kind: "copy-content"; content: string }
   | { kind: "exit-requested" };
 

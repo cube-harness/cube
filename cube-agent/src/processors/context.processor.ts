@@ -10,6 +10,7 @@ import {
   type ContextLimits,
 } from "../context.js";
 import { buildSummaryContext } from "../prompts/context.prompt.js";
+import { isEnvironmentContext } from "./environment.processor.js";
 
 type Prompt = ProcessLLMRequestArgs["prompt"];
 type Segment = { id?: string; message: Prompt[number] };
@@ -103,6 +104,7 @@ export function makeRequestFrame(input: {
   isCurrent: () => boolean;
 }): RequestFrame {
   const segments = mapRequestSources(input.messages, input.prompt, input.protectedMessages);
+  const environmentId = input.messages.filter(isEnvironmentContext).at(-1)?.id;
   const indexById = new Map(input.messages.map((message, index) => [message.id, index]));
   const count = (prompt: Prompt) => {
     const tokens = estimateTokens(prompt);
@@ -118,6 +120,7 @@ export function makeRequestFrame(input: {
     const retained = segments.filter(
       (segment) =>
         segment.id === undefined ||
+        segment.id === environmentId ||
         locate(segment.id) >= boundary ||
         segment.id === checkpoint.summary?.taskMessageId,
     );
@@ -126,7 +129,9 @@ export function makeRequestFrame(input: {
       new Set(checkpoint.prunedToolCallIds),
     );
     if (!checkpoint.summary) return prompt;
-    let position = prompt.findIndex((message) => message.role !== "system");
+    let position = prompt.findIndex(
+      (message) => message.role !== "system" && !input.protectedMessages.has(message),
+    );
     if (position < 0) position = prompt.length;
     prompt.splice(position, 0, {
       role: "user",

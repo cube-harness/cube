@@ -40,14 +40,19 @@ export class PreferenceService {
       ) {
         throw new Error("Skill is no longer available. Reopen /skills.");
       }
+      const keyed = pending.map(({ path, enabled }) => ({
+        configKey: choices.find(skill => skill.path === path)!.configKey,
+        enabled,
+      }));
       const updates = new Map(
-        pending.map(({ path, enabled }) => [skillPathIdentity(path), enabled]),
+        keyed.map(({ configKey, enabled }) => [skillPathIdentity(configKey), enabled]),
       );
       const store = ConfigStore(this.home);
       const current = await store.read();
       const aliases = new Set<string>();
       for (const item of current.skills.disabled) {
-        if (updates.has(skillPathIdentity(await realpath(item).catch(() => item))))
+        const canonical = item.startsWith("builtin:") ? item : await realpath(item).catch(() => item);
+        if (updates.has(skillPathIdentity(canonical)))
           aliases.add(item);
       }
       const saved = await store.update((config) => ({
@@ -58,7 +63,7 @@ export class PreferenceService {
               ...config.skills.disabled.filter(
                 (item) => !aliases.has(item) && !updates.has(skillPathIdentity(item)),
               ),
-              ...pending.filter(({ enabled }) => !enabled).map(({ path }) => path),
+              ...keyed.filter(({ enabled }) => !enabled).map(({ configKey }) => configKey),
             ]),
           ],
         },

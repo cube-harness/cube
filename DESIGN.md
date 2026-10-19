@@ -148,7 +148,7 @@ Prompt history is `~/.cube/history.jsonl`, separate from thread transcripts.
 | `SOUL.md` | Persona injected as the first system instruction. |
 | `AGENTS.md` | Global instructions. |
 | `history.jsonl` | Prompt editor history. |
-| `workspace.json` | Trusted workspace registry. |
+| `permission.json` | Workspace trust choices and per-workspace permission overrides. |
 | `mcp.json` | MCP client config seed. |
 | `model-catalog.json` | Cached provider models. |
 | `memories/memory.sqlite` | Threads, messages, vectors. |

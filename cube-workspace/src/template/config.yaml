@@ -21,48 +21,41 @@ status_line:
 
 telemetry: false
 
+subagents:
+  concurrency: 2
+  model: inherit
+  # reasoning_effort: medium # Shared optional default; custom role Markdown wins.
+  timeout_ms: 0 # No timeout. Positive milliseconds include approval waits, not queue time.
+
+background_tasks:
+  enabled: true
+  concurrency: 2
+  timeout_ms: 300000
+  # 0 means no deadline. execute_command timeout:null overrides this per command.
+
+truncation_policy:
+  execute_command:
+    max_bytes: 262144 # Preview ceiling, not a log-file size cap or token budget.
+    max_lines: 200 # Default preview lines; explicit tool tail can request up to 2000.
+  # Larger output is preserved for manage_task get with cursor: 0.
+  # Logs are temporary and removed when this Cube runtime exits.
+
 soul:
-  max_characters: 20000
+  max_characters: 2000
 
 memory:
-  # Cube currently supports only local SQLite storage. Cube owns the database
-  # ID, URL and <CubeHome>/memories/memory.sqlite path.
-  storage:
-    provider: sqlite
-    mode: local
-
-  # Optional vector storage for Semantic Recall.
-  vector:
-    enabled: false
-    provider: sqlite
-    mode: local
-
-  # Required for vector search. When enabled, model must be a concrete
-  # embedding model ID such as openai/text-embedding-3-small.
-  embedder:
-    enabled: false
-    model: null
-
   # When disabled, Cube derives the title from the first user prompt without
   # an LLM call. model accepts inherit or a concrete provider/model ID.
   generate_title:
     enabled: false
     model: inherit
+    # reasoning_effort: low
     instructions: Generate a concise title under 80 characters.
 
-  # RAG search over historical raw messages. Enabling this requires both
-  # vector.enabled and embedder.enabled.
-  semantic_recall:
-    enabled: false
-    top_k: 4
-    message_range:
-      before: 1
-      after: 1
-    scope: resource
-    # null disables similarity-score filtering.
-    threshold: null
-
   compaction:
+    # inherit uses the active chat model; a model ID overrides only summarization.
+    model: inherit
+    # reasoning_effort: low
     # /compact requires this fraction of the model context plus a safe cut.
     manual_min_ratio: 0.30
     # Fraction of conversation capacity retained after reserving instructions
@@ -71,9 +64,16 @@ memory:
     # Generation/counting reserve, not a fixed summary length.
     reserve_tokens: 16384
 
-permissions:
-  require_approval_for:
-    - execute_command
-    - edit_file
-    - write_file
-    - apply_patch
+  durable:
+    # Background extraction/consolidation consumes normal provider usage.
+    enabled: true
+    model: inherit
+    # reasoning_effort: low
+    min_idle_hours: 6
+    # Hybrid search over this project's committed Markdown memory, not raw history.
+    # API embeddings consume provider usage; local models use CPU/RAM/GPU.
+    retrieval:
+      enabled: false
+      model: null
+      # Cube manages task prefixes, section splitting and provider-default dimensions.
+      # Local Nomic example: model: ollama/nomic-embed-text:latest

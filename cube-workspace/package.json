@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && node -e \"require('node:fs').cpSync('src/skills', 'dist/skills', { recursive: true })\"",
     "test": "tsx --test --test-isolation=none tests/**/*.test.ts"
   },
   "dependencies": {

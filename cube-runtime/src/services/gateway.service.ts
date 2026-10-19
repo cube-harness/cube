@@ -10,6 +10,8 @@ import {
 } from "@cube/agent";
 import {
   CubeAuthSchema,
+  DEFAULT_OLLAMA_URL,
+  DEFAULT_LMSTUDIO_URL,
   ModelManager,
   type CatalogModel,
   ApiKeyProviderSchema,
@@ -94,7 +96,7 @@ type PendingDraft = {
   sourceKey?: string;
 };
 
-const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.159.2";
+const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.163.0";
 
 const containsModel = (catalog: ModelCatalog, modelId: string): boolean =>
   Object.values(catalog.providers).some((provider) =>
@@ -227,7 +229,7 @@ export class GatewayService {
     }
     const sourceKey = ModelManager.sourceKey(gatewayId, {
       config,
-      auth: { api_keys: {}, oauth: account },
+      auth: { api_keys: {}, oauth: account, mcp: {} },
     });
     const usage = await readUsage();
     if (
@@ -295,7 +297,8 @@ export class GatewayService {
           ? Boolean(auth.api_keys[descriptor.providerId as keyof typeof auth.api_keys])
           : descriptor.group === "oauth"
             ? Boolean(auth.oauth[descriptor.providerId as keyof typeof auth.oauth])
-            : Boolean(config.gateway_options[gatewayId as LocalGatewayId]),
+            : Boolean(config.gateway_options[gatewayId as LocalGatewayId]) ||
+              config.gateway === gatewayId,
     }));
   }
 
@@ -355,82 +358,71 @@ export class GatewayService {
     completion: Promise<GatewayDraft>;
     cancel(): Promise<void>;
   }> {
-    if (!this.dependencies.openAIAuth) {
-      throw new Error("OpenAI sign-in is unavailable.");
-    }
-    const generation = this.invalidate("oauth/openai");
-    await this.cancelLogin("oauth/openai");
-    const sourceKey = await this.sourceKey("oauth/openai");
-    const login = await this.dependencies.openAIAuth.beginLogin(signal);
-    if (this.generation("oauth/openai") !== generation) {
-      void login.completion.catch(() => undefined);
-      await login.cancel();
-      this.assertGeneration("oauth/openai", generation);
-    }
-    this.logins.set("oauth/openai", login);
-    const completion = login.completion
-      .then(async (credential) => {
-        this.assertGeneration("oauth/openai", generation);
-        if ((await this.sourceKey("oauth/openai")) !== sourceKey)
-          throw new Error("OpenAI account changed. Run /gateway again.");
-        const config = await this.dependencies.config.read();
-        return this.createDraft(
-          "oauth/openai",
-          { kind: "oauth", provider: "openai", credential },
-          config,
-          signal,
-          generation,
-          sourceKey,
-        );
-      })
-      .finally(() => {
-        if (this.logins.get("oauth/openai") === login) this.logins.delete("oauth/openai");
-      });
-    void completion.catch(() => undefined);
-    return { authorizationUrl: login.authorizationUrl, cancel: login.cancel, completion };
+    const auth = this.dependencies.openAIAuth;
+    if (!auth) throw new Error("OpenAI sign-in is unavailable.");
+    return this.beginOAuthLogin(
+      "oauth/openai",
+      "OpenAI",
+      () => auth.beginLogin(signal),
+      (credential: OpenAIOAuthCredential) => ({ kind: "oauth", provider: "openai", credential }),
+      signal,
+    );
   }
 
   async beginAnthropicLogin(signal?: AbortSignal) {
-    if (!this.dependencies.anthropicAuth) throw new Error("Anthropic sign-in is unavailable.");
-    const gatewayId = "oauth/anthropic";
-    const generation = this.invalidate(gatewayId);
-    await this.cancelLogin(gatewayId);
-    const sourceKey = await this.sourceKey(gatewayId);
-    const login = await this.dependencies.anthropicAuth.beginLogin(signal);
-    if (this.generation(gatewayId) !== generation) {
-      void login.completion.catch(() => undefined);
-      await login.cancel();
-      this.assertGeneration(gatewayId, generation);
-    }
-    this.logins.set(gatewayId, login);
-    const completion = login.completion
-      .then(async (credential) => {
-        this.assertGeneration(gatewayId, generation);
-        if ((await this.sourceKey(gatewayId)) !== sourceKey)
-          throw new Error("Anthropic account changed. Run /gateway again.");
-        return this.createDraft(
-          gatewayId,
-          { kind: "oauth", provider: "anthropic", credential },
-          await this.dependencies.config.read(),
-          signal,
-          generation,
-          sourceKey,
-        );
-      })
-      .finally(() => {
-        if (this.logins.get(gatewayId) === login) this.logins.delete(gatewayId);
-      });
-    void completion.catch(() => undefined);
-    return { ...login, completion };
+    const auth = this.dependencies.anthropicAuth;
+    if (!auth) throw new Error("Anthropic sign-in is unavailable.");
+    return this.beginOAuthLogin(
+      "oauth/anthropic",
+      "Anthropic",
+      () => auth.beginLogin(signal),
+      (credential: AnthropicOAuthCredential) => ({
+        kind: "oauth",
+        provider: "anthropic",
+        credential,
+      }),
+      signal,
+    );
   }
 
   async beginGoogleLogin(signal?: AbortSignal) {
-    if (!this.dependencies.googleAuth) throw new Error("Google sign-in is unavailable.");
-    const gatewayId = "oauth/google";
+    const auth = this.dependencies.googleAuth;
+    if (!auth) throw new Error("Google sign-in is unavailable.");
+    return this.beginOAuthLogin(
+      "oauth/google",
+      "Google",
+      () => auth.beginLogin(signal),
+      (credential: GoogleOAuthCredential) => ({ kind: "oauth", provider: "google", credential }),
+      signal,
+    );
+  }
+
+  async beginGrokLogin(signal?: AbortSignal) {
+    const auth = this.dependencies.grokAuth;
+    if (!auth) throw new Error("Grok Build sign-in is unavailable.");
+    return this.beginOAuthLogin(
+      "oauth/xai",
+      "xAI",
+      () => auth.beginLogin(signal),
+      (credential: GrokOAuthCredential) => ({ kind: "oauth", provider: "xai", credential }),
+      signal,
+    );
+  }
+
+  private async beginOAuthLogin<
+    Credential,
+    Login extends { completion: Promise<Credential>; cancel(): Promise<void> },
+  >(
+    gatewayId: GatewayId,
+    accountName: string,
+    beginLogin: () => Promise<Login>,
+    candidate: (credential: Credential) => PendingCandidate,
+    signal?: AbortSignal,
+  ): Promise<Omit<Login, "completion"> & { completion: Promise<GatewayDraft> }> {
     const generation = this.invalidate(gatewayId);
     await this.cancelLogin(gatewayId);
     const sourceKey = await this.sourceKey(gatewayId);
-    const login = await this.dependencies.googleAuth.beginLogin(signal);
+    const login = await beginLogin();
     if (this.generation(gatewayId) !== generation) {
       void login.completion.catch(() => undefined);
       await login.cancel();
@@ -441,10 +433,10 @@ export class GatewayService {
       .then(async (credential) => {
         this.assertGeneration(gatewayId, generation);
         if ((await this.sourceKey(gatewayId)) !== sourceKey)
-          throw new Error("Google account changed. Run /gateway again.");
+          throw new Error(`${accountName} account changed. Run /gateway again.`);
         return this.createDraft(
           gatewayId,
-          { kind: "oauth", provider: "google", credential },
+          candidate(credential),
           await this.dependencies.config.read(),
           signal,
           generation,
@@ -462,45 +454,6 @@ export class GatewayService {
     const pending = this.pending.get(draftId);
     if (pending) clearTimeout(pending.timeout);
     this.pending.delete(draftId);
-  }
-
-  async beginGrokLogin(signal?: AbortSignal) {
-    if (!this.dependencies.grokAuth) throw new Error("Grok Build sign-in is unavailable.");
-    const generation = this.invalidate("oauth/xai");
-    await this.cancelLogin("oauth/xai");
-    const sourceKey = await this.sourceKey("oauth/xai");
-    const login = await this.dependencies.grokAuth.beginLogin(signal);
-    if (this.generation("oauth/xai") !== generation) {
-      void login.completion.catch(() => undefined);
-      await login.cancel();
-      this.assertGeneration("oauth/xai", generation);
-    }
-    this.logins.set("oauth/xai", login);
-    const completion = login.completion.then(async (credential) => {
-      this.assertGeneration("oauth/xai", generation);
-      if ((await this.sourceKey("oauth/xai")) !== sourceKey)
-        throw new Error("xAI account changed. Run /gateway again.");
-      return this.createDraft(
-        "oauth/xai",
-        { kind: "oauth", provider: "xai", credential },
-        await this.dependencies.config.read(),
-        signal,
-        generation,
-        sourceKey,
-      );
-    });
-    void completion
-      .finally(() => {
-        if (this.logins.get("oauth/xai") === login) this.logins.delete("oauth/xai");
-      })
-      .catch(() => undefined);
-    return {
-      authorizationUrl: login.authorizationUrl,
-      userCode: login.userCode,
-      expiresAt: login.expiresAt,
-      cancel: login.cancel,
-      completion,
-    };
   }
 
   commitInitial(selection: GatewaySelection): Promise<GatewayState> {
@@ -762,8 +715,8 @@ export class GatewayService {
       const configuredUrl =
         candidate.kind === "local" && candidate.gatewayId === local
           ? candidate.baseUrl
-          : config.gateway_options[local]?.base_url;
-      if (!configuredUrl) throw new Error(`Missing endpoint for ${gatewayId}.`);
+          : (config.gateway_options[local]?.base_url ??
+            (local === "local/ollama" ? DEFAULT_OLLAMA_URL : DEFAULT_LMSTUDIO_URL));
       if (local === "local/ollama") {
         const baseUrl = normalizeOllamaBaseUrl(configuredUrl);
         const payload = await this.fetchJson(`${baseUrl}/api/tags`, {}, "Ollama", signal);

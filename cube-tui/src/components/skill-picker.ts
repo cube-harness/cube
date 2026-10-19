@@ -6,6 +6,7 @@ import {
   getKeybindings,
   fuzzyFilter,
   truncateToWidth,
+  visibleWidth,
   type Component,
   type Focusable,
 } from "@earendil-works/pi-tui";
@@ -41,6 +42,7 @@ export class SkillPicker implements Component, Focusable {
   }
 
   private rebuild(selected?: string): void {
+    const nameWidth = Math.max(0, ...this.items.map((skill) => visibleWidth(skill.name)));
     const visible = fuzzyFilter(
       this.items,
       this.searchBar.getQuery().trim(),
@@ -49,7 +51,7 @@ export class SkillPicker implements Component, Focusable {
     this.list = new SelectList(
       visible.map((skill) => ({
         value: skill.path,
-        label: `${skill.enabled ? appTheme.status.success("[x]") : appTheme.ui.muted("[ ]")} ${skill.name}  ${appTheme.ui.muted(skill.description.replace(/\s+/g, " ").trim())}`,
+        label: `${skill.enabled ? appTheme.status.success("[x]") : appTheme.ui.muted("[ ]")} ${skill.name}${" ".repeat(nameWidth - visibleWidth(skill.name))}  ${appTheme.ui.muted(skill.description.replace(/\s+/g, " ").trim())}`,
       })),
       10,
       { ...createSelectListTheme(), noMatch: () => appTheme.ui.muted("No matching skills.") },

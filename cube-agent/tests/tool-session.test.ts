@@ -14,6 +14,60 @@ import { configureCubePermissions } from "../src/permission.js";
 import { CubeRuntime } from "../../cube-runtime/src/runtime.js";
 import { cubeAskUserTool } from "../src/tools/ask-user.tool.js";
 
+test("live Ask, Allow and Deny control actual agent-owned tool execution", { timeout: 15_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cube-live-tool-policies-"));
+  const files = createFileTools(root);
+  let issueTool = false;
+  let target = "";
+  let gates = 0;
+  const model = new MockLanguageModelV3({ doStream: async () => {
+    const call = issueTool;
+    issueTool = false;
+    return { stream: new ReadableStream({ start(stream) {
+      stream.enqueue({ type: "stream-start", warnings: [] });
+      if (call) stream.enqueue({ type: "tool-call", toolCallId: target, toolName: "write_file",
+        input: JSON.stringify({ path: target, content: "allowed" }) });
+      stream.enqueue({ type: "finish", finishReason: { unified: call ? "tool-calls" : "stop", raw: call ? "tool_calls" : "stop" },
+        usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
+      stream.close();
+    } }) };
+  } });
+  const agent = new Agent({ id: "policy-agent", name: "Policy agent", instructions: "Test", model, tools: files.tools });
+  const controller = new AgentController({ id: "policy-controller", agent,
+    memory: new Memory({ options: { generateTitle: false, lastMessages: 100 } }),
+    modes: [{ id: "default", name: "Default", metadata: { default: true } }],
+    toolCategoryResolver: () => "other",
+  });
+  const mastra = new Mastra({ storage: new LibSQLStore({ id: "policy-test", url: ":memory:" }), agentControllers: { controller }, logger: false });
+  const session = await controller.createSession({ resourceId: root });
+  session.subscribe((event) => {
+    if (event.type === "tool_approval_required") {
+      gates++;
+      session.respondToToolApproval({ decision: "approve", toolCallId: event.toolCallId });
+    }
+  });
+  try {
+    await session.thread.create({ id: "policy-thread" });
+    for (const policy of ["ask", "allow", "deny"] as const) {
+      await configureCubePermissions(session, {
+        require_approval_for: policy === "ask" ? ["write_file"] : [],
+        deny_for: policy === "deny" ? ["write_file"] : [],
+      });
+      issueTool = true;
+      target = `${policy}.txt`;
+      await session.followUp({ content: `Create ${target}` });
+      if (policy === "deny") await assert.rejects(readFile(join(root, target)), { code: "ENOENT" });
+      else assert.equal(await readFile(join(root, target), "utf8"), "allowed");
+    }
+    assert.equal(gates, 1, "only Ask should open an approval gate");
+  } finally {
+    session.thread.detachFromCurrent();
+    await session.thread.clearAndReleaseLock();
+    await mastra.shutdown();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 for (const mode of ["single", "parallel", "queued"]) {
 const parallel = mode === "parallel";
 test(`declining ${mode} ask_user lets the model continue and the next prompt finish`, { timeout: 15_000 }, async () => {
@@ -106,22 +160,98 @@ test(`declining ${mode} ask_user lets the model continue and the next prompt fin
 });
 }
 
+test("failed file preparation returns errors without requesting approval", { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cube-invalid-tools-"));
+  const files = createFileTools(root);
+  const requests: any[] = [];
+  const attempts = [
+    { toolName: "write_file", input: { path: "../unauthorized.txt", content: "no" } },
+    { toolName: "edit_file", input: { path: "../unauthorized.txt", old_string: "old", new_string: "new" } },
+    { toolName: "apply_patch", input: { patch: "*** Begin Patch\n*** Add File: ../unauthorized.txt\n+no\n*** End Patch" } },
+    { toolName: "edit_file", input: { path: "a.txt", old_string: "missing", new_string: "new" } },
+    { toolName: "write_file", input: { path: "a.txt", content: "no" } },
+    { toolName: "write_file", input: { path: "large.txt", content: "x".repeat(70_000) } },
+  ];
+  let calls = 0;
+  const model = new MockLanguageModelV3({ doStream: async ({ prompt }) => {
+    requests.push(prompt);
+    const first = calls++ === 0;
+    return { stream: new ReadableStream({ start(stream) {
+      stream.enqueue({ type: "stream-start", warnings: [] });
+      if (first) {
+        for (const [index, attempt] of attempts.entries()) {
+          stream.enqueue({ type: "tool-call", toolCallId: `invalid-${index}`, toolName: attempt.toolName, input: JSON.stringify(attempt.input) });
+        }
+      } else {
+        stream.enqueue({ type: "text-start", id: "answer" });
+        stream.enqueue({ type: "text-delta", id: "answer", delta: "done" });
+        stream.enqueue({ type: "text-end", id: "answer" });
+      }
+      stream.enqueue({ type: "finish", finishReason: { unified: first ? "tool-calls" : "stop", raw: first ? "tool_calls" : "stop" }, usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } } });
+      stream.close();
+    } }) };
+  } });
+  const agent = new Agent({ id: "invalid-files", name: "Invalid files", instructions: "Cube", model, tools: files.tools });
+  const controller = new AgentController({ id: "invalid-controller", agent,
+    memory: new Memory({ options: { generateTitle: false, lastMessages: 100 } }),
+    modes: [{ id: "default", name: "Default", metadata: { default: true } }],
+  });
+  const mastra = new Mastra({ storage: new LibSQLStore({ id: "invalid-files", url: ":memory:" }), agentControllers: { controller }, logger: false });
+  const session = await controller.createSession({ resourceId: root });
+  const approvals: string[] = [];
+  session.subscribe((event) => {
+    if (event.type !== "tool_approval_required") return;
+    approvals.push(event.toolCallId);
+    session.respondToToolApproval({ decision: "decline", toolCallId: event.toolCallId });
+  });
+  try {
+    await writeFile(join(root, "a.txt"), "before\n");
+    await configureCubePermissions(session, { require_approval_for: ["write_file"] });
+    await session.thread.create({ id: "invalid-history" });
+    await session.followUp({ content: "Try the invalid file changes" });
+    assert.deepEqual(approvals, [], "preparation failures must not open approval");
+    const outputs = requests[1].filter((message: any) => message.role === "tool")
+      .flatMap((message: any) => message.content.map((part: any) => part.output));
+    assert.equal(outputs.length, attempts.length);
+    for (const output of outputs.slice(0, 3)) {
+      assert.deepEqual(output, { type: "text", value: "Permission denied: access on ../unauthorized.txt" });
+    }
+    assert.match(outputs[3].value, /not found|match/i);
+    assert.match(outputs[4].value, /File exists/);
+    assert.match(outputs[5].value, /Approval diff exceeds/);
+    assert.equal(await readFile(join(root, "a.txt"), "utf8"), "before\n");
+    await assert.rejects(readFile(join(root, "large.txt")), { code: "ENOENT" });
+    assert.equal(session.run.isRunning(), false);
+    assert.equal(session.suspensions.hasPending(), false);
+    await session.followUp({ content: "Continue" });
+    assert.equal(calls, 3);
+  } finally {
+    session.thread.detachFromCurrent();
+    await session.thread.clearAndReleaseLock();
+    await mastra.shutdown();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 test("native approval stores actual diffs but sends the model a short result, including on resume", { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "cube-native-tools-"));
   const files = createFileTools(root);
   const requests: any[] = [];
   let calls = 0;
+  let nextEdit: string | undefined;
   const model = new MockLanguageModelV3({ doStream: async ({ prompt, tools }) => {
     requests.push({ prompt, tools });
     const first = calls++ === 0;
-    const chunks = first ? [
-      { type: "tool-call", toolCallId: "edit-call", toolName: "edit_file", input: JSON.stringify({ path: "a.txt", old_string: "before", new_string: "after" }) },
+    const editPath = first ? "a.txt" : nextEdit;
+    nextEdit = undefined;
+    const chunks = editPath ? [
+      { type: "tool-call", toolCallId: first ? "edit-call" : `edit-${calls}`, toolName: "edit_file", input: JSON.stringify({ path: editPath, old_string: "before", new_string: "after" }) },
     ] : [
       { type: "text-start", id: "answer" }, { type: "text-delta", id: "answer", delta: "done" }, { type: "text-end", id: "answer" },
     ];
     return { stream: new ReadableStream({ start(controller) {
       for (const chunk of [{ type: "stream-start", warnings: [] }, ...chunks, {
-        type: "finish", finishReason: { unified: first ? "tool-calls" : "stop", raw: first ? "tool_calls" : "stop" },
+        type: "finish", finishReason: { unified: editPath ? "tool-calls" : "stop", raw: editPath ? "tool_calls" : "stop" },
         usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } },
       }]) controller.enqueue(chunk);
       controller.close();
@@ -151,7 +281,7 @@ test("native approval stores actual diffs but sends the model a short result, in
   });
   try {
     await writeFile(join(root, "a.txt"), "before\n");
-    await configureCubePermissions(session, { require_approval_for: ["edit_file"] });
+    await configureCubePermissions(session, { require_approval_for: ["edit_file", "apply_patch"] });
     assert.equal(session.resolveToolApproval("apply_patch"), "ask");
     await session.thread.create({ id: "tool-history" });
     await session.followUp({ content: "Edit the file" });
@@ -180,6 +310,21 @@ test("native approval stores actual diffs but sends the model a short result, in
       const resumedOutputs = requests.at(-1).prompt.filter((m: any) => m.role === "tool").flatMap((m: any) => m.content.map((p: any) => p.output));
       assert.deepEqual(resumedOutputs, [{ type: "text", value: "update: a.txt (+1/-1)" }]);
       assert.equal(await readFile(join(root, "a.txt"), "utf8"), "different now\n");
+      const unexpectedApprovals: string[] = [];
+      resumed.subscribe((event) => {
+        if (event.type !== "tool_approval_required") return;
+        unexpectedApprovals.push(event.toolCallId);
+        resumed.respondToToolApproval({ decision: "decline", toolCallId: event.toolCallId });
+      });
+      for (const policy of ["deny", "allow"] as const) {
+        if (policy === "allow") await configureCubePermissions(resumed, { require_approval_for: [] });
+        else await resumed.permissions.setForTool({ toolName: "edit_file", policy });
+        nextEdit = `${policy}.txt`;
+        await writeFile(join(root, nextEdit), "before\n");
+        await resumed.followUp({ content: `Try the ${policy} policy` });
+        assert.equal(await readFile(join(root, `${policy}.txt`), "utf8"), policy === "allow" ? "after\n" : "before\n");
+      }
+      assert.deepEqual(unexpectedApprovals, []);
     } finally { resumed.thread.detachFromCurrent(); await resumed.thread.clearAndReleaseLock(); }
   } finally {
     session.thread.detachFromCurrent();

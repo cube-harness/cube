@@ -62,7 +62,7 @@ export const appTheme: AppTheme = {
   },
   status: {
     success: chalk.hex("#34D399").bold,
-    warning: chalk.hex("#FBBF24").bold,
+    warning: chalk.hex("#FEBC2E").bold,
     error: chalk.hex("#FB7185").bold,
     info: chalk.hex("#7DD3FC"),
   },

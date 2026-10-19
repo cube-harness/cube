@@ -5,6 +5,9 @@ import type { PreferenceService } from "./services/preference.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
 import type { PromptService } from "./services/prompt.service.js";
+import type { PermissionService } from "./services/permission.service.js";
+import type { McpService } from "./services/mcp.service.js";
+import type { SubagentService } from "./services/subagent.service.js";
 import { toRuntimeNotice, type PromptResult, type SlashCommandSuggestion } from "./types.js";
 
 export type ParsedSlashCommand = {
@@ -16,9 +19,12 @@ export type SlashCommandContext = {
   thread: ThreadService;
   model: ModelService;
   preference: PreferenceService;
+  permission: PermissionService;
   memory: MemoryService;
   gateway: GatewayService;
   prompt: Pick<PromptService, "initialize">;
+  mcp?: McpService;
+  subagents?: SubagentService;
 };
 
 type SlashCommandDefinition = SlashCommandSuggestion & {
@@ -60,6 +66,28 @@ const parseModelSelection = (argument: string) => {
 
 const definitions: SlashCommandDefinition[] = [
   {
+    name: "/subagents",
+    description: "inspect and manage delegated child agents",
+    execute: async () => ({ kind: "subagents" }),
+  },
+  {
+    name: "/mcp",
+    description: "manage MCP servers and tools",
+    execute: async () => ({ kind: "mcp" }),
+  },
+  {
+    name: "/tasks",
+    description: "inspect or stop background tasks and processes",
+    execute: async () => ({ kind: "tasks" }),
+  },
+  {
+    name: "/permissions",
+    description: "configure workspace boundaries and tool permissions",
+    execute: async (_argument, context) => ({
+      kind: "permissions", permissions: await context.permission.get(),
+    }),
+  },
+  {
     name: "/init",
     description: "analyze the project and create or update AGENTS.md",
     execute: async (_argument, context) => context.prompt.initialize(),
@@ -74,9 +102,11 @@ const definitions: SlashCommandDefinition[] = [
   },
   {
     name: "/reload",
-    description: "reload project instructions",
+    description: "reload project instructions and MCP configuration",
     execute: async (_argument, context) => {
       await context.thread.reload();
+      await context.subagents?.reloadCatalog();
+      await context.mcp?.reload();
       return { kind: "notice", notice: { level: "info", message: "Project context reloaded." } };
     },
   },
@@ -120,10 +150,7 @@ const definitions: SlashCommandDefinition[] = [
         kind: "notice",
         notice: {
           level: "info",
-          message:
-            result.status === "compacted"
-              ? `Context compacted (estimated ${result.before} → ${result.after} tokens).`
-              : result.reason,
+          message: result.status === "compacted" ? "Context compacted." : result.reason,
         },
       };
     },
@@ -248,14 +275,6 @@ const definitions: SlashCommandDefinition[] = [
         model: await context.model.set({ modelId: current.modelId, reasoningEffort: effort }),
       };
     },
-  },
-  {
-    name: "/help",
-    description: "show available commands",
-    execute: async () => ({
-      kind: "command-catalog",
-      commands: slashCommandSuggestions,
-    }),
   },
   {
     name: "/rename",
@@ -398,7 +417,7 @@ export const slashCommandSuggestions: SlashCommandSuggestion[] = definitions.fla
       description: `Alias for ${name}`,
     })),
   ],
-);
+).sort((a, b) => a.name.localeCompare(b.name));
 
 export const parseSlashCommand = (content: string): ParsedSlashCommand | null => {
   if (!content.startsWith("/")) return null;

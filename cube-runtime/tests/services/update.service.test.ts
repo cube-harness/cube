@@ -21,6 +21,8 @@ const fixture = async (target = "win32-x64") => {
   await mkdir(path.dirname(launcher), { recursive: true });
   await writeFile(execPath, "installed runtime");
   await writeFile(launcher, "installed launcher");
+  await mkdir(path.join(version, "app"), { recursive: true });
+  await writeFile(path.join(version, "app", "package.json"), JSON.stringify({ version: "0.1.2" }));
   return { root, execPath, launcher, platform: target.split("-")[0], arch: target.split("-")[1] };
 };
 const manifestFetch = (target: string, hash = sha256, file?: string) => {
@@ -40,7 +42,8 @@ test("startup accepts version-named releases while comparing the installed check
     const installation = await fixture(target);
     try {
       const update = await checkCubeUpdate({ ...installation, fetch: manifestFetch(target) });
-      assert.equal(update.currentBuild, currentBuild);
+      assert.equal(update.currentVersion, "0.1.2");
+      assert.equal(update.version, "1.0.0");
       assert.equal(update.sha256, sha256);
       assert.equal(update.file, `releases/1.0.0/${target === "win32-x64" ? "cube-windows-x64.zip" : `cube-${target}.tar.gz`}`);
       assert.equal(update.installDir, installation.root);

@@ -4,6 +4,33 @@ export const CONTEXT_FILE = "AGENTS.md";
 export const SKILL_DIR = "skills";
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
+export const INHERIT_MODEL = "inherit";
+export const DEFAULT_WORKSPACE_ONLY = true;
+export const DEFAULT_COMMAND_TRUNCATION = { max_bytes: 256 * 1024, max_lines: 200 };
+export const DEFAULT_BACKGROUND_TASKS = {
+  enabled: true,
+  concurrency: 2,
+  timeout_ms: 300000,
+} as const;
+export const DEFAULT_SUBAGENTS = {
+  concurrency: 2,
+  model: INHERIT_MODEL,
+  timeout_ms: 0,
+} as const;
+export const MEMORY_RETRIEVAL_DEFAULTS = {
+  enabled: false,
+  model: null,
+};
+export const MEMORY_RETRIEVAL_LIMITS = {
+  max_dimensions: 65536,
+  manifest_bytes: 16 * 1024 * 1024,
+} as const;
+export const DURABLE_MEMORY_DEFAULTS = {
+  enabled: true,
+  model: INHERIT_MODEL,
+  min_idle_hours: 6,
+  retrieval: MEMORY_RETRIEVAL_DEFAULTS,
+} as const;
 
 export const HOME_PATHS = {
   ROOT: GLOBAL_ROOT,
@@ -20,12 +47,18 @@ export const HOME_FILES = {
   MCP: "mcp.json",
   MODEL_CATALOG: "model-catalog.json",
   SOUL: "SOUL.md",
-  WORKSPACE: "workspace.json",
+  PERMISSION: "permission.json",
   AGENTS: "AGENTS.md",
 } as const;
 
+export const MCP_DEFAULTS = {
+  REQUEST_TIMEOUT_MS: 60_000,
+  CONNECT_TIMEOUT_MS: 3_000,
+  AUTH_TIMEOUT_MS: 300_000,
+} as const;
+
 export const HOME_LIMITS = {
-  SOUL_MAX_CHARACTERS: 20000,
+  SOUL_MAX_CHARACTERS: 2000,
   MODEL_CATALOG_TTL_MS: 24 * 60 * 60 * 1000,
 } as const;
 

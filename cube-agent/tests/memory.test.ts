@@ -9,7 +9,9 @@ import {
   type CubeConfig,
   type HomeManager,
 } from "@cube/workspace";
-import { createMemory } from "../src/memory.js";
+import { createMemory, resolveMemoryModel } from "../src/memory.js";
+import { Agent } from "@mastra/core/agent";
+import { MockLanguageModelV3 } from "ai/test";
 
 const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
   gateway: "api_key/google",
@@ -20,20 +22,10 @@ const createConfig = (): CubeConfig => RunnableConfigSchema.parse({
   telemetry: false,
   soul: { max_characters: 20_000 },
   memory: {
-    storage: { provider: "sqlite", mode: "local" },
-    vector: { enabled: false, provider: "sqlite", mode: "local" },
-    embedder: { enabled: false, model: null },
     generate_title: {
       enabled: false,
       model: "inherit",
       instructions: "Generate a concise title under 80 characters.",
-    },
-    semantic_recall: {
-      enabled: false,
-      top_k: 4,
-      message_range: { before: 1, after: 1 },
-      scope: "resource",
-      threshold: null,
     },
     compaction: { manual_min_ratio: 0.3, keep_recent_ratio: 0.25, reserve_tokens: 16384 },
   },
@@ -92,7 +84,7 @@ test("resolves inherit against the model currently active on the Cube agent", as
       mastra: {
         getAgentById: (id: string) => {
           assert.equal(id, "cube-agent");
-          return { getModel: async () => activeModel };
+          return { getModel: async () => activeModel, getModelList: async () => null, getActiveModelId: () => activeModel };
         },
       },
     } as any;
@@ -107,29 +99,67 @@ test("resolves inherit against the model currently active on the Cube agent", as
   }
 });
 
-test("uses Cube's local memory database for optional vector storage", async () => {
+test("auxiliary effort reaches provider calls without changing the parent's settings", async () => {
+  let received: unknown;
+  const model = new MockLanguageModelV3({ doStream: async options => {
+    received = options.providerOptions;
+    return { stream: new ReadableStream({ start(controller) { controller.close(); } }) };
+  } });
+  const parent = new Agent({ id: "effort-parent", name: "parent", instructions: "test",
+    model: [{ model, providerOptions: { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } } }] });
+  const run = async (selection: { model: string; reasoning_effort?: "low" | "default" }) => {
+    const resolved = await resolveMemoryModel(parent, "google/gemini-3.7-flash", selection);
+    await resolved.doStream({ prompt: [] } as any);
+    return received;
+  };
+  assert.deepEqual(await run({ model: "inherit" }), { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } });
+  assert.deepEqual(await run({ model: "inherit", reasoning_effort: "low" }), { google: { thinkingConfig: { thinkingLevel: "low", includeThoughts: true } } });
+  assert.equal(await run({ model: "inherit", reasoning_effort: "default" }), undefined);
+  assert.deepEqual((await parent.getModelList())?.[0].providerOptions, { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } });
+});
+
+test("native title generation resolves its own model and effort through Cube gateways", async () => {
   const { home, root } = await createTestHome();
-  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  try {
+    const config = createConfig();
+    config.memory.generate_title = { ...config.memory.generate_title, enabled: true, model: "google/gemini-3.8-flash", reasoning_effort: "low" };
+    let received: unknown, selected: unknown;
+    const model = new MockLanguageModelV3({ doGenerate: async options => {
+      received = options.providerOptions;
+      return { content: [{ type: "text", text: "Cube title" }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } },
+        warnings: [] };
+    } });
+    const parent = new Agent({ id: "title-parent", name: "parent", instructions: "test", model });
+    const generateTitle = createMemory(config, home).getMergedThreadConfig().generateTitle;
+    assert.ok(generateTitle && typeof generateTitle === "object");
+    const resolved = await (generateTitle.model as Function)({ requestContext: {}, mastra: {
+      getAgentById: () => ({ getActiveModelId: () => "cube-api/google/gemini-3.7-flash",
+        getModelList: parent.getModelList.bind(parent),
+        getModel: async (options: unknown) => { selected = options; return model; } }),
+    } });
+    assert.equal(await parent.generateTitleFromUserMessage({ message: "First prompt", model: resolved }), "Cube title");
+    assert.ok(JSON.stringify(selected).includes("cube-api/google/gemini-3.8-flash"));
+    assert.deepEqual(received, { google: { thinkingConfig: { thinkingLevel: "low", includeThoughts: true } } });
+  } finally { await removeTestHome(root); }
+});
+
+test("durable retrieval does not enable embedding or semantic recall over raw history", async () => {
+  const { home, root } = await createTestHome();
   let memory: any;
   try {
-    process.env.OPENAI_API_KEY = "cube-memory-test-key";
     const config = createConfig();
-    config.memory.vector.enabled = true;
-    config.memory.embedder.enabled = true;
-    config.memory.embedder.model = "openai/text-embedding-3-small";
-    config.memory.semantic_recall.enabled = true;
+    config.memory.durable.retrieval.enabled = true;
+    config.memory.durable.retrieval.model = "openai/text-embedding-3-small";
 
     memory = createMemory(config, home) as any;
 
-    assert.equal(memory.vector?.id, "cube-vector");
-    assert.equal(memory.vector?.constructor?.name, "LibSQLVector");
-    assert.equal(memory.embedder?.provider, "openai");
-    assert.equal(memory.embedder?.modelId, "text-embedding-3-small");
+    assert.equal(memory.vector, undefined);
+    assert.equal(memory.embedder, undefined);
+    assert.equal(memory.getMergedThreadConfig().semanticRecall, false);
     assert.equal(home.getMemoryDbPath(), path.join(root, "memories", "memory.sqlite"));
   } finally {
-    await memory?.vector?.close();
-    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = previousOpenAiKey;
     await removeTestHome(root);
   }
 });

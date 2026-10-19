@@ -36,7 +36,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
       listener({ type: "display_state", displayState });
       return unsubscribe;
     },
-    run: { isRunning: () => true },
+    run: { isRunning: () => true, getRunId: () => "test-run" },
     abort: () => {
       aborted += 1;
     },
@@ -66,7 +66,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
     preference,
     memory,
     gateway,
-    suggestions: [{ name: "/help", description: "Help" }],
+    suggestions: [{ name: "/model", description: "Select model" }],
     workspaceRoot: "D:\\cube",
     readHistory: async () => ["one", "two"],
     readInstructionInfo: () => ({ soulCharacters: 12, agentsFiles: 0, agentsCharacters: 0 }),
@@ -88,7 +88,7 @@ test("CubeRuntime exposes ready services while keeping the native Session privat
   assert.equal(runtime.isApprovalPending(), false);
   assert.deepEqual(await runtime.getHistory(), ["one", "two"]);
   assert.equal(runtime.workspaceRoot, "D:\\cube");
-  assert.deepEqual(runtime.suggestions, [{ name: "/help", description: "Help" }]);
+  assert.deepEqual(runtime.suggestions, [{ name: "/model", description: "Select model" }]);
 
   const received: unknown[] = [];
   const dispose = runtime.subscribe((event) => received.push(event));

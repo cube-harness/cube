@@ -1,10 +1,16 @@
 import type { Session, InstructionInfo, CubeTools, CubeContext } from "@cube/agent";
+import type { SubagentTarget } from "./services/subagent.service.js";
+import { toRuntimeNotice } from "./types.js";
 import type { MemoryService } from "./services/memory.service.js";
+import type { BackgroundService } from "./services/background.service.js";
 import type { ModelService } from "./services/model.service.js";
 import type { PreferenceService } from "./services/preference.service.js";
+import type { PermissionService } from "./services/permission.service.js";
+import type { McpService } from "./services/mcp.service.js";
 import type { PromptService } from "./services/prompt.service.js";
 import type { ThreadService } from "./services/thread.service.js";
 import type { GatewayService } from "./services/gateway.service.js";
+import type { SubagentService } from "./services/subagent.service.js";
 import type {
   RuntimeDisplayState,
   RuntimeEventListener,
@@ -21,7 +27,11 @@ type CubeRuntimeDependencies = {
   thread: ThreadService;
   model: ModelService;
   preference: PreferenceService;
+  permission: PermissionService;
   memory: MemoryService;
+  background?: BackgroundService;
+  subagents?: SubagentService;
+  mcp?: McpService;
   context?: CubeContext;
   gateway: GatewayService;
   suggestions: SlashCommandSuggestion[];
@@ -36,8 +46,12 @@ export class CubeRuntime {
   readonly thread: ThreadService;
   readonly model: ModelService;
   readonly preference: PreferenceService;
+  readonly permission: PermissionService;
   readonly memory: MemoryService;
   readonly gateway: GatewayService;
+  readonly background?: BackgroundService;
+  readonly subagents?: SubagentService;
+  readonly mcp?: McpService;
 
   private shutdownPromise?: Promise<void>;
   private unsubscribeTools?: () => void;
@@ -48,8 +62,12 @@ export class CubeRuntime {
     this.thread = dependencies.thread;
     this.model = dependencies.model;
     this.preference = dependencies.preference;
+    this.permission = dependencies.permission;
     this.memory = dependencies.memory;
     this.gateway = dependencies.gateway;
+    this.background = dependencies.background;
+    this.subagents = dependencies.subagents;
+    this.mcp = dependencies.mcp;
     if (dependencies.tools) {
       this.unsubscribeTools = dependencies.session.subscribe((event) => {
         if (event.type === "tool_end") dependencies.tools!.discardPreview(event.toolCallId);
@@ -85,6 +103,9 @@ export class CubeRuntime {
   }
 
   subscribe(listener: RuntimeEventListener): () => void {
+    const stopSubagents = this.subagents?.subscribe((event) => {
+      if (event) listener(event);
+    });
     const unsubscribe = this.dependencies.session.subscribe((event) =>
       listener(
         event.type === "display_state_changed"
@@ -97,7 +118,7 @@ export class CubeRuntime {
       if (result?.status === "compacted")
         void listener({
           type: "info",
-          message: `Context compacted (estimated ${result.before} → ${result.after} tokens).`,
+          message: "Context compacted.",
         });
     });
     if (!this.noticesDelivered) {
@@ -106,6 +127,7 @@ export class CubeRuntime {
     }
     return () => {
       stopContext?.();
+      stopSubagents?.();
       unsubscribe();
     };
   }
@@ -124,12 +146,27 @@ export class CubeRuntime {
       !this.dependencies.session.suspensions.hasPending()
     )
       return false;
+    const runId = this.dependencies.session.run.getRunId();
+    if (runId)
+      void this.background
+        ?.cancelRun(runId)
+        .catch((error) => this.notify(toRuntimeNotice(error).message));
     this.dependencies.session.abort();
     return true;
   }
 
   respondToApproval(input: ToolApprovalResponse): void {
-    const { tools, session } = this.dependencies;
+    const tools = input.target ? this.subagents?.preview(input.target) : this.dependencies.tools;
+    const session = this.dependencies.session;
+    const respond = (approved: boolean, reason?: string) => {
+      if (input.target) {
+        void this.subagents!.respond(input.target, { approved, ...(reason ? { reason } : {}) })
+          .catch(error => this.notify(toRuntimeNotice(error).message));
+      } else {
+        session.respondToToolApproval({ decision: approved ? "approve" : "decline", toolCallId: input.toolCallId,
+          ...(reason ? { declineContext: { reason } } : {}) });
+      }
+    };
     if (
       input.decision !== "decline" &&
       tools &&
@@ -138,33 +175,36 @@ export class CubeRuntime {
     ) {
       const reason =
         "This file approval has no valid live preview. Request a fresh tool call before approving.";
-      session.respondToToolApproval({
-        decision: "decline",
-        toolCallId: input.toolCallId,
-        declineContext: { reason },
-      });
+      respond(false, reason);
       tools.discardPreview(input.toolCallId);
       throw new Error(reason);
     }
     if (input.decision === "decline") tools?.discardPreview(input.toolCallId);
-    if (input.decision === "approve_prefix") {
-      this.dependencies.session.grantTool(input.toolName);
+    if (input.decision === "approve_prefix" && !input.target) {
+      session.grantTool(input.toolName);
     }
-    this.dependencies.session.respondToToolApproval({
-      decision: input.decision === "decline" ? "decline" : "approve",
-      toolCallId: input.toolCallId,
-      ...(input.decision === "decline" && input.declineReason
-        ? { declineContext: { reason: input.declineReason } }
-        : {}),
-    });
+    respond(input.decision !== "decline", input.decision === "decline" ? input.declineReason ?? "User declined tool execution." : undefined);
   }
 
   respondToSuspension(input: ToolSuspensionResponse): Promise<void> {
+    if (input.target) {
+      if (!this.subagents) throw new Error("This child question is no longer active");
+      return this.subagents.respond(input.target, input.resumeData);
+    }
     return this.dependencies.session.respondToToolSuspension(input);
   }
 
-  async cancelSuspension(toolCallId: string): Promise<void> {
-    const { session } = this.dependencies;
+  notify(message: string): void {
+    if (!this.noticesDelivered) (this.dependencies.notices ??= []).push(message);
+    else this.dependencies.session.emit({ type: "info", message });
+  }
+
+  async cancelSuspension(toolCallId: string, target?: SubagentTarget): Promise<void> {
+    if (target) {
+      if (!this.subagents) throw new Error("This child question is no longer active");
+      return this.subagents.respond(target, { cancelled: true });
+    }
+    const session = this.dependencies.session;
     const suspension = session.suspensions.get({ toolCallId });
     if (!suspension) return;
     if (suspension.toolName !== "ask_user") {
@@ -174,8 +214,14 @@ export class CubeRuntime {
     // Resume with a decline so the native loop persists the result and continues.
     session.run.ensureAbortController();
     for (const pending of session.displayState.get().pendingSuspensions.values()) {
-      if (pending.toolName === "ask_user" && session.suspensions.has({ toolCallId: pending.toolCallId })) {
-        await session.respondToToolSuspension({ toolCallId: pending.toolCallId, resumeData: { cancelled: true } });
+      if (
+        pending.toolName === "ask_user" &&
+        session.suspensions.has({ toolCallId: pending.toolCallId })
+      ) {
+        await session.respondToToolSuspension({
+          toolCallId: pending.toolCallId,
+          resumeData: { cancelled: true },
+        });
       }
     }
   }
@@ -192,6 +238,8 @@ export class CubeRuntime {
       await this.memory.shutdown?.();
       if (session.run.isRunning() || session.approval.isArmed() || session.suspensions.hasPending())
         session.abort();
+      await this.subagents?.shutdown();
+      await this.background?.shutdown();
       if (session.thread.getId() !== null) {
         await session.thread.clearAndReleaseLock().catch(() => undefined);
       }

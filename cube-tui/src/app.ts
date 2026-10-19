@@ -7,8 +7,10 @@ import {
   type PromptResult,
   type RuntimeDisplayState,
   type RuntimeEvent,
+  type SubagentTarget,
 } from "@cube/runtime";
 import { copyToClipboard } from "./clipboard.js";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { matchesBinding } from "./keybindings.js";
 import type { ChatScreen } from "./screens/chat.screen.js";
 import type { OnBoardScreen } from "./screens/on-board.screen.js";
@@ -32,11 +34,11 @@ export type PreparedCube = {
 export class CubeApp {
   private unsubscribeRuntime: () => void = () => undefined;
   private unsubscribeInput: () => void = () => undefined;
-  private activeApprovalId: string | null = null;
-  private readonly activeSuspensionIds = new Set<string>();
-  private readonly cancelledSuspensionIds = new Set<string>();
-  private suspensionInputQueue: Promise<void> = Promise.resolve();
-  private suspensionQueueCancelled = false;
+  private unsubscribeActivities: () => void = () => undefined;
+  private readonly interactions = new Map<string, SubagentTarget | undefined>();
+  private readonly cancelledInteractions = new Set<string>();
+  private readonly questions = new Set<string>();
+  private interactionQueue: Promise<void> = Promise.resolve();
   private nativeQueuedFollowUps: number;
   private locallyCancelledQueueTransitions = 0;
   private currentModel: ModelState;
@@ -66,10 +68,17 @@ export class CubeApp {
       this.screen.mount({ onSubmit: (content) => this.submitPrompt(content) });
     }
     this.unsubscribeRuntime = this.runtime.subscribe((event) => this.handleRuntimeEvent(event));
+    const stopBackground = this.runtime.background?.subscribe(() => this.syncActivityCounts());
+    const stopSubagents = this.runtime.subagents?.subscribe(() => this.syncActivityCounts());
+    this.unsubscribeActivities = () => { stopBackground?.(); stopSubagents?.(); };
+    this.syncActivityCounts();
     this.unsubscribeInput = this.screen.addInputListener((data) => {
       if (matchesBinding(data, "cube.transcript.toggle")) {
         this.screen.messageList.toggleTranscript();
         this.screen.requestRender();
+        return { consume: true };
+      }
+      if (matchesBinding(data, "cube.subagent.approvals") && this.screen.reviewSubagentApprovals()) {
         return { consume: true };
       }
       if (matchesBinding(data, "cube.app.exit")) {
@@ -77,6 +86,12 @@ export class CubeApp {
         return { consume: true };
       }
       if (matchesBinding(data, "cube.turn.interrupt")) {
+        if (matchesKey(data, "escape")) {
+          if (!this.screen.promptEditor.focused || this.screen.promptEditor.isShowingAutocomplete()) {
+            return undefined;
+          }
+          if (this.screen.scrollToBottom()) return { consume: true };
+        }
         return this.handleInterrupt() ? { consume: true } : undefined;
       }
       return undefined;
@@ -98,10 +113,13 @@ export class CubeApp {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    for (const key of this.interactions.keys()) this.cancelInteraction(key);
     this.unsubscribeRuntime();
     this.unsubscribeRuntime = () => undefined;
     this.unsubscribeInput();
     this.unsubscribeInput = () => undefined;
+    this.unsubscribeActivities();
+    this.unsubscribeActivities = () => undefined;
     this.runtime.interrupt();
     this.screen.stopTerminal();
   }
@@ -140,8 +158,22 @@ export class CubeApp {
 
   async handlePromptResult(result: PromptResult): Promise<void> {
     switch (result.kind) {
+      case "mcp":
+        if (this.runtime.mcp) await this.screen.pickMcp(this.runtime.mcp);
+        return;
+      case "tasks":
+        if (this.runtime.background) await this.screen.pickTasks(this.runtime.background);
+        return;
+      case "subagents": {
+        const parent = this.runtime.thread.current();
+        if (this.runtime.subagents) await this.screen.pickSubagents(this.runtime.subagents, parent ?? "new thread");
+        return;
+      }
       case "skills":
         await this.screen.pickSkills(result.skills, (changes) => this.runtime.preference.setSkillsEnabled(changes));
+        return;
+      case "permissions":
+        await this.screen.pickPermissions(result.permissions, (state) => this.runtime.permission.set(state));
         return;
       case "ignored":
       case "submitted":
@@ -237,16 +269,6 @@ export class CubeApp {
         this.screen.showUsage(result.metrics);
         if (result.notice) this.screen.showNotice(result.notice);
         return;
-      case "command-catalog":
-        this.screen.showNotice({
-          level: "info",
-          message: [
-            "### Available Slash Commands",
-            "",
-            ...result.commands.map((command) => `- \`${command.name}\`: ${command.description}`),
-          ].join("\n"),
-        });
-        return;
       case "copy-content": {
         const copied = await (this.options.copyToClipboard ?? copyToClipboard)(result.content);
         this.screen.showNotice({
@@ -268,64 +290,29 @@ export class CubeApp {
         this.applyDisplayState(event.displayState);
         return;
       case "tool_approval_required":
-        if (this.activeApprovalId === event.toolCallId) return;
-        this.activeApprovalId = event.toolCallId;
-        void this.screen
-          .requestApproval({ toolName: event.toolName, args: event.args })
-          .then((decision) => {
-            this.runtime.respondToApproval({
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              decision,
-              ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}),
-            });
-            this.applyDisplayState(this.runtime.getDisplayState());
-          })
-          .finally(() => {
-            this.activeApprovalId = null;
-          });
+        this.queueInteraction(event);
         return;
       case "tool_suspended":
-        if (this.activeSuspensionIds.has(event.toolCallId)) return;
-        if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
-        this.activeSuspensionIds.add(event.toolCallId);
-        this.suspensionInputQueue = this.suspensionInputQueue.then(async () => {
-          try {
-            if (this.suspensionQueueCancelled || this.cancelledSuspensionIds.has(event.toolCallId))
-              return;
-            const resolution = await this.screen.requestToolSuspension({
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              args: event.args,
-              suspendPayload: event.suspendPayload,
-              ...(event.resumeSchema ? { resumeSchema: event.resumeSchema } : {}),
-            });
-            if (resolution.kind === "dismissed") return;
-            if (resolution.kind === "cancel") {
-              this.suspensionQueueCancelled = true;
-              await this.runtime.cancelSuspension(event.toolCallId);
-              return;
-            }
-            await this.runtime.respondToSuspension({
-              toolCallId: event.toolCallId,
-              resumeData: resolution.resumeData,
-            });
-          } catch (error: unknown) {
-            this.screen.workingIndicator.stop();
-            this.screen.showNotice(toRuntimeNotice(error));
-          } finally {
-            this.activeSuspensionIds.delete(event.toolCallId);
-            this.cancelledSuspensionIds.delete(event.toolCallId);
-            this.applyDisplayState(this.runtime.getDisplayState());
-            if (this.activeSuspensionIds.size === 0) this.suspensionQueueCancelled = false;
-          }
-        });
+        this.queueInteraction(event);
         return;
       case "tool_suspension_cancelled":
-        this.cancelledSuspensionIds.add(event.toolCallId);
-        this.screen.cancelToolSuspension(event.toolCallId);
+        this.cancelInteraction(`main:${event.toolCallId}`);
+        return;
+      case "subagent_interaction":
+        this.queueInteraction(event.event, event.target,
+          event.event.type === "tool_approval_required" ? event.agent : `${event.description} · ${event.agent}`,
+          event.directory, event.description);
+        return;
+      case "subagent_interaction_cancelled":
+        for (const [key, target] of this.interactions) if (target?.jobId === event.jobId &&
+          (!event.runId || target.runId === event.runId)) this.cancelInteraction(key);
+        return;
+      case "agent_end":
+        if (event.reason !== "suspended") for (const [key, target] of this.interactions)
+          if (!target) this.cancelInteraction(key);
         return;
       case "thread_created":
+        this.syncActivityCounts();
         this.screen.setInfo({
           threadId: event.thread.id,
           threadTitle: event.thread.title,
@@ -340,6 +327,7 @@ export class CubeApp {
         this.updateTerminalTitle();
         return;
       case "thread_changed":
+        this.syncActivityCounts();
         this.screen.setInfo({
           threadId: event.threadId,
         });
@@ -347,6 +335,13 @@ export class CubeApp {
         this.nativeQueuedFollowUps = 0;
         this.locallyCancelledQueueTransitions = 0;
         this.updateTerminalTitle();
+        return;
+      case "thread_deleted":
+        this.syncActivityCounts();
+        if (!this.runtime.thread.current()) {
+          this.screen.setInfo({ threadId: "new thread", threadTitle: undefined });
+          this.updateTerminalTitle();
+        }
         return;
       case "error":
         this.screen.workingIndicator.stop();
@@ -367,6 +362,78 @@ export class CubeApp {
         this.screen.workingIndicator.stop();
         this.screen.showNotice(toRuntimeNotice(event.error));
     }
+  }
+
+  private cancelInteraction(key: string): void {
+    if (this.interactions.get(key) && !this.questions.has(key)) {
+      this.interactions.delete(key);
+      this.screen.removeSubagentApproval(key);
+      return;
+    }
+    this.cancelledInteractions.add(key);
+    this.screen.cancelToolSuspension(key);
+    this.screen.cancelApproval(key);
+  }
+
+  private syncActivityCounts(): void {
+    this.screen.setActivityCounts(
+      this.runtime.background?.runningCount() ?? 0,
+      this.runtime.subagents?.runningCount() ?? 0,
+    );
+  }
+
+  private queueInteraction(
+    event: Extract<RuntimeEvent, { type: "tool_approval_required" | "tool_suspended" }>,
+    target?: SubagentTarget,
+    label?: string,
+    directory?: string,
+    description?: string,
+  ): void {
+    const key = target ? `${target.jobId}:${target.runId}:${event.toolCallId}` : `main:${event.toolCallId}`;
+    if (this.interactions.has(key)) return;
+    this.interactions.set(key, target);
+    if (target && event.type === "tool_approval_required") {
+      this.screen.addSubagentApproval({
+        id: key, agent: label ?? "Subagent", description, toolName: event.toolName, args: event.args, directory,
+        onDecision: decision => {
+          if (!this.started || !this.interactions.has(key)) return;
+          this.interactions.delete(key);
+          this.screen.removeSubagentApproval(key);
+          try {
+            this.runtime.respondToApproval({ target, toolName: event.toolName, toolCallId: event.toolCallId, decision,
+              ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}) });
+          } catch (error) { this.screen.showNotice(toRuntimeNotice(error)); }
+          this.applyDisplayState(this.runtime.getDisplayState());
+        },
+      });
+      return;
+    }
+    if (event.type === "tool_suspended") this.questions.add(key);
+    this.interactionQueue = this.interactionQueue.then(async () => {
+      try {
+        if (this.cancelledInteractions.has(key) || !this.started) return;
+        if (event.type === "tool_approval_required") {
+          const decision = await this.screen.requestApproval({ toolName: event.toolName, args: event.args, label, directory, interactionId: key });
+          if (this.cancelledInteractions.has(key)) return;
+          this.runtime.respondToApproval({ target, toolName: event.toolName, toolCallId: event.toolCallId, decision,
+            ...(decision === "decline" ? { declineReason: "User declined tool execution." } : {}) });
+        } else {
+          const resolution = await this.screen.requestToolSuspension({ ...event, toolCallId: key, label });
+          if (resolution.kind === "dismissed" || this.cancelledInteractions.has(key)) return;
+          if (resolution.kind === "cancel") {
+            // Never cancel a sibling's identical tool-call ID.
+            for (const [other, owner] of this.interactions) if (owner?.jobId === target?.jobId && this.questions.has(other)) this.cancelInteraction(other);
+            void this.runtime.cancelSuspension(event.toolCallId, target).catch(error => this.screen.showNotice(toRuntimeNotice(error)));
+          } else void this.runtime.respondToSuspension({ target, toolCallId: event.toolCallId, resumeData: resolution.resumeData })
+            .catch(error => this.screen.showNotice(toRuntimeNotice(error)));
+        }
+      } catch (error) { this.screen.showNotice(toRuntimeNotice(error)); }
+      finally {
+        this.interactions.delete(key); this.cancelledInteractions.delete(key);
+        this.questions.delete(key);
+        this.applyDisplayState(this.runtime.getDisplayState());
+      }
+    });
   }
 
   handleInterrupt(): boolean {
@@ -454,13 +521,21 @@ export const startPreparedCube = async (
   options: CubeAppOptions,
   onboarding: Pick<
     OnBoardScreen,
-    "mount" | "stopTerminal" | "showNotice" | "pickGateway" | "waitForRetry"
+    "mount" | "stopTerminal" | "showNotice" | "pickTrust" | "pickGateway" | "waitForRetry"
   >,
 ): Promise<PreparedCube | null> => {
   while (true) {
     let runtime: CubeRuntime | undefined;
     try {
       const bootstrap = await prepare();
+      if (!bootstrap.permission?.trusted) {
+        const trusted = await onboarding.pickTrust(bootstrap.workspaceRoot);
+        if (!trusted) {
+          onboarding.stopTerminal();
+          return null;
+        }
+        await bootstrap.setTrust(true);
+      }
       if (!bootstrap.readiness.ready) {
         onboarding.mount();
         const selection = await onboarding.pickGateway(bootstrap.gateway);

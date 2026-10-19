@@ -6,21 +6,26 @@ import { z } from "zod";
 import type { RequestFrame } from "./processors/context.processor.js";
 import { buildCompactPrompt, COMPACT_SYSTEM_PROMPT } from "./prompts/compact.prompt.js";
 
-export type ContextPolicy = CubeConfig["memory"]["compaction"];
+export type ContextPolicy = Omit<CubeConfig["memory"]["compaction"], "model">;
 export type ContextLimits = { context?: number; input?: number; output?: number };
 export type ContextBudget = { context: number; input: number; reserve: number; summary: number };
 export type CompactResult =
   | { status: "compacted"; before: number; after: number }
   | { status: "skipped"; reason: string };
 
-const checkpointSchema = z.object({
-  summary: z.object({
-    text: z.string().min(1),
-    firstRetainedMessageId: z.string().min(1),
-    taskMessageId: z.string().min(1).optional(),
-  }).strict().optional(),
-  prunedToolCallIds: z.array(z.string()),
-}).strict();
+const checkpointSchema = z
+  .object({
+    summary: z
+      .object({
+        text: z.string().min(1),
+        firstRetainedMessageId: z.string().min(1),
+        taskMessageId: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    prunedToolCallIds: z.array(z.string()),
+  })
+  .strict();
 export type ContextCheckpoint = z.infer<typeof checkpointSchema>;
 
 const positive = (n: number | undefined): n is number =>
@@ -35,11 +40,19 @@ export function contextBudget(
 ): ContextBudget | undefined {
   if (!positive(limits.context)) return;
   const reserve = Math.max(policy.reserve_tokens, requestedOutput);
-  const input = Math.min(positive(limits.input) ? limits.input : Infinity, limits.context - reserve);
+  const input = Math.min(
+    positive(limits.input) ? limits.input : Infinity,
+    limits.context - reserve,
+  );
   if (input <= 0) return;
   return {
-    context: limits.context, input, reserve,
-    summary: Math.min(Math.floor(0.8 * reserve), positive(limits.output) ? limits.output : Infinity),
+    context: limits.context,
+    input,
+    reserve,
+    summary: Math.min(
+      Math.floor(0.8 * reserve),
+      positive(limits.output) ? limits.output : Infinity,
+    ),
   };
 }
 
@@ -48,10 +61,13 @@ export function contextBudget(
 export function estimateTokens(value: unknown): number | undefined {
   let unknownMedia = false;
   const text = JSON.stringify(value, (_key, item) => {
-    if (item && typeof item === "object" && (
-      ["image", "file", "image-data", "file-data", "media"].includes(item.type) ||
-      item.__workspaceMedia === true || item instanceof Uint8Array
-    )) {
+    if (
+      item &&
+      typeof item === "object" &&
+      (["image", "file", "image-data", "file-data", "media"].includes(item.type) ||
+        item.__workspaceMedia === true ||
+        item instanceof Uint8Array)
+    ) {
       unknownMedia = true;
       return "[media]";
     }
@@ -73,7 +89,9 @@ export function selectPrunedTools(
   count: (output: unknown) => number | undefined = estimateTokens,
 ): string[] {
   const previous = new Set(checkpoint.prunedToolCallIds);
-  let turns = 0, total = 0, candidateTokens = 0;
+  let turns = 0,
+    total = 0,
+    candidateTokens = 0;
   const candidates: string[] = [];
   loop: for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
@@ -87,7 +105,13 @@ export function selectPrunedTools(
         const call = part.toolInvocation;
         if (call.state !== "result" || call.isError || protectedTools.has(call.toolName)) continue;
         if (previous.has(call.toolCallId)) break loop;
-        if (call.result && typeof call.result === "object" && "isError" in call.result && call.result.isError) continue;
+        if (
+          call.result &&
+          typeof call.result === "object" &&
+          "isError" in call.result &&
+          call.result.isError
+        )
+          continue;
         const tokens = count(part.providerMetadata?.mastra?.modelOutput ?? call.result);
         // Unknown media cost cannot establish the protected frontier safely.
         if (tokens === undefined) break loop;
@@ -107,7 +131,10 @@ type ContextDependencies = {
   policy: ContextPolicy;
   storage: () => Promise<MemoryStorage>;
   summarize: (input: {
-    text: string; maxOutputTokens: number; signal: AbortSignal; requestContext: RequestContext;
+    text: string;
+    maxOutputTokens: number;
+    signal: AbortSignal;
+    requestContext: RequestContext;
   }) => Promise<SummaryOutput>;
   protectedTools: ReadonlySet<string>;
 };
@@ -125,14 +152,26 @@ export class CubeContext {
     return contextBudget(limits, this.dependencies.policy, requestedOutput);
   }
 
-  invalidate(): void { this.envelope = undefined; }
-  remember(frame: RequestFrame): void { this.envelope = frame; }
-  isCompacting(): boolean { return this.operation !== undefined; }
-  cancel(): void { this.controller?.abort(); }
-  async drain(): Promise<void> { await this.operation?.catch(() => undefined); }
+  invalidate(): void {
+    this.envelope = undefined;
+  }
+  remember(frame: RequestFrame): void {
+    this.envelope = frame;
+  }
+  isCompacting(): boolean {
+    return this.operation !== undefined;
+  }
+  cancel(): void {
+    this.controller?.abort();
+  }
+  async drain(): Promise<void> {
+    await this.operation?.catch(() => undefined);
+  }
   subscribe(listener: (active: boolean, automaticResult?: CompactResult) => void): () => void {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   async read(threadId: string): Promise<ContextCheckpoint> {
@@ -144,7 +183,11 @@ export class CubeContext {
       : checkpointSchema.parse(thread.metadata.cubeContext);
   }
 
-  private async save(threadId: string, checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<void> {
+  private async save(
+    threadId: string,
+    checkpoint: ContextCheckpoint,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const store = await this.dependencies.storage();
     const thread = await store.getThreadById({ threadId });
     if (!thread) throw new Error("Context thread no longer exists");
@@ -156,19 +199,28 @@ export class CubeContext {
   }
 
   async messages(threadId: string): Promise<MastraDBMessage[]> {
-    return (await (await this.dependencies.storage()).listMessages({
-      threadId, perPage: false, orderBy: { field: "createdAt", direction: "ASC" },
-    })).messages;
+    return (
+      await (
+        await this.dependencies.storage()
+      ).listMessages({
+        threadId,
+        perPage: false,
+        orderBy: { field: "createdAt", direction: "ASC" },
+      })
+    ).messages;
   }
 
   async prune(threadId: string): Promise<void> {
     const checkpoint = await this.read(threadId);
     const candidates = selectPrunedTools(
-      await this.messages(threadId), checkpoint, this.dependencies.protectedTools,
+      await this.messages(threadId),
+      checkpoint,
+      this.dependencies.protectedTools,
     );
     if (!candidates.length) return;
     await this.save(threadId, {
-      ...checkpoint, prunedToolCallIds: [...new Set([...checkpoint.prunedToolCallIds, ...candidates])],
+      ...checkpoint,
+      prunedToolCallIds: [...new Set([...checkpoint.prunedToolCallIds, ...candidates])],
     });
   }
 
@@ -182,19 +234,32 @@ export class CubeContext {
         if (!mapped) throw new Error("Retained context was not cloned");
         return mapped;
       };
-      const toolIds = new Set(cloned.clonedMessages.flatMap((message) =>
-        (message.content.parts ?? []).flatMap((part) => part.type === "tool-invocation"
-          ? [part.toolInvocation.toolCallId] : [])));
+      const toolIds = new Set(
+        cloned.clonedMessages.flatMap((message) =>
+          (message.content.parts ?? []).flatMap((part) =>
+            part.type === "tool-invocation" ? [part.toolInvocation.toolCallId] : [],
+          ),
+        ),
+      );
       await this.save(cloned.thread.id, {
-        ...(checkpoint.summary ? { summary: {
-          ...checkpoint.summary,
-          firstRetainedMessageId: remap(checkpoint.summary.firstRetainedMessageId),
-          ...(checkpoint.summary.taskMessageId ? { taskMessageId: remap(checkpoint.summary.taskMessageId) } : {}),
-        } } : {}),
+        ...(checkpoint.summary
+          ? {
+              summary: {
+                ...checkpoint.summary,
+                firstRetainedMessageId: remap(checkpoint.summary.firstRetainedMessageId),
+                ...(checkpoint.summary.taskMessageId
+                  ? { taskMessageId: remap(checkpoint.summary.taskMessageId) }
+                  : {}),
+              },
+            }
+          : {}),
         prunedToolCallIds: checkpoint.prunedToolCallIds.filter((id) => toolIds.has(id)),
       });
     } catch (cause) {
-      throw new Error(`Context copy failed; incomplete clone ${cloned.thread.id} was not activated.`, { cause });
+      throw new Error(
+        `Context copy failed; incomplete clone ${cloned.thread.id} was not activated.`,
+        { cause },
+      );
     }
     return { id: cloned.thread.id };
   }
@@ -202,7 +267,11 @@ export class CubeContext {
   async compactManual(input: { threadId: string; signal: AbortSignal }): Promise<CompactResult> {
     const envelope = this.envelope;
     if (!envelope || envelope.threadId !== input.threadId || !envelope.isCurrent()) {
-      return { status: "skipped", reason: "Cannot establish the current request budget; send a turn first, then retry /compact." };
+      return {
+        status: "skipped",
+        reason:
+          "Cannot establish the current request budget; send a turn first, then retry /compact.",
+      };
     }
     const frame = await envelope.refresh(await this.messages(input.threadId));
     return this.compact(frame, true, input.signal);
@@ -211,31 +280,47 @@ export class CubeContext {
   compact(frame: RequestFrame, manual: boolean, signal?: AbortSignal): Promise<CompactResult> {
     if (this.operation) return Promise.reject(new Error("Compaction is already running"));
     this.controller = new AbortController();
-    const combined = signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal;
+    const combined = signal
+      ? AbortSignal.any([signal, this.controller.signal])
+      : this.controller.signal;
     // Defer the body so ownership is installed before observers can re-enter.
     this.operation = Promise.resolve().then(() => this.performCompact(frame, manual, combined));
     for (const listener of this.listeners) listener(true);
     let completed: CompactResult | undefined;
-    return this.operation.then((result) => { completed = result; return result; }).finally(() => {
-      this.operation = undefined;
-      this.controller = undefined;
-      for (const listener of this.listeners) listener(false, manual ? undefined : completed);
-    });
+    return this.operation
+      .then((result) => {
+        completed = result;
+        return result;
+      })
+      .finally(() => {
+        this.operation = undefined;
+        this.controller = undefined;
+        for (const listener of this.listeners) listener(false, manual ? undefined : completed);
+      });
   }
 
-  private async performCompact(frame: RequestFrame, manual: boolean, signal: AbortSignal): Promise<CompactResult> {
+  private async performCompact(
+    frame: RequestFrame,
+    manual: boolean,
+    signal: AbortSignal,
+  ): Promise<CompactResult> {
     const skip = (reason: string): CompactResult => ({ status: "skipped", reason });
     const policy = this.dependencies.policy;
     const budget = contextBudget(frame.limits, policy, frame.requestedOutput);
     if (!budget) return skip("The active model has no usable context budget.");
     const previous = await this.read(frame.threadId);
     const before = frame.count(frame.project(previous));
-    if (before === undefined) return skip("Cannot establish context size for this request's media attachments.");
+    if (before === undefined)
+      return skip("Cannot establish context size for this request's media attachments.");
     if (manual && before / budget.context < policy.manual_min_ratio)
-      return skip(`Context is below the ${Math.round(policy.manual_min_ratio * 100)}% manual compaction threshold.`);
+      return skip(
+        `Context is below the ${Math.round(policy.manual_min_ratio * 100)}% manual compaction threshold.`,
+      );
     const fixed = frame.fixedTokens;
     if (fixed === undefined) return skip("Cannot establish the fixed request overhead.");
-    const keep = Math.floor(policy.keep_recent_ratio * Math.max(0, budget.input - fixed - budget.summary - 128));
+    const keep = Math.floor(
+      policy.keep_recent_ratio * Math.max(0, budget.input - fixed - budget.summary - 128),
+    );
     const selection = frame.select(previous, keep);
     if (!selection) return skip("No older conversation can be compacted safely.");
     const text = buildCompactPrompt(selection.text, previous.summary?.text);
@@ -244,13 +329,20 @@ export class CubeContext {
       return skip("The summarization request itself exceeds the model input budget.");
     signal.throwIfAborted();
     const output = await this.dependencies.summarize({
-      text, maxOutputTokens: budget.summary, signal, requestContext: frame.requestContext,
+      text,
+      maxOutputTokens: budget.summary,
+      signal,
+      requestContext: frame.requestContext,
     });
     signal.throwIfAborted();
     if (!output.text.trim() || output.finishReason !== "stop" || output.toolCalls?.length)
       throw new Error("Compaction did not produce a complete continuation summary");
     const next: ContextCheckpoint = {
-      summary: { text: output.text.trim(), firstRetainedMessageId: selection.boundary, taskMessageId: selection.task },
+      summary: {
+        text: output.text.trim(),
+        firstRetainedMessageId: selection.boundary,
+        taskMessageId: selection.task,
+      },
       prunedToolCallIds: previous.prunedToolCallIds,
     };
     const after = frame.count(frame.project(next));

@@ -1,8 +1,18 @@
 import { createCodingAgent } from "@mastra/core/coding-agent";
+import type { Agent } from "@mastra/core/agent";
+import type { ToolHooks } from "@mastra/core/tools";
+import type { RequestContext } from "@mastra/core/request-context";
 import type { IMastraLogger } from "@mastra/core/logger";
-import { type CubeConfig, type HomeManager, type WorkspaceManager } from "@cube/workspace";
+import {
+  type CubeConfig,
+  type HomeManager,
+  type WorkspaceManager,
+  type MemorySnapshot,
+} from "@cube/workspace";
+import type { createMemoryRecall } from "../tools/memory-recall.tool.js";
+import { createMemoryProcessor } from "../processors/memory.processor.js";
 import { createMastraWorkspace } from "../workspace.js";
-import { webFetchTool, webSearchTool } from "@mastra/core/tools";
+import { createWorkspaceTools } from "@mastra/core/workspace";
 import { createCubeTools, type CubeTools } from "../tools/cube-tools.js";
 import { getCanonicalModelId } from "../gateways/types.js";
 import {
@@ -17,22 +27,32 @@ import { createContextProcessor } from "../processors/context.processor.js";
 import type { CubeContext, ContextLimits } from "../context.js";
 import { createCubeSkills } from "../skills.js";
 import { createSkillsProcessor } from "../processors/skills.processor.js";
-import { createInitializeProcessor } from "../processors/initialize.processor.js";
+import type { CubeMcp } from "../mcp/client.js";
+import { CUBE_SYSTEM_PROMPT } from "../prompts/default.prompt.js";
+import { buildExecutionInstructions } from "../prompts/environment.prompt.js";
+import { createEnvironmentProcessor } from "../processors/environment.processor.js";
+import { createSubagentToolsProcessor } from "../processors/subagent-tools.processor.js";
+
+export type CubeAgentOptions = {
+  id?: string;
+  snapshot?: InstructionSnapshot;
+  skills?: Awaited<ReturnType<typeof createCubeSkills>>;
+  agents?: (context: RequestContext) => Record<string, Agent>;
+  toolHooks?: () => ToolHooks | undefined;
+};
 
 export const buildModelConfig = (modelId: string, effort?: string): Record<string, any> => {
   const canonicalModelId = getCanonicalModelId(modelId);
   const providerOptions: Record<string, any> = {};
 
-  if (
-    canonicalModelId.startsWith("google/gemini-3") &&
-    effort &&
-    effort !== "none" &&
-    effort !== "default"
-  ) {
-    providerOptions.google = {
-      thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
-    };
-  } else if (canonicalModelId.startsWith("google/")) {
+  if (canonicalModelId.startsWith("google/gemini-3")) {
+    // Gemini 3 cannot disable thinking with a numeric budget. Omit unsupported levels.
+    if (effort && ["minimal", "low", "medium", "high"].includes(effort)) {
+      providerOptions.google = {
+        thinkingConfig: { thinkingLevel: effort, includeThoughts: true },
+      };
+    }
+  } else if (canonicalModelId.startsWith("google/gemini-2.5")) {
     if (effort === "max" || effort === "xhigh") {
       providerOptions.google = {
         thinkingConfig: { thinkingBudget: 32768, includeThoughts: true },
@@ -105,7 +125,7 @@ export const reloadCubeAgentInstructions = async (
   workspace: WorkspaceManager,
   includeDiscovered = false,
 ): Promise<void> => {
-  const base = await loadInstructionSnapshot(home, workspace);
+  const base = await agent.loadInstructions();
   agent.installInstructions(
     includeDiscovered
       ? await refreshInstructionSnapshot(workspace, base, agent.readInstructions())
@@ -122,45 +142,54 @@ export const createCubeAgent = async (
   contextManager?: {
     context: CubeContext;
     readModel: (modelId: string) => Promise<{ limits: ContextLimits }>;
+    readMemory?: () => Promise<MemorySnapshot>;
+    recallTool?: ReturnType<typeof createMemoryRecall>["tool"];
   },
+  mcp?: Pick<CubeMcp, "readTools" | "readToolNames">,
+  options: CubeAgentOptions = {},
 ) => {
-  let snapshot = await loadInstructionSnapshot(home, workspace);
-  const startupSnapshot = structuredClone(snapshot);
+  let snapshot: InstructionSnapshot = options.snapshot ? structuredClone(options.snapshot) : await loadInstructionSnapshot(
+    home,
+    workspace,
+    contextManager?.readMemory,
+  );
   let context = formatAgentsContext(snapshot.sources);
   const paths = await workspace.getPaths();
-  const cubeTools = tools ?? createCubeTools(paths.root);
+  const cubeTools =
+    tools ??
+    createCubeTools(paths.root, () => config.permissions.workspace_only, config.background_tasks, paths.root, undefined,
+      { cacheDir: home.getToolOutputDir(), policy: config.truncation_policy.execute_command });
   let activeModel = config.model;
-  const executionInstructions = [
-    `Workspace: ${paths.root}. File tools are restricted to this root; commands run on the host and are NOT an OS sandbox.`,
-    process.platform === "win32"
-      ? `execute_command uses ${process.env.ComSpec || "cmd.exe"}. Use cmd syntax (dir, %VAR%, date /t, time /t).`
-      : "execute_command uses /bin/sh. Use POSIX shell syntax.",
-    "Commands have no TTY. Avoid interactive prompts, editors and pagers; use non-interactive options only when appropriate for the requested action.",
-    "Supply a brief reason for each command. cwd defaults to the workspace root. Use background: true for long-running work, then get_process or kill_process with its returned process_id.",
-    "Use the exposed file mutation tools for edits. File mutations accept UTF-8 text; binary/media editing is unsupported. Read, list and grep paths are relative to the workspace root.",
-  ].join("\n");
+  const executionInstructions = () => buildExecutionInstructions(paths.root, config.permissions.workspace_only);
   const effort = config.model_config?.reasoning_effort;
   const modelConfig = buildModelConfig(config.model, effort);
-  const skills = await createCubeSkills(home, workspace, config.skills.disabled);
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
-
+  const skills = options.skills ?? await createCubeSkills(home, workspace, config.skills.disabled, { logger });
+  const mastraWorkspace = await createMastraWorkspace(
+    workspace,
+    skills,
+    () => config.permissions.workspace_only,
+  );
   const agent = createCodingAgent({
-    id: "cube-agent",
+    id: options.id ?? "cube-agent",
     name: "Cube Agent",
+    agents: ({ requestContext }) => options.agents?.(requestContext) ?? {},
     model: [modelConfig as any],
-    instructions: [
+    instructions: () => [
+      { role: "system", content: CUBE_SYSTEM_PROMPT },
       { role: "system", content: snapshot.soul },
-      { role: "system", content: executionInstructions },
+      { role: "system", content: executionInstructions() },
     ],
     inputProcessors: [
-      createInitializeProcessor(),
+      createEnvironmentProcessor(),
+      createSubagentToolsProcessor(context => options.agents?.(context) ?? {}),
       createSkillsProcessor(skills),
       createAgentsMdProcessor(
         () => context,
-        async (targets) => {
+        async (targets, emit) => {
           const explored = new Set(snapshot.explored);
           const discovered = await workspace.discoverContextFiles(targets, explored, paths.root);
           if (explored.size === snapshot.explored.length) return;
+          await emit(discovered);
           const next = {
             ...snapshot,
             sources: [...discovered, ...snapshot.sources],
@@ -168,11 +197,18 @@ export const createCubeAgent = async (
           };
           await result.onInstructionsDiscovered?.(next);
           snapshot = next;
-          context = formatAgentsContext(snapshot.sources);
           result.instructionInfo = instructionInfo(snapshot);
         },
         (message) => contextManager?.context.protectedMessages.add(message),
       ),
+      ...(contextManager?.readMemory
+        ? [
+            createMemoryProcessor(
+              () => snapshot.durableMemory,
+              contextManager.context.protectedMessages,
+            ),
+          ]
+        : []),
       ...(contextManager
         ? [
             createContextProcessor(
@@ -184,11 +220,12 @@ export const createCubeAgent = async (
         : []),
     ],
     workspace: mastraWorkspace,
-    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).globalPaths,
+    skills: async ({ requestContext }) => (await skills.snapshot(requestContext)).agentPaths,
     basePath: paths.root,
     tools: () => ({
       ...cubeTools.forModel(activeModel),
-      fetch: webFetchTool,
+      ...(contextManager?.recallTool ? { memory_recall: contextManager.recallTool } : {}),
+      ...mcp?.readTools(),
     }),
     defaultOptions: ({ requestContext }) => {
       const controller = requestContext.get("controller") as { threadId?: string } | undefined;
@@ -204,8 +241,10 @@ export const createCubeAgent = async (
         });
       };
       return {
+        hooks: options.toolHooks?.(),
         onChunk: (chunk) => {
           runId = chunk.runId;
+          requestContext.set("cubeBackgroundRunId", runId);
           // Log phase changes, not every token or any prompt/tool/provider content.
           if (chunk.type === previousType) return;
           previousType = chunk.type;
@@ -226,9 +265,22 @@ export const createCubeAgent = async (
     },
   });
 
-  if (logger) agent.__registerPrimitives({ logger });
   const result = Object.assign(agent, {
     cubeSkills: skills,
+    listPermissionTools: async () => [
+      ...new Set([
+        ...cubeTools.names,
+        ...(mcp?.readToolNames() ?? []),
+        ...Object.keys(await agent.listTools({ resolveWebSearch: false })),
+        ...Object.keys(await createWorkspaceTools(mastraWorkspace)),
+        // Native skill tool names; listing permissions must not load SKILL.md files.
+        "skill",
+        "skill_read",
+        "skill_search",
+      ]),
+    ],
+    getActiveModelId: () => activeModel,
+    loadInstructions: () => loadInstructionSnapshot(home, workspace, contextManager?.readMemory),
     setToolModel: (modelId: string) => {
       activeModel = modelId;
       contextManager?.context.invalidate();
@@ -239,20 +291,17 @@ export const createCubeAgent = async (
       | ((snapshot: InstructionSnapshot) => Promise<void>)
       | undefined,
     readInstructions: (): InstructionSnapshot => structuredClone(snapshot),
+    refreshPermissions: () => result.installInstructions(snapshot),
     installInstructions: (next: InstructionSnapshot): void => {
       contextManager?.context.invalidate();
       const replacement = structuredClone(next);
       const formatted = formatAgentsContext(replacement.sources);
-      agent.__updateInstructions([
-        { role: "system", content: replacement.soul },
-        { role: "system", content: executionInstructions },
-      ]);
       snapshot = replacement;
       context = formatted;
       result.instructionInfo = instructionInfo(replacement);
     },
-    refreshInstructions: (saved: unknown) =>
-      refreshInstructionSnapshot(workspace, startupSnapshot, saved),
+    refreshInstructions: async (saved: unknown) =>
+      refreshInstructionSnapshot(workspace, await result.loadInstructions(), saved),
   });
   return result;
 };

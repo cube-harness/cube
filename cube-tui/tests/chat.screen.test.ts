@@ -156,11 +156,14 @@ test("ChatScreen mounts its concrete components in one stable order", () => {
   const screen = new ChatScreen({ tui: fake.tui, basePath: "D:\\cube" });
   screen.mount({ onSubmit: async () => undefined });
 
+  const approvalHint = fake.added[4]!;
+  assert.deepEqual(approvalHint.render(80), []);
   assert.deepEqual(fake.added, [
     screen.banner,
     screen.infoBox,
     screen.messageList,
     screen.workingIndicator,
+    approvalHint,
     screen.promptEditor,
     screen.footer,
   ]);
@@ -335,9 +338,6 @@ test("ChatScreen pauses prompt cursor blinking while the working indicator spins
     pendingSuspensions: new Map(),
     activeSubagents: new Map(),
     queuedFollowUps: 0,
-    omProgress: { status: "idle" },
-    bufferingMessages: false,
-    bufferingObservations: false,
   } as unknown as RuntimeDisplayState;
 
   screen.workingIndicator.sync = () => ({
@@ -378,9 +378,6 @@ test("ChatScreen passes the elapsed native reasoning phase duration to the messa
     pendingSuspensions: new Map(),
     activeSubagents: new Map(),
     queuedFollowUps: 0,
-    omProgress: { status: "idle" },
-    bufferingMessages: false,
-    bufferingObservations: false,
   };
   const reasoningMessage = {
     id: "assistant-reasoning",

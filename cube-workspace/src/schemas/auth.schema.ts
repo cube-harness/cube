@@ -40,6 +40,10 @@ export const CubeAuthSchema = z
         google: GoogleOAuthCredentialSchema.optional(),
       })
       .strict(),
+    mcp: z.record(z.string(), z.object({
+      url: z.string().url(),
+      values: z.record(z.string(), z.string()),
+    }).strict()).default({}),
   })
   .strict();
 

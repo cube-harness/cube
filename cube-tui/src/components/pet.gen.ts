@@ -130,6 +130,55 @@ export function encodeSixel(px: Uint8Array, w: number, h: number, palette: PetPa
   return out + "\x1b\\";
 }
 
+/** Resize our cached Sixel frames in memory, preserving edited art and palette. */
+export function resizeSixel(frame: string, size: number): string {
+  const raster = /^\x1bP[\d;]*q"1;1;(\d+);(\d+)([\x20-\x7e]+)\x1b\\$/.exec(frame);
+  if (!raster) throw new Error("Invalid pet frame");
+  const w = Number(raster[1]), h = Number(raster[2]);
+  if (![w, h, size].every(n => Number.isInteger(n) && n > 0 && n <= 512)) {
+    throw new Error("Invalid pet size");
+  }
+  const source = new Uint8Array(w * h).fill(NONE);
+  const palette = { ...DEFAULT_PALETTE };
+  const tokens = /#([0-5])(?:;2;(\d+);(\d+);(\d+))?|!(\d+)([?-~])|([?-~])|([$-])/y;
+  const body = raster[3];
+  let x = 0, y = 0, color = NONE;
+  while (tokens.lastIndex < body.length) {
+    const token = tokens.exec(body);
+    if (!token) throw new Error("Unsupported pet frame data");
+    if (token[1] !== undefined) {
+      color = Number(token[1]);
+      if (token[2] !== undefined) {
+        const rgb = token.slice(2, 5).map(Number);
+        if (rgb.some(n => n > 100)) throw new Error("Invalid pet color");
+        palette[COLORS[color]] = "#" + rgb.map(n => Math.round(n * 255 / 100).toString(16).padStart(2, "0")).join("");
+      }
+    } else if (token[8] === "$") {
+      x = 0;
+    } else if (token[8] === "-") {
+      x = 0;
+      y += 6;
+      if (y > Math.ceil(h / 6) * 6) throw new Error("Invalid pet raster height");
+    } else {
+      const repeat = token[5] === undefined ? 1 : Number(token[5]);
+      if (repeat < 1 || repeat > w - x || y >= h || color === NONE) {
+        throw new Error("Invalid pet raster data");
+      }
+      const bits = (token[6] ?? token[7]).charCodeAt(0) - 63;
+      for (let i = 0; i < repeat; i++) for (let k = 0; k < 6 && y + k < h; k++) {
+        if (bits & (1 << k)) source[(y + k) * w + x + i] = color;
+      }
+      x += repeat;
+    }
+  }
+  if (w === size && h === size) return frame;
+  const pixels = new Uint8Array(size * size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    pixels[y * size + x] = source[Math.floor(y * h / size) * w + Math.floor(x * w / size)];
+  }
+  return encodeSixel(pixels, size, size, palette);
+}
+
 // ---- animations -------------------------------------------------------------
 const bob = (n: number, amp: number) =>
   Array.from({ length: n }, (_, i) => Math.round((amp * (1 - Math.cos((2 * Math.PI * i) / n))) / 2));
@@ -155,7 +204,7 @@ function specs(): Record<PetState, { fps: number; frames: FrameSpec[] }> {
 export function generateAnimations(palette: PetPalette = DEFAULT_PALETTE): Record<PetState, PetAnimation> {
   const out = {} as Record<PetState, PetAnimation>;
   for (const [state, { fps, frames }] of Object.entries(specs()) as [PetState, ReturnType<typeof specs>[PetState]][]) {
-    out[state] = { fps, frames: frames.map((f) => encodeSixel(drawFrame(f), W, W, palette)) };
+    out[state] = { fps, frames: frames.map(f => encodeSixel(drawFrame(f), W, W, palette)) };
   }
   return out;
 }

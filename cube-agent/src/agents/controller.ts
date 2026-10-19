@@ -1,6 +1,6 @@
 import { Agent } from "@mastra/core/agent";
 import { CubeConfig, HomeManager, WorkspaceManager } from "@cube/workspace";
-import { AgentController } from "@mastra/core/agent-controller";
+import { AgentController, type AgentControllerConfig } from "@mastra/core/agent-controller";
 import type { MastraModelGatewayInterface } from "@mastra/core/llm";
 import { createMastraWorkspace } from "../workspace.js";
 import { resolveCubeToolCategory } from "../permission.js";
@@ -15,15 +15,21 @@ export const createCubeController = async (
   agent: Agent,
   gateways: MastraModelGatewayInterface[] = [],
   skills?: CubeSkills,
+  threadLock?: AgentControllerConfig["threadLock"],
+  options: Pick<AgentControllerConfig, "id" | "memory" | "storage" | "idGenerator"> & {
+    allowTool?: (name: string) => boolean;
+  } = { id: "cube-controller" },
 ) => {
-  const mastraWorkspace = await createMastraWorkspace(workspace, skills);
+  const mastraWorkspace = await createMastraWorkspace(workspace, skills, () => config.permissions.workspace_only);
 
   return new AgentController({
-    id: "cube-controller",
+    id: options.id,
     agent,
-    memory: createMemory(config, home),
+    memory: options.memory ?? createMemory(config, home),
+    storage: options.storage,
+    idGenerator: options.idGenerator,
     modes: [{ id: "default", name: "Default", metadata: { default: true } }],
-    tools: { ask_user: cubeAskUserTool },
+    tools: options.allowTool?.("ask_user") === false ? {} : { ask_user: cubeAskUserTool },
     disableBuiltinTools: [
       "ask_user",
       "task_write",
@@ -31,9 +37,11 @@ export const createCubeController = async (
       "task_complete",
       "task_check",
       "submit_plan",
+      "subagent",
     ],
     workspace: mastraWorkspace,
     toolCategoryResolver: resolveCubeToolCategory,
     gateways,
+    threadLock,
   });
 };

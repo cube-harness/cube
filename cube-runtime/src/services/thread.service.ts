@@ -46,9 +46,7 @@ const extractAssistantText = (messages: RuntimeMessage[]): string | null => {
 
 export class ThreadService {
   private plannedThreadId: string;
-  private reloadBeforeCreate = false;
-  private creationSnapshot: InstructionSnapshot;
-  private readonly startupSnapshot: InstructionSnapshot;
+  private pendingCreation?: string;
   private readonly snapshots = new Map<string, InstructionSnapshot>();
 
   constructor(
@@ -64,11 +62,12 @@ export class ThreadService {
       fork(id: string, title?: string): Promise<{ id: string }>;
       invalidate(): void;
       isBusy(): boolean;
+      drain?(): Promise<void>;
+      onActivated?(threadId: string): void;
+      beforeDelete?(threadId: string): Promise<void>;
     },
   ) {
     this.plannedThreadId = createId();
-    this.startupSnapshot = instructions.read();
-    this.creationSnapshot = structuredClone(this.startupSnapshot);
   }
 
   current(): string | null {
@@ -77,7 +76,7 @@ export class ThreadService {
 
   async list(): Promise<ThreadSummary[]> {
     const activeId = this.current();
-    return (await this.session.thread.list()).map((thread) => ({
+    return (await this.session.thread.list()).filter(thread => !thread.metadata?.cubeSubagent).map((thread) => ({
       id: thread.id,
       title: thread.title || "Untitled Thread",
       updatedAt: new Date(thread.updatedAt).toISOString(),
@@ -94,18 +93,16 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("create a thread");
 
-    if (this.reloadBeforeCreate) {
-      await this.instructions.reload();
-      this.creationSnapshot = this.instructions.read();
-      this.reloadBeforeCreate = false;
-    }
+    const snapshot = this.instructions.read();
     const title = content.trim().replace(/\s+/g, " ") || "New Thread";
     const thread = await this.session.thread.create({
       id: this.plannedThreadId,
       title,
     });
-    await this.saveInstructions(this.creationSnapshot);
-    this.instructions.install(this.creationSnapshot);
+    this.pendingCreation = thread.id;
+    await this.saveInstructions(snapshot);
+    this.instructions.install(snapshot);
+    this.context?.onActivated?.(thread.id);
     return thread.id;
   }
 
@@ -113,10 +110,11 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("start a new thread");
 
+    await this.instructions.reload();
     this.session.thread.detachFromCurrent();
     await this.session.thread.clearAndReleaseLock();
     this.plannedThreadId = this.createId();
-    this.reloadBeforeCreate = true;
+    this.pendingCreation = undefined;
     return { threadId: null };
   }
 
@@ -124,13 +122,16 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("switch threads");
 
-    const snapshot = await this.prepareInstructions(threadId);
+    const target = await this.session.thread.getById({ threadId });
+    if (target?.metadata?.cubeSubagent) throw new Error("Child conversations are available through /subagents, not /resume");
+
+    const snapshot = await this.prepareInstructions(threadId, target);
     this.context?.invalidate();
     await this.session.thread.switch({ threadId });
     this.instructions.install(snapshot);
     this.snapshots.set(threadId, snapshot);
-    this.reloadBeforeCreate = false;
-    this.creationSnapshot = structuredClone(this.startupSnapshot);
+    this.pendingCreation = undefined;
+    this.context?.onActivated?.(threadId);
     return this.loadSnapshot(threadId);
   }
 
@@ -150,13 +151,10 @@ export class ThreadService {
     if (this.session.run.isRunning() || this.context?.isBusy())
       throw activeRunError("delete a thread");
     const wasActive = this.current() === threadId;
+    await this.context?.beforeDelete?.(threadId);
     await this.session.thread.delete({ threadId });
     this.snapshots.delete(threadId);
-    if (wasActive) {
-      this.reloadBeforeCreate = false;
-      this.creationSnapshot = structuredClone(this.startupSnapshot);
-      this.instructions.install(this.creationSnapshot);
-    }
+    if (this.pendingCreation === threadId) this.pendingCreation = undefined;
     if (wasActive) this.plannedThreadId = this.createId();
     return { threadId, wasActive };
   }
@@ -167,6 +165,9 @@ export class ThreadService {
     const sourceThreadId = this.current();
     if (!sourceThreadId) throw new Error("No active thread to fork");
     const normalizedTitle = title?.trim() || undefined;
+    const snapshot = await this.instructions.refresh(
+      this.snapshots.get(sourceThreadId) ?? this.instructions.read(),
+    );
     const clone = this.context
       ? await this.context.fork(sourceThreadId, normalizedTitle)
       : await this.session.thread.clone({
@@ -177,13 +178,10 @@ export class ThreadService {
       await this.session.thread.switch({ threadId: clone.id });
       this.context.invalidate();
     }
-    const snapshot = structuredClone(
-      this.snapshots.get(sourceThreadId) ?? this.instructions.read(),
-    );
     await this.saveInstructions(snapshot);
     this.instructions.install(snapshot);
-    this.reloadBeforeCreate = false;
-    this.creationSnapshot = structuredClone(this.startupSnapshot);
+    this.pendingCreation = undefined;
+    this.context?.onActivated?.(clone.id);
     return this.loadSnapshot(clone.id);
   }
 
@@ -200,13 +198,42 @@ export class ThreadService {
     await this.instructions.reload(true);
     const snapshot = this.instructions.read();
     if (this.current()) await this.saveInstructions(snapshot);
-    else this.creationSnapshot = snapshot;
   }
 
-  private async prepareInstructions(threadId: string): Promise<InstructionSnapshot> {
+  /** Roll back an uncommitted first turn, never an existing conversation. */
+  async finishRun(reason?: string): Promise<void> {
+    const threadId = this.pendingCreation;
+    if (
+      !threadId ||
+      this.current() !== threadId ||
+      (reason !== "complete" && reason !== "error")
+    )
+      return;
+    // agent_end can precede native persistence; inspect only after the stream settles.
+    await this.context?.drain?.();
+    if (this.current() !== threadId) return;
+    if ((await this.session.thread.listMessages({ threadId, limit: 1 })).length) {
+      this.pendingCreation = undefined;
+      return;
+    }
+    if (
+      reason !== "error" ||
+      this.session.followUps.count() ||
+      this.session.approval.isArmed() ||
+      this.session.suspensions.hasPending()
+    )
+      return;
+    await this.session.thread.delete({ threadId });
+    this.snapshots.delete(threadId);
+    this.pendingCreation = undefined;
+    this.plannedThreadId = this.createId();
+    this.context?.invalidate();
+  }
+
+  private async prepareInstructions(threadId: string, loaded?: Awaited<ReturnType<Session["thread"]["getById"]>>): Promise<InstructionSnapshot> {
     const cached = this.snapshots.get(threadId);
     if (cached) return cached;
-    const thread = await this.session.thread.getById({ threadId });
+    const thread = loaded ?? await this.session.thread.getById({ threadId });
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     const snapshot = await this.instructions.refresh(thread.metadata?.cubeInstructions);
     await this.session.thread.setSettingOn({ threadId, key: "cubeInstructions", value: snapshot });
@@ -217,6 +244,7 @@ export class ThreadService {
     const snapshot = await this.prepareInstructions(threadId);
     this.instructions.install(snapshot);
     this.snapshots.set(threadId, snapshot);
+    this.context?.onActivated?.(threadId);
   }
 
   async lastAssistantContent(): Promise<string | null> {

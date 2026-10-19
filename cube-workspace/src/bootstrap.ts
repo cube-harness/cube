@@ -4,6 +4,18 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { HOME_FILES } from "./constants.js";
 
+export async function getBuiltinSkillsPath(): Promise<string> {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const installed = path.join(currentDir, "skills");
+  try {
+    await access(installed);
+    return installed;
+  } catch {
+    const development = path.join(currentDir, "..", "src", "skills");
+    return await access(development).then(() => development, () => installed);
+  }
+}
+
 export class Bootstrap {
   constructor(private readonly home: HomeManager) {}
 
@@ -12,7 +24,7 @@ export class Bootstrap {
     await this.seedFromTemplate(HOME_FILES.CONFIG, this.home.getConfigPath());
     await this.seedFromTemplate(HOME_FILES.AUTH, this.home.getAuthPath());
     await this.seedFromTemplate(HOME_FILES.MCP, this.home.getMcpPath());
-    await this.seedFromTemplate(HOME_FILES.WORKSPACE, this.home.getWorkspacePath());
+    await this.seedFromTemplate(HOME_FILES.PERMISSION, this.home.getPermissionPath());
     await this.seedFromTemplate(HOME_FILES.SOUL, this.home.getSoulPath());
     await this.seedFromTemplate(HOME_FILES.HISTORY, this.home.getHistoryPath());
   }
@@ -29,9 +41,10 @@ export class Bootstrap {
   private async seedFromTemplate(templateFile: string, destPath: string): Promise<void> {
     if (await this.fileExists(destPath)) return;
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    let srcFile = path.join(currentDir, "template", templateFile);
+    // Use checkout assets in development; packaged builds keep them beside the bundle.
+    let srcFile = path.join(currentDir, "..", "src", "template", templateFile);
     if (!(await this.fileExists(srcFile))) {
-      srcFile = path.join(currentDir, "..", "src", "template", templateFile);
+      srcFile = path.join(currentDir, "template", templateFile);
     }
     await copyFile(srcFile, destPath);
   }

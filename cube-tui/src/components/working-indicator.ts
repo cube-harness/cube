@@ -53,9 +53,6 @@ interface SessionDisplayStateLike {
   pendingApproval: { toolName?: string } | null;
   pendingSuspensions: Map<string, unknown>;
   activeSubagents: Map<string, { agentType: string; displayName?: string; status: string }>;
-  omProgress: { status: string };
-  bufferingMessages: boolean;
-  bufferingObservations: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

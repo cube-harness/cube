@@ -15,8 +15,11 @@ export type ToolApprovalDecision = "approve" | "decline" | "approve_prefix";
 export interface ApprovalPickerOptions {
   toolName: string;
   args: unknown;
+  directory?: string;
   environment?: string;
   reason?: string;
+  label?: string;
+  title?: string;
   onDecision: (decision: ToolApprovalDecision) => void;
 }
 
@@ -25,6 +28,7 @@ export interface ParsedApprovalArgs {
   reason?: string;
   environment?: string;
   rawLines: string[];
+  directory?: string;
   preview?: FileMutationResult;
 }
 
@@ -139,9 +143,9 @@ export class ApprovalPicker implements Component, Focusable {
           ? obj.environment
           : typeof obj.env === "string"
             ? obj.env
-            : typeof obj.Cwd === "string"
-              ? obj.Cwd
-              : typeof obj.cwd === "string" ? obj.cwd : undefined;
+            : undefined;
+      const directory =
+        typeof obj.Cwd === "string" ? obj.Cwd : typeof obj.cwd === "string" ? obj.cwd : undefined;
 
       const rawLines = Object.entries(obj).filter(([key]) => key !== "preview").map(
         ([k, v]) => toolText(`${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`),
@@ -151,6 +155,7 @@ export class ApprovalPicker implements Component, Focusable {
         command: command === undefined ? undefined : toolText(command),
         reason: reason === undefined ? undefined : toolText(reason),
         environment: environment === undefined ? undefined : toolText(environment),
+        directory: directory === undefined ? undefined : toolText(directory),
         preview: fileChanges(obj.preview),
         rawLines,
       };
@@ -191,28 +196,38 @@ export class ApprovalPicker implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const cardContentLines: string[] = [];
+    const cardContentLines: string[] = [
+      ...(this.options.label ? [appTheme.ui.primary(this.options.label)] : []),
+      appTheme.ui.text.bold(
+        this.options.title ?? (this.parsed.preview
+          ? "Would you like to apply the proposed file changes?"
+          : this.parsed.command
+            ? "Would you like to run the following command?"
+            : `Would you like to run the tool: ${this.options.toolName}?`),
+      ),
+    ];
+    for (const [label, value] of [
+      [
+        "Environment",
+        this.parsed.environment ?? this.options.environment ?? (this.parsed.command ? "local" : undefined),
+      ],
+      ["Directory", this.parsed.directory ?? this.options.directory],
+      ["Reason", this.parsed.reason ?? this.options.reason],
+    ]) {
+      if (value) {
+        cardContentLines.push(
+          `${appTheme.ui.muted(`${label}:`)} ${appTheme.role.assistant(toolText(value))}`,
+        );
+      }
+    }
 
     if (this.parsed.preview) {
       cardContentLines.push(
-        appTheme.ui.text.bold("Would you like to apply the proposed file changes?"),
         (this.parsed.preview.status === "failed" ? appTheme.status.error : appTheme.ui.muted)(
           toolText(this.parsed.preview.summary),
         ),
       );
     } else if (this.parsed.command) {
-      cardContentLines.push(
-        appTheme.ui.text.bold("Would you like to run the following command?"),
-      );
-      cardContentLines.push("");
-      cardContentLines.push(
-        `${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment || "local")}`,
-      );
-      if (this.parsed.reason) {
-        cardContentLines.push(
-          `${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
-        );
-      }
       cardContentLines.push("");
       const cmdLines = this.parsed.command.split(/\r?\n/);
       cardContentLines.push(
@@ -224,21 +239,6 @@ export class ApprovalPicker implements Component, Focusable {
         );
       }
     } else {
-      cardContentLines.push(
-        appTheme.ui.text.bold(
-          `Would you like to run the tool: ${this.options.toolName}?`,
-        ),
-      );
-      if (this.parsed.environment) {
-        cardContentLines.push(
-          `${appTheme.ui.muted("Environment:")} ${appTheme.role.assistant(this.parsed.environment)}`,
-        );
-      }
-      if (this.parsed.reason) {
-        cardContentLines.push(
-          `${appTheme.ui.muted("Reason:")} ${appTheme.role.assistant(this.parsed.reason)}`,
-        );
-      }
       if (this.parsed.rawLines.length > 0) {
         cardContentLines.push("");
         for (const rawLine of this.parsed.rawLines) {

@@ -188,9 +188,18 @@ const mapSessionMessage = (
   }
 
   const metadata = raw.content?.metadata;
-  const signalType = asRecord(metadata?.signal)?.type;
+  const signal = asRecord(metadata?.signal);
+  const signalType = signal?.type;
+  const cube = asRecord(asRecord(signal?.metadata)?.cube) ?? asRecord(metadata?.cube);
+  // Internal retained context is not a human message or a TUI notice.
+  if (raw.role === "signal" && (
+    signal?.tagName === "background_task" ||
+    signal?.tagName === "subagent_result" ||
+    (signalType === "reactive" && ["skill-activation", "agents-discovery", "environment-context"].includes(String(cube?.kind)))
+  ))
+    return [];
   const userAuthored = raw.role === "user" || (raw.role === "signal" && ["user", "user-message"].includes(String(signalType)));
-  const displayText = userAuthored ? asRecord(metadata?.cube)?.displayText : undefined;
+  const displayText = userAuthored ? cube?.displayText : undefined;
   const originalParts = raw.content?.parts ?? [];
   const parts = typeof displayText === "string"
     ? [{ type: "text", text: displayText }, ...originalParts.filter((part) => asRecord(part)?.type !== "text")]
@@ -320,10 +329,6 @@ export class MessageList implements Component {
         return;
       }
     }
-    if (msg.status === "streaming") {
-      this.addMessage(msg);
-      return;
-    }
     this.addMessage(msg);
   }
 
@@ -341,16 +346,7 @@ export class MessageList implements Component {
     reasoningDurationMs?: number,
     pendingApproval?: RuntimeDisplayState["pendingApproval"],
   ): void {
-    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval).map(
-      (item) =>
-        item.tool
-          ? {
-              ...createToolMessage(item.tool),
-              sourceMessageId: item.sourceMessageId,
-              timestamp: item.timestamp,
-            }
-          : item,
-    );
+    const mapped = mapSessionMessage(message, streaming, reasoningDurationMs, pendingApproval);
     if (!message.id) {
       for (const item of mapped) this.upsertMessage(item);
       return;
@@ -382,10 +378,7 @@ export class MessageList implements Component {
 
   toggleTranscript(): boolean {
     this.transcriptExpanded = !this.transcriptExpanded;
-    for (const entry of this.entries) {
-      entry.cachedLines = undefined;
-      entry.cachedWidth = undefined;
-    }
+    this.invalidate();
     return this.transcriptExpanded;
   }
 
@@ -479,6 +472,10 @@ export class MessageList implements Component {
         command?.reason ?? (typeof args?.reason === "string" ? args.reason : undefined);
       const cwd = command?.cwd ?? (typeof args?.cwd === "string" ? args.cwd : undefined);
       for (const detail of [
+        (tool?.name.startsWith("agent-") ||
+          String(asRecord(tool?.result)?.text ?? "").startsWith("Background subagent accepted:")) &&
+          typeof args?.prompt === "string" &&
+          `Task: ${args.prompt}`,
         reason && `Reason: ${reason}`,
         cwd && `Directory: ${cwd}`,
         command &&

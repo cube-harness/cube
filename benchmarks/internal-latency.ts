@@ -78,7 +78,7 @@ try {
     ConfigStore(home).read(), new AuthStore(home).read(), ModelCatalogStore(home).read(),
     instructions.loadInstructionSnapshot(home, workspace),
   ]), ([config, auth, catalog, snapshot]) => {
-    assert.equal(config.memory.storage.provider, "sqlite");
+    assert.equal(config.memory.compaction.model, "inherit");
     assert.equal(auth.api_keys.google?.api_key, "synthetic-benchmark-key");
     assert.equal(catalog.api_key.google?.models.length, 100);
     assert.equal(snapshot.sources.length, 2);
