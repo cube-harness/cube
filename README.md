@@ -2,7 +2,9 @@
   <img src="docs/assets/cube.png" alt="Cube logo" width="144" />
 </p>
 
-> **Install Cube → start coding**
+**Install Cube → start coding**
+
+https://github.com/user-attachments/assets/856c43d7-2313-4c14-bc01-8beb8637d4b4
 
 # Cube
 
