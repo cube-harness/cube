@@ -47,10 +47,9 @@ The startup info box shows loaded SOUL.md and AGENTS.md information. Opening Cub
 ```text
 cd /path/to/your/project
 cube
-
-# In Cube:
-Explain the main components of this project.
 ```
+
+![Cube startup screen](../docs/assets/getting-started.png)
 
 <a id="updates"></a>
 
