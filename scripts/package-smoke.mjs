@@ -58,7 +58,7 @@ try {
   const config = RunnableConfigSchema.parse({ ...await ConfigStore(home).read(), gateway: "api_key/google", model: "google/test" });
   composition = await createCubeMastra(home, CubeWorkspace(home, project), config);
   agent = composition.agent;
-  const builtinNames = ["cube-background", "cube-delegation", "cube-memory", "skill-creator"];
+  const builtinNames = ["cube-background", "cube-delegation", "cube-docs", "cube-memory", "skill-creator"];
   const assets = await getBuiltinSkillsPath();
   for (const location of [assets, path.join(assets, "..", "dist", "skills")]) {
     const shipped = resolveAgentSkills([location]);
