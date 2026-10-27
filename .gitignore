@@ -49,5 +49,6 @@ coverage/
 
 # Project Specific Ignored Directories
 AGENTS.md
-docs/
+docs/superpowers/plans/
+docs/superpowers/specs/
 .agents/
