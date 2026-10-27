@@ -2,14 +2,7 @@
   <img src="docs/assets/cube.png" alt="Cube logo" width="144" />
 </p>
 
-<!-- CUBE_DEMO_VIDEO_START
-Replace the placeholder below with your uploaded installation/first-run video URL.
-Keep this video directly below the logo.
--->
 > **Install Cube → start coding**
->
-> Installation and first-run video coming soon.
-<!-- CUBE_DEMO_VIDEO_END -->
 
 # Cube
 
