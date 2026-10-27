@@ -1,6 +1,6 @@
 {
   "name": "cube-monorepo",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "license": "Apache-2.0",
   "description": "Cube CLI - Production-Grade Interactive Coding Agent CLI",
