@@ -91,7 +91,7 @@ test("native reactive skill signals survive tool steps, SQLite restore/fork and 
     await firstTurn;
     assert.deepEqual(errors, []);
     assert.equal(requests.length, 3);
-    for (const name of ["cube-background", "cube-delegation", "cube-memory", "skill-creator"]) {
+    for (const name of ["cube-background", "cube-delegation", "cube-docs", "cube-memory", "skill-creator"]) {
       assert.ok(requests[0]!.includes(`<name>${name}</name>`));
     }
     assert.doesNotMatch(requests[0]!, /# Cube Background Work/);

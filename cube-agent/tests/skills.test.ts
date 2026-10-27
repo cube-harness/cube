@@ -21,7 +21,7 @@ test("shipped skills load natively outside the workspace with stable keys and re
   const assets = await getBuiltinSkillsPath();
   const skills = await createCubeSkills(home, new WorkspaceManager(home, root), []);
   const catalog = await skills.list();
-  assert.deepEqual(catalog.map(skill => skill.name), ["cube-background", "cube-delegation", "cube-memory", "skill-creator"]);
+  assert.deepEqual(catalog.map(skill => skill.name), ["cube-background", "cube-delegation", "cube-docs", "cube-memory", "skill-creator"]);
   const snapshot = await skills.snapshot(new RequestContext());
   for (const item of catalog) {
     assert.equal(item.source, "builtin");
@@ -41,7 +41,7 @@ test("shipped skills load natively outside the workspace with stable keys and re
   skills.setDisabled(catalog.map(item => item.configKey));
   assert.deepEqual(await (await skills.snapshot(new RequestContext())).enabled.list(), []);
   assert.deepEqual((await snapshot.enabled.list()).map(item => item.name).sort(),
-    ["cube-background", "cube-delegation", "cube-memory", "skill-creator"], "in-flight snapshot remains unchanged");
+    ["cube-background", "cube-delegation", "cube-docs", "cube-memory", "skill-creator"], "in-flight snapshot remains unchanged");
 });
 
 test("user source precedence reveals builtin fallback without leaking shadowed paths to native tools or children", async (t) => {
