@@ -2,17 +2,24 @@
   <img src="docs/assets/cube.png" alt="Cube logo" width="144" />
 </p>
 
-**Install Cube → start coding**
+<h1 align="center">Cube</h1>
 
-https://github.com/user-attachments/assets/856c43d7-2313-4c14-bc01-8beb8637d4b4
+<p align="center">
+  A terminal coding agent that works in your project, with your choice of models.<br />
+  Read and edit files, run commands, connect external tools, and delegate focused work<br />
+  without leaving the terminal.
+</p>
 
-# Cube
+<p align="center">
+  <a href="https://cube-agent.pages.dev">Website</a> ·
+  <a href="docs/index.md">Documentation</a> ·
+  <a href="docs/getting-started.md">Getting started</a>
+</p>
 
-A terminal coding agent that works in your project, with your choice of models.
-Read and edit files, run commands, connect external tools, and delegate focused work
-without leaving the terminal.
+<p align="center">
+  <img src="docs/assets/cube.gif" alt="Cube demo" width="100%" />
+</p>
 
-[Website](https://cube-agent.pages.dev) · [Documentation](docs/index.md) · [Getting started](docs/getting-started.md)
 
 ## Install
 
