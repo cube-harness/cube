@@ -96,7 +96,7 @@ type PendingDraft = {
   sourceKey?: string;
 };
 
-const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.163.0";
+const OPENAI_BACKEND = "https://chatgpt.com/backend-api/codex/models?client_version=0.165.0";
 
 const containsModel = (catalog: ModelCatalog, modelId: string): boolean =>
   Object.values(catalog.providers).some((provider) =>
