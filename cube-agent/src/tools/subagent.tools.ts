@@ -3,7 +3,7 @@ import { z } from "zod";
 
 const idError = 'id must be the UUID returned by a subagent role tool such as worker or explore. Example: {"action":"get","id":"<UUID>","view":"result"}.';
 const id = z.string({ error: idError }).uuid({ error: idError });
-const manageSubagentInput = z.discriminatedUnion("action", [
+const manageSubagentActionInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }).strict(),
   z.object({
     action: z.literal("get"),
@@ -16,6 +16,11 @@ const manageSubagentInput = z.discriminatedUnion("action", [
   }).strict(),
   z.object({ action: z.literal("kill"), id }).strict(),
 ], { error: 'action must be list, get or kill. Use {"action":"list"}, {"action":"get","id":"<UUID>","view":"status"} or {"action":"kill","id":"<UUID>"}.' });
+// OpenAI requires an object at the schema root; the pipe retains per-action validation.
+const manageSubagentInput = z.object({
+  action: z.enum(["list", "get", "kill"]),
+  ...manageSubagentActionInput.options[1].omit({ action: true }).partial().shape,
+}).strict().pipe(manageSubagentActionInput);
 export type ManageSubagentInput = z.infer<typeof manageSubagentInput>;
 
 export function createSubagentTools() {
