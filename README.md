@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/cube.gif" alt="Cube demo" style="max-width: 600px; width: 100%;" />
+  <img src="docs/assets/cube.gif" alt="Cube demo" style="width: 100%;" />
 </p>
 
 
