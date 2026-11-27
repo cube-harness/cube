@@ -74,14 +74,20 @@ const commandInput = z.object({
   tail: z.number().int().min(1).max(2000).optional(),
   background: z.boolean().default(false),
 });
-const manageTaskInput = z.discriminatedUnion("action", [
+const manageTaskActionInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }).strict(),
-  z.object({ action: z.literal("get"), id: z.string().uuid(),
+  z.object({
+    action: z.literal("get"), id: z.string().uuid(),
     cursor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
     limit: z.number().int().min(1).max(2000).optional(),
   }).strict(),
   z.object({ action: z.literal("kill"), id: z.string().uuid() }).strict(),
 ]);
+// OpenAI requires an object at the schema root; the pipe retains per-action validation.
+const manageTaskInput = z.object({
+  action: z.enum(["list", "get", "kill"]),
+  ...manageTaskActionInput.options[1].omit({ action: true }).partial().shape,
+}).strict().pipe(manageTaskActionInput);
 export type ManageTaskInput = z.infer<typeof manageTaskInput>;
 
 export function createCommandTools(

@@ -3,6 +3,22 @@ import test from "node:test";
 import type { GatewayLanguageModel } from "@mastra/core/llm";
 import { OAuthGateway } from "../../src/gateways/oauth.gateway.js";
 import { buildModelConfig } from "../../src/agents/default.agent.js";
+import { createCubeTools } from "../../src/tools/cube-tools.js";
+import { z } from "zod";
+import { tmpdir } from "node:os";
+
+test("management tools publish object schemas for OpenAI while retaining action validation", async () => {
+  const cube = createCubeTools(tmpdir());
+  try {
+    for (const name of ["manage_task", "manage_subagent"] as const) {
+      const tool = cube.forModel("cube-oauth/openai/gpt-6.1-sol")[name];
+      const schema = z.toJSONSchema(tool.inputSchema as z.ZodType, { io: "input" });
+      assert.equal(schema.type, "object", name);
+      assert.equal(schema.anyOf, undefined, name);
+      assert.ok(schema.properties?.action, name);
+    }
+  } finally { await cube.dispose(); }
+});
 
 test("Google native adapter preserves tools, signatures, reasoning and usage across Antigravity envelopes", async () => {
   let token: string | undefined = "first";

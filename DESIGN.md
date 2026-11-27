@@ -164,13 +164,3 @@ Telemetry is opt-in (`telemetry: true`) and exports traces into the same LibSQL 
 `cube-tui` builds to `dist/main.js` (`bin: cube`). `scripts/build-binary.mjs` produces the standalone binary published for the launcher. `cube-cli` checks a local cache, otherwise downloads the verified binary for Windows x64, macOS arm64/x64, or Linux x64 from R2, then execs it.
 
 Dev bypasses the binary: `pnpm dev` runs the TUI through `tsx`.
-
-## Invariants
-
-- One session per process. No background agent, no parallel turns.
-- Workspace root is a hard boundary for file tools and command `cwd`. It is not a sandbox for the shell itself.
-- File approvals require a live preview from the same tool call.
-- Instructions are scoped data, not a new user turn, and are not rewritten into stored history.
-- Model ids in config and UI are canonical. Router prefixes exist only inside Mastra.
-- Shutdown must not close SQLite while a stream or trace export is still writing.
-- UI copy of provider errors never includes credentials.
